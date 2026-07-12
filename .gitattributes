@@ -1,0 +1,11 @@
+* text=auto
+
+# Scripts que precisam de EOL específico
+gradlew text eol=lf
+*.sh text eol=lf
+*.bat text eol=crlf
+
+# Binários — nunca converter
+*.jar binary
+*.png binary
+*.ico binary
