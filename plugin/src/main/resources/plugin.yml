@@ -1,0 +1,18 @@
+name: AusTvSales
+version: '${version}'
+main: de.austv.sales.AusTvSalesPlugin
+api-version: '1.21'
+author: AusTV
+description: Registra eventos de venda de itens por cash do servidor AusTV.
+
+commands:
+  austv-sales:
+    description: Gerencia eventos de venda de itens por cash.
+    usage: /<command> add <player_nick> <item_id> <total_price> <qtd>
+    permission: austv.sales.admin
+    permission-message: Você não tem permissão para usar este comando.
+
+permissions:
+  austv.sales.admin:
+    description: Permite registrar vendas via /austv-sales.
+    default: op
