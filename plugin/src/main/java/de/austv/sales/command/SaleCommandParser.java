@@ -63,8 +63,8 @@ public final class SaleCommandParser {
           "Invalid total_price '" + rawTotalPrice + "'. Must be a decimal number.");
     }
 
-    if (totalPrice.compareTo(BigDecimal.ZERO) < 0) {
-      return new ParseResult.Failure("total_price must be >= 0, got " + totalPrice + ".");
+    if (totalPrice.compareTo(BigDecimal.ZERO) <= 0) {
+      return new ParseResult.Failure("total_price must be > 0, got " + totalPrice + ".");
     }
 
     int qtd;

@@ -37,7 +37,13 @@ export function validateEnv(
   });
 
   if (errors.length > 0) {
-    throw new Error(errors.toString());
+    const details = errors
+      .map(
+        (error) =>
+          `${error.property}: ${Object.values(error.constraints ?? {}).join(', ')}`,
+      )
+      .join('; ');
+    throw new Error(`Invalid environment configuration — ${details}`);
   }
 
   return validatedConfig;

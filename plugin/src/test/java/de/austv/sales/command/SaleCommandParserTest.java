@@ -28,11 +28,12 @@ class SaleCommandParserTest {
   }
 
   @Test
-  @DisplayName("total_price of exactly zero is accepted (>= 0)")
-  void acceptsZeroPrice() {
+  @DisplayName("total_price of exactly zero is rejected (must be strictly positive, like the API)")
+  void rejectsZeroPrice() {
     ParseResult result = SaleCommandParser.parse(new String[] {"add", "Murilo", "item1", "0", "1"});
 
-    assertInstanceOf(ParseResult.Success.class, result);
+    ParseResult.Failure failure = assertInstanceOf(ParseResult.Failure.class, result);
+    assertTrue(failure.message().contains("total_price"));
   }
 
   @ParameterizedTest
