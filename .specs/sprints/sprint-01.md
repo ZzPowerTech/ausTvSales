@@ -17,7 +17,7 @@ fica esperando decisão.
 
 ### S1.1 — Scaffolding do backend NestJS + container + CI básico
 
-- **Como** mantenedor do projeto, **quero** um backend NestJS containerizado com healthcheck e pipeline de build/test, **para** que todo PR seguinte já nasça deployável na VPS `weissmurillo.de`.
+- **Como** mantenedor do projeto, **quero** um backend NestJS containerizado com healthcheck e pipeline de build/test, **para** que todo PR seguinte já nasça deployável na VPS original do servidor AusTV.
 - **Responsável:** `devops-specialist` + `backend-specialist`
 - **Estimativa:** 3 SP — scaffolding é mecânico, mas inclui Dockerfile, docker-compose de dev (Postgres local), config de ambiente e workflow de CI.
 - **Critérios de aceite:**

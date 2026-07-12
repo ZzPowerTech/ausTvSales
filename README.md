@@ -37,7 +37,7 @@ Detalhamento vivo da árvore de código: [`structure.md`](structure.md).
 | Plugin | Java (Paper 1.21.x), sqlite-jdbc |
 | Backend | NestJS + PostgreSQL |
 | Frontend | Angular (Signals) |
-| Deploy | Container isolado na VPS (`weissmurillo.de`), atrás de Nginx |
+| Deploy | Container isolado na VPS original do servidor AusTV (separada da máquina do jogo), atrás de Nginx |
 
 ## Fora de escopo
 

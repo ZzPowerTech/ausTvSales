@@ -24,7 +24,7 @@ Spec completo (decisões de negócio, entidades, contrato do comando, critérios
 | Backend | NestJS + PostgreSQL (instância compartilhada com AusTV Finance) | `backend/` |
 | Frontend | Angular (Signals) | `frontend/` |
 
-Deploy: container isolado na VPS `weissmurillo.de`, atrás de Nginx — **não** roda na máquina
+Deploy: container isolado na VPS original do servidor AusTV, atrás de Nginx — **não** roda na máquina
 dedicada do servidor de jogo.
 
 ## Decisões de negócio já fechadas (não reabrir sem o Murilo)

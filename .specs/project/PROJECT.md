@@ -116,7 +116,7 @@ Reward:
 - Plugin: Java (Paper 1.21.x), SQLite via biblioteca leve embutida (ex: sqlite-jdbc)
 - Backend: NestJS + PostgreSQL (reaproveitando instância do AusTV Finance)
 - Frontend: Angular (Signals), seguindo padrão visual próprio já estabelecido — proibido UI genérica
-- Deploy: container isolado na VPS (`weissmurillo.de`), atrás de Nginx — não roda na máquina dedicada do servidor de jogo
+- Deploy: container isolado na VPS original do servidor AusTV (atualizado em 2026-07-12 — antes previa a VPS `weissmurillo.dev`), atrás de Nginx — não roda na máquina dedicada do servidor de jogo
 
 ## 9. Pendências para a próxima fase (Scrum)
 
