@@ -1,0 +1,52 @@
+# --- Node / NestJS / Angular ---
+node_modules/
+dist/
+build/
+.angular/
+coverage/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Java / Gradle / Maven (plugin) ---
+.gradle/
+**/build/
+!src/**/build/
+target/
+*.class
+*.jar
+!gradle-wrapper.jar
+out/
+
+# --- Env / Secrets ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# --- Banco local / fallback ---
+*.sqlite
+*.sqlite3
+*.db
+
+# --- IDEs ---
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# --- Claude Code ---
+.claude/.worktrees/
+.claude/settings.local.json
+
+# --- Logs ---
+logs/
+*.log
+
+# --- OS ---
+desktop.ini
