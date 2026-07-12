@@ -37,6 +37,8 @@ dedicada do servidor de jogo.
 - Fallback de fila é SQLite local no plugin, com `sale_id` gerado no plugin (idempotência).
 - Migração histórica é única, marcada com `historical_import = true`, sem timestamp granular
   fictício (não deve poluir gráfico de série temporal).
+- `total_price` dos eventos históricos migrados = preço unitário atual × qtd (decisão de
+  2026-07-12: preços não costumam mudar), via mapa `item_id → preço` fornecido ao script.
 - Comunicação plugin→API **precisa** de autenticação (API key ou mTLS) — bloqueante, validado
   pelo `cybersecurity-validator` antes de qualquer merge.
 

@@ -25,7 +25,7 @@ MyCommand removidos e validação final do `cybersecurity-validator` aprovada. F
   - [ ] Script versionado no repo (fora do caminho de deploy da API), lendo `otherdb.yml` + MySQL do MyCommand
   - [ ] Cada contador vira um evento agregado: `qtd` = total acumulado, `historical_import = true`, `sale_id` **determinístico** (ex.: UUID v5 de `player_uuid + item_id + "historical"`) — rodar duas vezes não duplica
   - [ ] `purchased_at` recebe data sentinela documentada (ex.: data do lançamento) — irrelevante para exibição, pois a série temporal exclui `historical_import` (garantido na S5.1)
-  - [ ] `total_price` dos eventos históricos: **NULL/zero documentado** — o sistema antigo não guarda preço; receita histórica não será inventada *(validar com o Murilo)*
+  - [ ] `total_price` dos eventos históricos: **preço unitário atual × qtd** — decisão do Murilo (2026-07-12): os preços não costumam mudar, então o preço vigente é usado como preço dos valores importados. Como a tabela `items` não guarda preço (vem do `%price%` do Genesis na venda), o script recebe um mapa `item_id → preço unitário atual` (arquivo de entrada versionado junto ao runbook); item legado sem preço no mapa → divergência no relatório de dry-run
   - [ ] `item_id` legado sem correspondência no catálogo → listado no relatório do dry-run para cadastro manual **antes** da execução real; nada é auto-criado
   - [ ] Modo `--dry-run` com relatório de conciliação (contadores lidos × eventos a inserir × divergências)
   - [ ] Execução real registrada em runbook (data, operador, totais conferidos no dashboard)
