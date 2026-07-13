@@ -1,0 +1,73 @@
+// Design tokens — austv-sales
+//
+// Derived from the AusTV store template (CentralCart) design system so the
+// dashboard shares the server's visual identity. Do not invent colors here:
+// every value traces back to the store's `core.scss` / README, except
+// `--chart-series`, a calibrated step of the brand purple validated for
+// contrast and color-vision-deficiency on the dark card surface.
+//
+// Design reference: Sprints 4-5 design spec.
+// Rules that components must honor:
+//   - Accent (--color-accent) is for one primary action per screen, never data.
+//   - Gold (--color-gold) is reserved for VIP categories/items only.
+//   - Data wears purple (--color-chart-series); color follows the entity, not rank.
+//   - State is never color-alone — always pair with a textual badge.
+//   - Single dark theme only (the AusTV identity has no light variant).
+
+:root {
+  // Surfaces
+  --color-bg: #181a28;
+  --color-surface: #202336;
+  --color-surface-2: #23263b;
+  --color-surface-3: #252541;
+
+  // Brand
+  --color-primary: #644191;
+  --color-primary-hover: #7851a8;
+  --color-primary-light: #b072ff;
+  --color-chart-series: #a876f0;
+
+  // Accent & VIP
+  --color-accent: #fdda0d;
+  --color-gold: #e8c547;
+
+  // Status (reserved — never reused as a data series color)
+  --color-success: #4caf50;
+  --color-warning: #ff9800;
+  --color-danger: #ff6b6b;
+  --color-discord: #5865f2;
+
+  // Ink
+  --color-ink: #ffffff;
+  --color-ink-muted: #777b9e;
+
+  // Lines & separators
+  --color-line: rgba(119, 123, 158, 0.18);
+
+  // Typography
+  --font-display: "Montserrat", "Segoe UI", sans-serif;
+  --font-body: "Roboto", system-ui, sans-serif;
+  --font-label: "Roboto Condensed", "Arial Narrow", sans-serif;
+
+  // Type scale
+  --text-xs: 0.75rem; // 12px — labels, badges
+  --text-sm: 0.8125rem; // 13px — table body, hints
+  --text-base: 0.9375rem; // 15px — body
+  --text-lg: 1.0625rem; // 17px — panel titles
+  --text-xl: 1.625rem; // 26px — section / hero numbers
+  --text-2xl: 2.5rem; // 40px — page title
+
+  // Radius & spacing rhythm
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-pill: 999px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 22px;
+  --space-6: 30px;
+
+  // Elevation
+  --shadow-panel: 0 18px 50px rgba(0, 0, 0, 0.4);
+}

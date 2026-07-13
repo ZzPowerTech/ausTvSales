@@ -1,0 +1,23 @@
+.app-shell {
+  max-width: 60ch;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-5);
+}
+
+.brand-eyebrow {
+  font-size: var(--text-xs);
+  letter-spacing: 0.18em;
+  color: var(--color-accent);
+  margin: 0 0 var(--space-3);
+}
+
+h1 {
+  font-size: var(--text-2xl);
+  line-height: 1.12;
+  margin: 0 0 var(--space-3);
+}
+
+.tagline {
+  color: var(--color-ink-muted);
+  margin: 0;
+}
