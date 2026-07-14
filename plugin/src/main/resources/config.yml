@@ -1,0 +1,15 @@
+# Configuracao do AusTvSales.
+
+# Auto-atualizacao do plugin a partir dos GitHub Releases (tags plugin-vX.Y.Z).
+# No boot, o plugin checa se ha versao nova; se houver, baixa o jar para a pasta
+# de update do servidor e o Paper o aplica automaticamente no proximo restart.
+auto-update:
+  # Liga/desliga toda a checagem de atualizacao.
+  enabled: true
+
+  # true  = apenas registra no log que ha versao nova, sem baixar.
+  # false = baixa e prepara a atualizacao para o proximo restart.
+  notify-only: false
+
+  # Repositorio (owner/repo) de onde baixar os releases do plugin.
+  repository: "ZzPowerTech/ausTvSales"
