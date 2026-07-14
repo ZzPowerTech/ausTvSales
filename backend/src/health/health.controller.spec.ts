@@ -4,11 +4,13 @@ import { HealthService } from './health.service';
 
 describe('HealthController', () => {
   let controller: HealthController;
+  const check = jest.fn();
 
   beforeEach(async () => {
+    check.mockReset();
     const module: TestingModule = await Test.createTestingModule({
       controllers: [HealthController],
-      providers: [HealthService],
+      providers: [{ provide: HealthService, useValue: { check } }],
     }).compile();
 
     controller = module.get<HealthController>(HealthController);
@@ -18,10 +20,14 @@ describe('HealthController', () => {
     expect(controller).toBeDefined();
   });
 
-  it('returns status ok', () => {
-    expect(controller.check()).toEqual({
-      status: 'ok',
-      components: { database: 'not_configured' },
-    });
+  it('delegates to HealthService and returns its result', async () => {
+    const expected = {
+      status: 'ok' as const,
+      components: { database: 'ok' as const },
+    };
+    check.mockResolvedValue(expected);
+
+    await expect(controller.check()).resolves.toEqual(expected);
+    expect(check).toHaveBeenCalledTimes(1);
   });
 });

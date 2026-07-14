@@ -1,4 +1,4 @@
-export type ComponentStatus = 'ok' | 'error' | 'not_configured';
+export type ComponentStatus = 'ok' | 'error';
 
 export interface HealthCheckResult {
   status: ComponentStatus;

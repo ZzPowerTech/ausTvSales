@@ -21,10 +21,14 @@ austv-sales/
 │       │       ├── SaleCommandParser.java      # Parser puro — validação testável sem Bukkit
 │       │       └── SaleCommandExecutor.java    # Esqueleto Bukkit (integrações: Sprints 2-3)
 │       └── test/.../SaleCommandParserTest.java # 24 testes JUnit 5
-├── backend/                        # API NestJS (PostgreSQL entra na S1.2)
+├── backend/                        # API NestJS (PostgreSQL via Drizzle — S1.2)
+│   ├── docker-compose.yml          # PostgreSQL 16 local para desenvolvimento
+│   ├── drizzle.config.ts           # Config do drizzle-kit (schema → migrations SQL)
+│   ├── drizzle/                    # Migrations SQL versionadas (geradas, revisáveis)
 │   └── src/
-│       ├── config/                 # env.validation + ValidationPipe global (testados)
-│       ├── health/                 # GET /health (preparado p/ status do banco)
+│       ├── config/                 # env.validation (+ DATABASE_URL) + ValidationPipe global
+│       ├── db/                     # schema.ts (4 tabelas do spec §4) + DatabaseModule (Drizzle/pg)
+│       ├── health/                 # GET /health — SELECT 1 real no Postgres
 │       └── sales/dto/              # CreateSaleDto — contrato do plugin, testado campo a campo
 ├── frontend/                       # Dashboard Angular 19 (standalone + Signals)
 │   └── src/app/core/
@@ -36,5 +40,6 @@ austv-sales/
 └── .gitignore
 ```
 
-Telas do dashboard (Sprints 4-5), banco/migrations (S1.2) e integração plugin→API
-(Sprints 2-3) ainda não implementados — apenas scaffolding com testes e CI.
+Banco/migrations entregues na S1.2 (schema Drizzle + docker-compose + CI com Postgres).
+Telas do dashboard (Sprints 4-5) e integração plugin→API (Sprints 2-3) ainda não
+implementados — apenas scaffolding com testes e CI.

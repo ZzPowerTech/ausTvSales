@@ -1,0 +1,26 @@
+# Local development database for austv-sales.
+# In production the backend reuses the shared AusTV Finance PostgreSQL instance
+# (spec §8) with a dedicated database/user; this compose file is dev-only.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: austv-sales-postgres
+    environment:
+      POSTGRES_USER: austv_sales
+      POSTGRES_PASSWORD: austv_sales_dev
+      POSTGRES_DB: austv_sales
+    # Host port 5433 (not 5432) to avoid colliding with a native PostgreSQL
+    # install, which commonly already owns 5432 on dev machines.
+    # Bound to 127.0.0.1 so the dev DB is never exposed to the LAN.
+    ports:
+      - '127.0.0.1:5433:5432'
+    volumes:
+      - austv_sales_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U austv_sales -d austv_sales']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  austv_sales_pgdata:

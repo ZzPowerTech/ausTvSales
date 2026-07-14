@@ -21,6 +21,24 @@ jobs:
       run:
         working-directory: backend
 
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: austv_sales
+          POSTGRES_PASSWORD: austv_sales_dev
+          POSTGRES_DB: austv_sales
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U austv_sales -d austv_sales"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://austv_sales:austv_sales_dev@localhost:5432/austv_sales
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -40,6 +58,9 @@ jobs:
 
       - name: Test
         run: npm test
+
+      - name: Run migrations
+        run: npm run db:migrate
 
       - name: E2E tests
         run: npm run test:e2e
