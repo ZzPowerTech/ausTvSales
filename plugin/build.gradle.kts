@@ -19,6 +19,10 @@ repositories {
 dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.4-R0.1-SNAPSHOT")
 
+    // Gson para parsear a API de Releases do GitHub no auto-update.
+    // compileOnly: o Paper ja fornece o Gson no classpath em runtime.
+    compileOnly("com.google.code.gson:gson:2.11.0")
+
     // Fila de fallback (Sprint 2) - habilitado desde já para desenvolvimento incremental.
     implementation("org.xerial:sqlite-jdbc:3.47.1.0")
 
