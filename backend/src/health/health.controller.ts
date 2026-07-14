@@ -8,7 +8,7 @@ export class HealthController {
 
   @Get()
   @HttpCode(HttpStatus.OK)
-  check(): HealthCheckResult {
+  check(): Promise<HealthCheckResult> {
     return this.healthService.check();
   }
 }
