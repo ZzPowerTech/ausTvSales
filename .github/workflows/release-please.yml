@@ -1,0 +1,30 @@
+name: release-please
+
+# Gera versionamento independente por componente (frontend / backend / plugin).
+# Abre um Release PR separado por pacote com bump de versao + CHANGELOG a partir
+# dos Conventional Commits, e cria a tag `<componente>-vX.Y.Z` ao mergear.
+#
+# Token: usa RELEASE_PLEASE_TOKEN (PAT) se existir, para que os workflows de
+# release (plugin/backend/frontend) disparem ao criar a tag. Sem o PAT, cai no
+# GITHUB_TOKEN nativo — o versionamento funciona, mas os deploys nao disparam
+# em cadeia (limitacao anti-loop do GitHub Actions).
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
