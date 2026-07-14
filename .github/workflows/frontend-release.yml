@@ -1,0 +1,71 @@
+name: frontend-release
+
+# Ao publicar um release frontend-vX.Y.Z (via release-please), builda a imagem
+# Docker do frontend (Nginx servindo o bundle Angular), publica no GHCR e (quando
+# a VPS estiver configurada) faz deploy via SSH.
+#
+# Requer release criado por PAT (RELEASE_PLEASE_TOKEN) para o evento `release` disparar.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-deploy:
+    if: startsWith(github.event.release.tag_name, 'frontend-v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image vars
+        id: img
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version="${TAG#frontend-v}"
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/$owner/austvsales-frontend" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ${{ steps.img.outputs.image }}:${{ steps.img.outputs.version }}
+            ${{ steps.img.outputs.image }}:latest
+
+      # -------------------------------------------------------------------------
+      # TODO(deploy VPS): descomentar e ajustar quando a VPS estiver pronta.
+      # Requer os secrets VPS_HOST, VPS_USER, VPS_SSH_KEY e um docker-compose.yml
+      # na VPS cujo servico `frontend` referencie a imagem publicada acima no GHCR.
+      # Ajustar o caminho (/opt/austv-sales) e o nome do servico conforme a infra.
+      # -------------------------------------------------------------------------
+      # - name: Deploy to VPS
+      #   uses: appleboy/ssh-action@v1
+      #   with:
+      #     host: ${{ secrets.VPS_HOST }}
+      #     username: ${{ secrets.VPS_USER }}
+      #     key: ${{ secrets.VPS_SSH_KEY }}
+      #     script: |
+      #       cd /opt/austv-sales
+      #       docker compose pull frontend
+      #       docker compose up -d frontend
+
+      - name: Deploy pendente (placeholder)
+        run: |
+          echo "Imagem publicada: ${{ steps.img.outputs.image }}:${{ steps.img.outputs.version }}"
+          echo "Deploy SSH ainda nao configurado — ver TODO(deploy VPS) neste workflow."
