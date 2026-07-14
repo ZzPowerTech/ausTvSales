@@ -1,0 +1,22 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "separate-pull-requests": true,
+  "bootstrap-sha": "81403ef023149f3cf550e1fb9c491f521e86e4e8",
+  "packages": {
+    "frontend": {
+      "release-type": "node",
+      "component": "frontend"
+    },
+    "backend": {
+      "release-type": "node",
+      "component": "backend"
+    },
+    "plugin": {
+      "release-type": "simple",
+      "component": "plugin",
+      "extra-files": [
+        "build.gradle.kts"
+      ]
+    }
+  }
+}

@@ -3,7 +3,7 @@ plugins {
 }
 
 group = "de.austv.sales"
-version = "0.1.0-SNAPSHOT"
+version = "0.1.0" // x-release-please-version
 
 java {
     toolchain {
