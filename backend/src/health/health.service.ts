@@ -25,7 +25,10 @@ export class HealthService {
     } catch (error) {
       // Log for diagnostics; the response intentionally omits the error detail
       // so /health never leaks connection internals (CWE-209).
-      this.logger.error('Database health check failed', error);
+      this.logger.error(
+        'Database health check failed',
+        error instanceof Error ? error.stack : String(error),
+      );
       return 'error';
     }
   }
