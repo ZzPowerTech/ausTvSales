@@ -20,6 +20,9 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+# SQL das migrations aplicadas no boot (src/main.ts). Sem isto, migrate() nao
+# encontra o journal e o schema nunca e criado num banco novo.
+COPY --from=build /app/drizzle ./drizzle
 COPY package.json ./
 EXPOSE 3000
 CMD ["node", "dist/main"]
