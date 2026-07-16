@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.1.0...backend-v0.2.0) (2026-07-16)
+
+
+### Features
+
+* **backend:** aplicar migrations no boot via drizzle-orm migrator ([47a9242](https://github.com/ZzPowerTech/ausTvSales/commit/47a9242695173261a18d7e70937e9f00108de97e))
+
 ## [0.1.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.0.1...backend-v0.1.0) (2026-07-14)
 
 
