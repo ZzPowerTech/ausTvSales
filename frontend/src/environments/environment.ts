@@ -1,4 +1,5 @@
 export const environment = {
   production: true,
-  apiBaseUrl: 'https://api.austv-sales.example.com',
+  // Mesmo host que o dashboard (sales.austv.net); o Nginx reverso roteia /api -> backend.
+  apiBaseUrl: '/api',
 };
