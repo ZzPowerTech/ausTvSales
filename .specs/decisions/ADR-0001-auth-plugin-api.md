@@ -1,6 +1,6 @@
 # ADR-0001 — Autenticação plugin→API (API key vs mTLS)
 
-- **Status:** Proposto — aguardando aprovação do Murilo
+- **Status:** Aceito (aprovado pelo Murilo em 2026-07-16)
 - **Data:** 2026-07-16
 - **História:** S1.3 (spike) — issue #7
 - **Responsáveis:** `devops-specialist` + `cybersecurity-validator`
