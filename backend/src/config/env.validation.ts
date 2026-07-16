@@ -76,6 +76,21 @@ export class EnvironmentVariables {
   // the Angular dev server and the API). Unset in production (same origin).
   @IsOptional()
   CORS_ORIGIN?: string;
+
+  // --- Ingest auth (game-server plugin → API, ADR-0001 / S2.1) ---
+
+  // Comma-separated list of accepted ingest API keys. Each key is 64 hex chars
+  // (32 bytes from `openssl rand -hex 32`). The list supports the ADR-0001
+  // dual-key rotation window (old + new accepted at once); a single key is the
+  // common case. Required in every environment (fail-closed): the ingest
+  // endpoint is a public attack surface (spec §7) and must never boot without a
+  // configured key set — mirroring the other required secrets above. Injected
+  // as a deploy secret, never committed.
+  @Matches(/^\s*[0-9a-fA-F]{64}\s*(,\s*[0-9a-fA-F]{64}\s*)*$/, {
+    message:
+      'INGEST_API_KEYS must be a comma-separated list of 64-char hex keys (openssl rand -hex 32)',
+  })
+  INGEST_API_KEYS!: string;
 }
 
 export function validateEnv(
