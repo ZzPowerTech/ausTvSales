@@ -33,6 +33,37 @@ npm run start:dev           # http://localhost:3000/health
 `GET /health` retorna `{ status, components: { database } }` — `database: "ok"` quando o
 `SELECT 1` no Postgres responde, `"error"` caso contrário.
 
+## Autenticação (login por Discord)
+
+O painel é de acesso restrito: **todas** as rotas exigem uma sessão autenticada por
+padrão (guard global _deny-by-default_), exceto `GET /health` e as rotas de login
+(`@Public()`). O login é feito via **Discord OAuth2** e liberado apenas para os IDs
+listados em `ALLOWED_DISCORD_IDS` (dois usuários). A sessão vive num cookie httpOnly
+assinado (JWT); nenhum token trafega para o JavaScript do frontend.
+
+Rotas:
+
+| Rota | Descrição |
+|---|---|
+| `GET /auth/discord/login` | Inicia o fluxo OAuth (redirect para o Discord) |
+| `GET /auth/discord/callback` | Callback do Discord: valida `state`, checa allowlist, cria a sessão |
+| `POST /auth/logout` | Limpa o cookie de sessão |
+| `GET /auth/me` | Retorna o usuário autenticado (rota protegida) |
+
+Variáveis de ambiente (ver [`.env.example`](.env.example)) — **obrigatórias para o boot**:
+
+| Variável | O que é |
+|---|---|
+| `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` | Credenciais do app no Discord Developer Portal |
+| `DISCORD_REDIRECT_URI` | URL pública do callback (ex: `https://sales.austv.net/api/auth/discord/callback`) — cadastrar no app do Discord |
+| `ALLOWED_DISCORD_IDS` | IDs (snowflakes) autorizados, separados por vírgula (dois usuários) |
+| `SESSION_JWT_SECRET` | Segredo para assinar o JWT de sessão (mín. 32 chars) |
+| `FRONTEND_BASE_URL` | Base do dashboard para os redirects (`/` em produção; dev: `http://localhost:4200`) |
+| `CORS_ORIGIN` | Origem permitida para CORS com credenciais (apenas dev cross-origin) |
+
+> **Deploy:** o backend **não sobe** sem essas variáveis (validação de ambiente no boot).
+> Configure os segredos de produção fora do repositório antes de fazer deploy.
+
 ## Banco de dados (Drizzle)
 
 | Comando | O que faz |

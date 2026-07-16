@@ -38,6 +38,13 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://austv_sales:austv_sales_dev@localhost:5432/austv_sales
+      # Non-secret CI values: the e2e suite boots the app, which validates these
+      # at startup. Real production secrets live outside the repo.
+      DISCORD_CLIENT_ID: ci-discord-client-id
+      DISCORD_CLIENT_SECRET: ci-discord-client-secret
+      DISCORD_REDIRECT_URI: http://localhost:3000/auth/discord/callback
+      ALLOWED_DISCORD_IDS: '111111111111111111,222222222222222222'
+      SESSION_JWT_SECRET: ci-session-secret-for-e2e-suite-0123456789
 
     steps:
       - name: Checkout
