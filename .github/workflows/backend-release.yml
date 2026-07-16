@@ -48,23 +48,21 @@ jobs:
             ${{ steps.img.outputs.image }}:latest
 
       # -------------------------------------------------------------------------
-      # TODO(deploy VPS): descomentar e ajustar quando a VPS estiver pronta.
-      # Requer os secrets VPS_HOST, VPS_USER, VPS_SSH_KEY e um docker-compose.yml
-      # na VPS cujo servico `backend` referencie a imagem publicada acima no GHCR.
-      # Ajustar o caminho (/opt/austv-sales) e o nome do servico conforme a infra.
+      # Deploy via SSH. O docker-compose.yml vive na VPS (/opt/austv-sales) e o
+      # servico `backend` referencia a imagem publicada acima no GHCR.
+      # Se o package do GHCR for privado, a VPS precisa de `docker login ghcr.io`
+      # previo (ou um ~/.docker/config.json com credencial de pull).
+      # Hardening opcional: setar o secret VPS_SSH_HOST_KEY (conteudo do known_hosts)
+      # e passar `fingerprint:` para nao aceitar host desconhecido cegamente.
       # -------------------------------------------------------------------------
-      # - name: Deploy to VPS
-      #   uses: appleboy/ssh-action@v1
-      #   with:
-      #     host: ${{ secrets.VPS_HOST }}
-      #     username: ${{ secrets.VPS_USER }}
-      #     key: ${{ secrets.VPS_SSH_KEY }}
-      #     script: |
-      #       cd /opt/austv-sales
-      #       docker compose pull backend
-      #       docker compose up -d backend
-
-      - name: Deploy pendente (placeholder)
-        run: |
-          echo "Imagem publicada: ${{ steps.img.outputs.image }}:${{ steps.img.outputs.version }}"
-          echo "Deploy SSH ainda nao configurado — ver TODO(deploy VPS) neste workflow."
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script_stop: true
+          script: |
+            cd /opt/austv-sales
+            docker compose pull backend
+            docker compose up -d backend
