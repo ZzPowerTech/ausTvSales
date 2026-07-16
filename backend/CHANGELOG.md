@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.1](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.3.0...backend-v0.3.1) (2026-07-16)
+
+
+### Bug Fixes
+
+* **backend:** corrige entrypoint da imagem (dist/main.js em vez de dist/src) ([31c9c0c](https://github.com/ZzPowerTech/ausTvSales/commit/31c9c0cf33a67a41cef2acd528b5b9315fb280d1))
+* **backend:** corrige entrypoint da imagem Docker (dist/main.js) — resolve 502 ([0d5b702](https://github.com/ZzPowerTech/ausTvSales/commit/0d5b70262493a38436d1b1e53df0dafcf818ee05))
+
 ## [0.3.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.2.0...backend-v0.3.0) (2026-07-16)
 
 
