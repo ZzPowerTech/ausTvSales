@@ -1,0 +1,31 @@
+<section class="login">
+  <div class="login__card">
+    <p class="u-label login__eyebrow">AusTV · Sales Dashboard</p>
+    <h1 class="login__title">Acesso restrito</h1>
+    <p class="login__lead">
+      O painel de vendas é exclusivo da equipe. Entre com sua conta do Discord
+      autorizada para continuar.
+    </p>
+
+    @if (errorMessage(); as message) {
+      <p class="login__error" role="alert">{{ message }}</p>
+    }
+
+    <button type="button" class="login__button" (click)="signIn()">
+      <svg
+        class="login__icon"
+        viewBox="0 0 24 18"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <path
+          fill="currentColor"
+          d="M20.32 1.49A19.8 19.8 0 0 0 15.4 0l-.25.5a18.3 18.3 0 0 1 4.36 1.35A16.6 16.6 0 0 0 12 .96 16.6 16.6 0 0 0 4.5 1.85 18.3 18.3 0 0 1 8.85.5L8.6 0A19.8 19.8 0 0 0 3.68 1.49 20.6 20.6 0 0 0 .1 15.6a19.9 19.9 0 0 0 6.05 3.06l.79-1.35a13 13 0 0 1-2.06-.99l.5-.38a14.2 14.2 0 0 0 12.24 0l.5.38a13 13 0 0 1-2.06 1l.79 1.34a19.9 19.9 0 0 0 6.05-3.06 20.6 20.6 0 0 0-3.58-14.1ZM8.07 12.9c-1.18 0-2.15-1.08-2.15-2.41 0-1.33.95-2.42 2.15-2.42 1.2 0 2.17 1.1 2.15 2.42 0 1.33-.95 2.41-2.15 2.41Zm7.86 0c-1.18 0-2.15-1.08-2.15-2.41 0-1.33.95-2.42 2.15-2.42 1.2 0 2.17 1.1 2.15 2.42 0 1.33-.94 2.41-2.15 2.41Z"
+        />
+      </svg>
+      Entrar com Discord
+    </button>
+
+    <p class="login__hint">O login é liberado apenas para contas pré-autorizadas.</p>
+  </div>
+</section>

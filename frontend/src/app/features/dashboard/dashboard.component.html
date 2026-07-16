@@ -1,0 +1,20 @@
+<header class="topbar">
+  <p class="u-label topbar__brand">AusTV · Sales Dashboard</p>
+  @if (user(); as currentUser) {
+    <div class="topbar__user">
+      <span class="topbar__name">{{ currentUser.username }}</span>
+      <button type="button" class="topbar__logout" (click)="logout()">
+        Sair
+      </button>
+    </div>
+  }
+</header>
+
+<main class="app-shell">
+  <p class="u-label brand-eyebrow">Sessão autenticada</p>
+  <h1>Painel de vendas</h1>
+  <p class="tagline">
+    Acesso liberado. As telas de catálogo e visualização dos Sprints 4-5 nascem
+    sobre este shell autenticado.
+  </p>
+</main>
