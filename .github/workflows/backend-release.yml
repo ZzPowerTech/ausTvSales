@@ -52,15 +52,20 @@ jobs:
       # servico `backend` referencia a imagem publicada acima no GHCR.
       # Se o package do GHCR for privado, a VPS precisa de `docker login ghcr.io`
       # previo (ou um ~/.docker/config.json com credencial de pull).
-      # Hardening opcional: setar o secret VPS_SSH_HOST_KEY (conteudo do known_hosts)
-      # e passar `fingerprint:` para nao aceitar host desconhecido cegamente.
+      # Verificacao de host key (anti-MITM): o input `fingerprint` recebe o SHA256
+      # da host key da VPS via secret VPS_SSH_FINGERPRINT. Obtenha com:
+      #   ssh-keyscan <host> | ssh-keygen -lf - (use a linha ed25519/rsa desejada).
+      # Se o secret estiver vazio, a action nao verifica (comportamento atual) —
+      # setar o secret ativa a protecao sem mais mudancas no workflow.
+      # Acao de terceiro pinada por commit SHA (supply-chain); atualizar junto com a tag.
       # -------------------------------------------------------------------------
       - name: Deploy to VPS
-        uses: appleboy/ssh-action@v1
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          fingerprint: ${{ secrets.VPS_SSH_FINGERPRINT }}
           script_stop: true
           script: |
             cd /opt/austv-sales
