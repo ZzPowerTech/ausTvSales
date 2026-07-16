@@ -45,6 +45,8 @@ jobs:
       DISCORD_REDIRECT_URI: http://localhost:3000/auth/discord/callback
       ALLOWED_DISCORD_IDS: '111111111111111111,222222222222222222'
       SESSION_JWT_SECRET: ci-session-secret-for-e2e-suite-0123456789
+      # Non-secret CI value (64 hex chars) for the ingest guard boot validation.
+      INGEST_API_KEYS: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
 
     steps:
       - name: Checkout

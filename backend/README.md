@@ -64,6 +64,26 @@ Variáveis de ambiente (ver [`.env.example`](.env.example)) — **obrigatórias 
 > **Deploy:** o backend **não sobe** sem essas variáveis (validação de ambiente no boot).
 > Configure os segredos de produção fora do repositório antes de fazer deploy.
 
+## Ingestão de vendas (plugin → API)
+
+O plugin do servidor de jogo envia cada venda para `POST /sales`. Esse grupo de rotas
+(ingest) **não** usa a sessão de dashboard: autentica por **API key** (ADR-0001), via
+o decorator `@IngestAuth()` (`@Public()` para escapar do guard de sessão + `IngestApiKeyGuard`
++ rate limiting). Detalhes:
+
+- **Header:** `X-Api-Key: <key>` (fallback `Authorization: Bearer <key>`).
+- **`INGEST_API_KEYS`** (obrigatória no boot): lista separada por vírgula de chaves de
+  64 hex (`openssl rand -hex 32`). Múltiplas chaves permitem a janela de rotação
+  dupla-chave sem downtime (ver ADR-0001). Nunca commitar o valor real.
+- **Comparação em tempo constante** (`crypto.timingSafeEqual` sobre digests SHA-256, sem
+  short-circuit entre chaves) — não vaza qual/quantas chaves casaram nem o tamanho.
+- **Rate limiting** (`@nestjs/throttler`) aplicado só ao grupo de ingest: ~10 req/s
+  (calibrável em `src/ingest/ingest.throttle.ts`) → `429` ao estourar.
+- **Borda no Nginx** (repo de infra, fora daqui): `allow <ip da VPS do jogo>; deny all;`
+  + `limit_req` no `location` do ingest. O throttler é a segunda linha se alguém furar o proxy.
+
+> Estado atual (S2.1): `POST /sales` é **stub 501** — a persistência idempotente é a S2.2.
+
 ## Banco de dados (Drizzle)
 
 | Comando | O que faz |
