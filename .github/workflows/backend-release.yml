@@ -48,7 +48,7 @@ jobs:
             ${{ steps.img.outputs.image }}:latest
 
       # -------------------------------------------------------------------------
-      # Deploy via SSH. O docker-compose.yml vive na VPS (/opt/austv-sales) e o
+      # Deploy via SSH. O docker-compose.yml vive na VPS (/home/austv-sales) e o
       # servico `backend` referencia a imagem publicada acima no GHCR.
       # Se o package do GHCR for privado, a VPS precisa de `docker login ghcr.io`
       # previo (ou um ~/.docker/config.json com credencial de pull).
@@ -68,6 +68,6 @@ jobs:
           fingerprint: ${{ secrets.VPS_SSH_FINGERPRINT }}
           script_stop: true
           script: |
-            cd /opt/austv-sales
+            cd /home/austv-sales
             docker compose pull backend
             docker compose up -d backend
