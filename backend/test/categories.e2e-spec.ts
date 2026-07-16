@@ -90,6 +90,20 @@ describe('Categories (e2e)', () => {
     });
   });
 
+  it('rejects a PATCH with no updatable fields (400)', async () => {
+    const created = await http()
+      .post('/categories')
+      .set('Cookie', authCookie)
+      .send({ name: 'Caixas' })
+      .expect(201);
+
+    await http()
+      .patch(`/categories/${(created.body as { id: number }).id}`)
+      .set('Cookie', authCookie)
+      .send({})
+      .expect(400);
+  });
+
   it('returns 404 when updating a missing category', () => {
     return http()
       .patch('/categories/999')

@@ -14,9 +14,8 @@ import type { Category } from '../db/schema';
 
 /**
  * Catalog category administration (spec S1.5). Every route is protected by the
- * global {@link AdminTokenGuard} — including reads, since the dashboard has no
- * session auth of its own until S4.1 and nothing under sales.austv.net should be
- * publicly enumerable before launch.
+ * global `SessionAuthGuard` — including reads, since nothing under
+ * sales.austv.net should be publicly enumerable before launch.
  */
 @Controller('categories')
 export class CategoriesController {

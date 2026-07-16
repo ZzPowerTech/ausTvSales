@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Inject,
   Injectable,
@@ -47,7 +48,7 @@ export class CategoriesService {
 
   async update(id: number, dto: UpdateCategoryDto): Promise<Category> {
     if (dto.name === undefined && dto.display_order === undefined) {
-      throw new ConflictException('No fields to update');
+      throw new BadRequestException('No fields to update');
     }
     // Surface a clean 404 before attempting the write.
     await this.findOne(id);

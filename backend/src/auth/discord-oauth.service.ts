@@ -46,9 +46,10 @@ export class DiscordOAuthService {
       response_type: 'code',
       scope: DISCORD_SCOPE,
       state,
-      // `prompt=none` gives the "automatic login" feel: if the user already
-      // authorized the app, Discord skips the consent screen and bounces back.
-      prompt: 'none',
+      // No `prompt` override: Discord shows consent only on first authorization
+      // and skips it afterwards (the "automatic login" feel) without the
+      // `prompt=none` failure mode that returns `consent_required` for a
+      // first-time user instead of an authorization code.
     });
     return `${DISCORD_AUTHORIZE_URL}?${params.toString()}`;
   }

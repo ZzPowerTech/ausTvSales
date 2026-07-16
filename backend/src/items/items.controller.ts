@@ -14,7 +14,7 @@ import type { Item } from '../db/schema';
 
 /**
  * Catalog item administration (spec S1.6). Protected by the global
- * {@link AdminTokenGuard}, reads included (see CategoriesController note).
+ * `SessionAuthGuard`, reads included (see CategoriesController note).
  */
 @Controller('items')
 export class ItemsController {

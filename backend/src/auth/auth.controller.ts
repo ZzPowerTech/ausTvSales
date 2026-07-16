@@ -56,8 +56,10 @@ export class AuthController {
   ): Promise<void> {
     const cookies = (req.cookies ?? {}) as Record<string, string>;
     const expectedState = cookies[OAUTH_STATE_COOKIE];
-    // Consume the one-time state cookie regardless of outcome.
-    res.clearCookie(OAUTH_STATE_COOKIE, { path: '/' });
+    // Consume the one-time state cookie regardless of outcome. Clear it with
+    // the same flags it was set with (secure/sameSite/path) so it is removed
+    // consistently across browsers.
+    res.clearCookie(OAUTH_STATE_COOKIE, this.session.clearCookieOptions());
 
     if (!code || !state || !expectedState || state !== expectedState) {
       this.logger.warn(

@@ -130,6 +130,25 @@ describe('Items (e2e)', () => {
     expect((updated.body as { active: boolean }).active).toBe(false);
   });
 
+  it('rejects a PATCH with no updatable fields (400)', async () => {
+    const categoryId = await createCategory();
+    const created = await http()
+      .post('/items')
+      .set('Cookie', authCookie)
+      .send({
+        item_id: 'caixaNatal2026',
+        display_name: 'Caixa',
+        category_id: categoryId,
+      })
+      .expect(201);
+
+    await http()
+      .patch(`/items/${(created.body as { id: number }).id}`)
+      .set('Cookie', authCookie)
+      .send({})
+      .expect(400);
+  });
+
   it('forbids sending item_id on update (immutable, 400)', async () => {
     const categoryId = await createCategory();
     const created = await http()

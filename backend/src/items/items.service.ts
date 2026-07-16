@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Inject,
   Injectable,
@@ -53,7 +54,7 @@ export class ItemsService {
       dto.category_id === undefined &&
       dto.active === undefined
     ) {
-      throw new ConflictException('No fields to update');
+      throw new BadRequestException('No fields to update');
     }
     await this.findOne(id);
 
