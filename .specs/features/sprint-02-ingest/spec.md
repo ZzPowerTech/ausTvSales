@@ -32,16 +32,16 @@ O ingest **não pode** passar pelo `SessionAuthGuard`. Duas rotas do plugin (`PO
 ### 1.2 `IngestApiKeyGuard`
 
 - Lê o header `X-Api-Key` (fallback `Authorization: Bearer <key>` opcional).
-- Compara em **tempo constante** (`crypto.timingSafeEqual`, igual ao guard de sessão) contra o conjunto de chaves aceitas.
+- Compara em **tempo constante** (`crypto.timingSafeEqual`) contra o conjunto de chaves aceitas.
 - **Suporte a rotação (dupla-chave):** env `INGEST_API_KEYS` = lista separada por vírgula; a comparação constante roda contra cada chave (curto-circuito só após checar todas para não vazar timing). MVP pode ter 1 chave; a lista permite a janela de rotação do ADR sem downtime.
 - Falha (ausente/ inválida) → **401**, log com IP de origem (`X-Forwarded-For` atrás do Nginx) e rota, **sem** vazar qual parte falhou.
 
 ### 1.3 Env vars novas (`env.validation.ts`)
 
 ```
-INGEST_API_KEYS   # obrigatória em prod; regex: hex de >=32 chars, 1+ separados por vírgula
+INGEST_API_KEYS   # obrigatória em prod; regex: hex de 64 chars (32 bytes), 1+ separados por vírgula
 ```
-Gerada por `openssl rand -hex 32`. Nunca commitada; injetada como secret no deploy.
+Cada chave é gerada por `openssl rand -hex 32` (32 bytes → **64 caracteres hex**). Nunca commitada; injetada como secret no deploy.
 
 ### 1.4 Rate limiting (camada de app)
 
@@ -162,5 +162,3 @@ S2.1 (guard ingest + throttler + rota stub)     ← bloqueante; nada de ingest s
 - Demo ponta a ponta: cadastrar item (Sprint 1) → comando no Paper de teste → linha em `sales` com `purchased_at` correto.
 - Reenvio manual do mesmo payload não duplica venda.
 - Contrato 2xx/4xx/5xx documentado no README do backend.
-</content>
-</invoke>
