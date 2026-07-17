@@ -16,12 +16,19 @@ import java.time.Duration;
 public final class SaleApiConfig {
 
   private final String salesEndpoint;
+  private final String itemsSyncEndpoint;
   private final String apiKey;
   private final Duration timeout;
   private final boolean enabled;
 
-  private SaleApiConfig(String salesEndpoint, String apiKey, Duration timeout, boolean enabled) {
+  private SaleApiConfig(
+      String salesEndpoint,
+      String itemsSyncEndpoint,
+      String apiKey,
+      Duration timeout,
+      boolean enabled) {
     this.salesEndpoint = salesEndpoint;
+    this.itemsSyncEndpoint = itemsSyncEndpoint;
     this.apiKey = apiKey;
     this.timeout = timeout;
     this.enabled = enabled;
@@ -30,19 +37,25 @@ public final class SaleApiConfig {
   /**
    * Builds a config from raw config values. A blank {@code base-url}/{@code apiKey}, or a {@code
    * base-url} that is not a valid {@code http(s)} URI, yields a disabled config (the caller logs and
-   * skips network delivery).
+   * skips network delivery). When disabled, {@link #itemsSyncEndpoint()} is also empty, so the
+   * S3.1 item-cache sync task is skipped by the caller and the cache stays empty (see {@code
+   * de.austv.sales.cache.ItemCache}).
    */
   public static SaleApiConfig of(String baseUrl, String apiKey, long timeoutMs) {
     Duration timeout = Duration.ofMillis(timeoutMs > 0 ? timeoutMs : 5000);
     if (!isPresent(baseUrl) || !isPresent(apiKey)) {
-      return new SaleApiConfig("", "", timeout, false);
+      return new SaleApiConfig("", "", "", timeout, false);
     }
 
-    String endpoint = trimTrailingSlash(baseUrl.trim()) + "/sales";
-    if (!isValidHttpUri(endpoint)) {
-      return new SaleApiConfig("", "", timeout, false);
+    String trimmedBase = trimTrailingSlash(baseUrl.trim());
+    String salesEndpoint = trimmedBase + "/sales";
+    String itemsSyncEndpoint = trimmedBase + "/items/sync";
+    // Both endpoints share the same base-url, so validating one validates the other; kept as a
+    // single check to mirror the pre-S3.1 fail-safe gate exactly.
+    if (!isValidHttpUri(salesEndpoint)) {
+      return new SaleApiConfig("", "", "", timeout, false);
     }
-    return new SaleApiConfig(endpoint, apiKey.trim(), timeout, true);
+    return new SaleApiConfig(salesEndpoint, itemsSyncEndpoint, apiKey.trim(), timeout, true);
   }
 
   private static boolean isPresent(String value) {
@@ -76,6 +89,11 @@ public final class SaleApiConfig {
 
   public String salesEndpoint() {
     return salesEndpoint;
+  }
+
+  /** {@code {base-url}/items/sync}, used by the S3.1 item-cache sync. Empty when disabled. */
+  public String itemsSyncEndpoint() {
+    return itemsSyncEndpoint;
   }
 
   public String apiKey() {

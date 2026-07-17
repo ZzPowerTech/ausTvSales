@@ -1,7 +1,10 @@
 package de.austv.sales;
 
+import de.austv.sales.api.ItemSyncClient;
 import de.austv.sales.api.SaleApiClient;
 import de.austv.sales.api.SaleApiConfig;
+import de.austv.sales.cache.ItemCache;
+import de.austv.sales.cache.ItemSyncTask;
 import de.austv.sales.command.SaleCommandExecutor;
 import de.austv.sales.queue.SaleQueue;
 import de.austv.sales.update.UpdateChecker;
@@ -19,12 +22,14 @@ public final class AusTvSalesPlugin extends JavaPlugin {
 
   private ScheduledExecutorService queueIo;
   private SaleQueue saleQueue;
+  private ItemCache itemCache;
 
   @Override
   public void onEnable() {
     saveDefaultConfig();
 
-    SaleApiClient apiClient = buildApiClient();
+    SaleApiConfig apiConfig = buildApiConfig();
+    SaleApiClient apiClient = buildApiClient(apiConfig);
 
     queueIo = Executors.newSingleThreadScheduledExecutor(queueIoThreadFactory());
     saleQueue = new SaleQueue(getDataFolder(), queueIo, getLogger());
@@ -50,9 +55,12 @@ public final class AusTvSalesPlugin extends JavaPlugin {
       return;
     }
 
+    itemCache = new ItemCache();
+    startItemSync(apiConfig);
+
     var command = getCommand("austv-sales");
     if (command != null) {
-      command.setExecutor(new SaleCommandExecutor(this, apiClient, saleQueue));
+      command.setExecutor(new SaleCommandExecutor(this, apiClient, saleQueue, itemCache));
     } else {
       getLogger().severe("Command 'austv-sales' not found in plugin.yml.");
     }
@@ -60,6 +68,34 @@ public final class AusTvSalesPlugin extends JavaPlugin {
     new UpdateChecker(this).runAsync();
 
     getLogger().info("AusTvSales enabled.");
+  }
+
+  /**
+   * Schedules the S3.1 {@link ItemSyncTask} when the API is configured, period = {@code
+   * api.sync-interval} minutes (reused as-is - not duplicated as a separate {@code items:} key,
+   * per §1.5 of the Sprint 3 spec). When the API is disabled, {@link #itemCache} simply stays
+   * empty for the whole session: every {@code /austv-sales} command is then rejected locally by
+   * {@link SaleCommandExecutor} (§1.4 of the spec) - severe-logged here so the operator sees the
+   * consequence immediately, not just as a stream of per-command warnings later.
+   */
+  private void startItemSync(SaleApiConfig apiConfig) {
+    if (!apiConfig.enabled()) {
+      getLogger()
+          .severe(
+              "Sync do cache de itens desabilitado (API nao configurada): o cache permanece "
+                  + "vazio e TODO comando /austv-sales sera rejeitado localmente ate api.base-url "
+                  + "/ api.api-key serem configurados.");
+      return;
+    }
+
+    ItemSyncClient itemSyncClient = new ItemSyncClient(apiConfig, getLogger());
+    long syncIntervalMinutes = getConfig().getLong("api.sync-interval", 5);
+    ItemSyncTask.schedule(this, itemSyncClient, itemCache, syncIntervalMinutes);
+    getLogger()
+        .info(
+            "Sync do cache de itens agendado (intervalo: "
+                + syncIntervalMinutes
+                + " min, minimo efetivo 1 min).");
   }
 
   /** Names the single {@code queue-io} thread for readable thread dumps/logs. */
@@ -71,21 +107,24 @@ public final class AusTvSalesPlugin extends JavaPlugin {
     };
   }
 
+  /** Reads the {@code api:} block from {@code config.yml} into a resolved {@link SaleApiConfig}. */
+  private SaleApiConfig buildApiConfig() {
+    var config = getConfig();
+    return SaleApiConfig.of(
+        config.getString("api.base-url", ""),
+        config.getString("api.api-key", ""),
+        config.getLong("api.timeout-ms", 5000));
+  }
+
   /**
-   * Reads the {@code api:} block from {@code config.yml} and builds the delivery client. If {@code
-   * base-url} or {@code api-key} are missing the client is disabled (fail-safe): the command still
-   * parses and validates, but nothing is sent — and the server keeps running.
+   * Builds the delivery client from an already-resolved {@link SaleApiConfig}. If {@code
+   * base-url} or {@code api-key} are missing (or invalid) the config is disabled and the client is
+   * skipped (fail-safe): the command still parses and validates, but nothing is sent — and the
+   * server keeps running.
    *
    * @return a ready {@link SaleApiClient}, or {@code null} when the API is not configured.
    */
-  private SaleApiClient buildApiClient() {
-    var config = getConfig();
-    SaleApiConfig apiConfig =
-        SaleApiConfig.of(
-            config.getString("api.base-url", ""),
-            config.getString("api.api-key", ""),
-            config.getLong("api.timeout-ms", 5000));
-
+  private SaleApiClient buildApiClient(SaleApiConfig apiConfig) {
     if (!apiConfig.enabled()) {
       getLogger()
           .severe(
