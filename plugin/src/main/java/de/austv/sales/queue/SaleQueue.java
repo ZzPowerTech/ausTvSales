@@ -12,6 +12,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -202,6 +204,48 @@ public final class SaleQueue {
             }
           } catch (Exception e) {
             logSevere("find sale_id=" + saleId, e);
+            future.completeExceptionally(e);
+          }
+        });
+    return future;
+  }
+
+  /**
+   * Batch lookup for the S3.3 worker: every {@code pending} row that is due for a (re)delivery
+   * attempt right now - either never attempted yet ({@code next_attempt_at IS NULL}) or whose
+   * backoff window already elapsed ({@code next_attempt_at <= now}) - oldest first, capped at
+   * {@code limit}. {@code sent}/{@code failed_permanent} rows are terminal and never returned.
+   *
+   * <p>The cutoff parameter is formatted with {@link #formatTimestamp(Instant)} (fixed-width, 3
+   * fractional digits), matching how {@code next_attempt_at} is stored, so the lexicographic {@code
+   * <=} comparison SQLite performs on the TEXT column is equivalent to a chronological comparison.
+   */
+  public CompletableFuture<List<Row>> findPendingDue(int limit) {
+    // Guard against a non-positive limit: SQLite treats a negative LIMIT as "no limit", so a
+    // misconfigured/buggy caller could otherwise drain the entire pending queue in one cycle
+    // (long stalls / memory pressure). Nothing due to fetch with a limit of zero or less.
+    if (limit <= 0) {
+      return CompletableFuture.completedFuture(List.of());
+    }
+    CompletableFuture<List<Row>> future = new CompletableFuture<>();
+    queueIo.execute(
+        () -> {
+          String sql =
+              "SELECT * FROM sale_queue WHERE status = 'pending' "
+                  + "AND (next_attempt_at IS NULL OR next_attempt_at <= ?) "
+                  + "ORDER BY created_at ASC LIMIT ?";
+          try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, formatTimestamp(Instant.now()));
+            statement.setInt(2, limit);
+            try (ResultSet resultSet = statement.executeQuery()) {
+              List<Row> rows = new ArrayList<>();
+              while (resultSet.next()) {
+                rows.add(mapRow(resultSet));
+              }
+              future.complete(rows);
+            }
+          } catch (Exception e) {
+            logSevere("findPendingDue limit=" + limit, e);
             future.completeExceptionally(e);
           }
         });

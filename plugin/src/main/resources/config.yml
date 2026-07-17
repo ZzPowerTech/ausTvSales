@@ -46,9 +46,10 @@ queue:
   # Retencao de eventos terminais (sent/failed_permanent) antes da limpeza, em horas.
   retention-hours: 168
 
-  # Intervalo do worker de reenvio, em segundos. Chave usada pela S3.3 (worker ainda nao
-  # agendado nesta versao); documentada aqui para nao precisar de outro deploy de config.
+  # Intervalo do worker de reenvio, em segundos. So e agendado quando a API esta configurada
+  # (sem API nao ha para onde reenviar).
   worker-interval-seconds: 30
 
-  # Backoff maximo entre tentativas de um mesmo evento, em segundos. Uso futuro (S3.3).
+  # Backoff maximo entre tentativas de um mesmo evento, em segundos.
+  # Backoff efetivo por tentativa: min(5s * 2^tentativas, max-backoff-seconds).
   max-backoff-seconds: 300

@@ -8,6 +8,7 @@ import java.io.File;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -194,5 +195,96 @@ class SaleQueueTest {
     assertEquals(1, deleted);
     assertTrue(await(queue.find(sentPayload.saleId())).isEmpty());
     assertTrue(await(queue.find(pendingPayload.saleId())).isPresent());
+  }
+
+  @Test
+  @DisplayName("findPendingDue retorna pending nunca tentado (next_attempt_at NULL)")
+  void findPendingDueReturnsNeverAttemptedPendingRow() throws Exception {
+    SalePayload payload = payload(new BigDecimal("1.00"));
+    await(queue.enqueuePending(payload));
+
+    List<SaleQueue.Row> due = await(queue.findPendingDue(10));
+
+    assertEquals(1, due.size());
+    assertEquals(payload.saleId().toString(), due.get(0).saleId());
+  }
+
+  @Test
+  @DisplayName("findPendingDue com limit <= 0 retorna vazio (nunca vira 'no limit' do SQLite)")
+  void findPendingDueWithNonPositiveLimitReturnsEmpty() throws Exception {
+    await(queue.enqueuePending(payload(new BigDecimal("1.00"))));
+    await(queue.enqueuePending(payload(new BigDecimal("2.00"))));
+
+    assertTrue(await(queue.findPendingDue(0)).isEmpty());
+    assertTrue(await(queue.findPendingDue(-1)).isEmpty());
+  }
+
+  @Test
+  @DisplayName("findPendingDue nao retorna pending cujo next_attempt_at ainda esta no futuro")
+  void findPendingDueExcludesRowsNotYetDue() throws Exception {
+    SalePayload payload = payload(new BigDecimal("1.00"));
+    await(queue.enqueuePending(payload));
+    await(queue.bumpTransient(payload.saleId(), Instant.now().plusSeconds(3600)));
+
+    List<SaleQueue.Row> due = await(queue.findPendingDue(10));
+
+    assertTrue(due.isEmpty());
+  }
+
+  @Test
+  @DisplayName("findPendingDue retorna pending cujo next_attempt_at ja passou")
+  void findPendingDueIncludesRowsPastBackoff() throws Exception {
+    SalePayload payload = payload(new BigDecimal("1.00"));
+    await(queue.enqueuePending(payload));
+    await(queue.bumpTransient(payload.saleId(), Instant.now().minusSeconds(60)));
+
+    List<SaleQueue.Row> due = await(queue.findPendingDue(10));
+
+    assertEquals(1, due.size());
+    assertEquals(payload.saleId().toString(), due.get(0).saleId());
+    assertEquals(1, due.get(0).attempts());
+  }
+
+  @Test
+  @DisplayName("findPendingDue nunca retorna linhas sent ou failed_permanent")
+  void findPendingDueExcludesTerminalRows() throws Exception {
+    SalePayload sentPayload = payload(new BigDecimal("1.00"));
+    SalePayload failedPayload = payload(new BigDecimal("2.00"));
+    SalePayload pendingPayload = payload(new BigDecimal("3.00"));
+    await(queue.enqueuePending(sentPayload));
+    await(queue.enqueuePending(failedPayload));
+    await(queue.enqueuePending(pendingPayload));
+    await(queue.markSent(sentPayload.saleId()));
+    await(queue.markFailedPermanent(failedPayload.saleId()));
+
+    List<SaleQueue.Row> due = await(queue.findPendingDue(10));
+
+    assertEquals(1, due.size());
+    assertEquals(pendingPayload.saleId().toString(), due.get(0).saleId());
+  }
+
+  @Test
+  @DisplayName("findPendingDue ordena por created_at ascendente e respeita o LIMIT")
+  void findPendingDueOrdersByCreatedAtAndRespectsLimit() throws Exception {
+    SalePayload first = payload(new BigDecimal("1.00"));
+    await(queue.enqueuePending(first));
+    // Fixed-width created_at has millisecond precision (see SaleQueue.TIMESTAMP_FORMAT) - sleep
+    // past a millisecond boundary between inserts so ordering is unambiguous, not a coin flip.
+    Thread.sleep(5);
+    SalePayload second = payload(new BigDecimal("2.00"));
+    await(queue.enqueuePending(second));
+    Thread.sleep(5);
+    SalePayload third = payload(new BigDecimal("3.00"));
+    await(queue.enqueuePending(third));
+
+    List<SaleQueue.Row> limited = await(queue.findPendingDue(2));
+
+    assertEquals(2, limited.size());
+    assertEquals(first.saleId().toString(), limited.get(0).saleId());
+    assertEquals(second.saleId().toString(), limited.get(1).saleId());
+
+    List<SaleQueue.Row> all = await(queue.findPendingDue(10));
+    assertEquals(3, all.size());
+    assertEquals(third.saleId().toString(), all.get(2).saleId());
   }
 }
