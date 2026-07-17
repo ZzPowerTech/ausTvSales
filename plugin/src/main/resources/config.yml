@@ -36,7 +36,9 @@ api:
   # Timeout de conexao e de requisicao, em milissegundos.
   timeout-ms: 5000
 
-  # Intervalo (em minutos) de sincronizacao do cache de itens. Uso futuro (S2.3/S3).
+  # Intervalo (em minutos) de sincronizacao do cache local de itens ativos (S3.1). O plugin so
+  # aceita um /austv-sales cujo item_id esteja neste cache; API desabilitada ou sem sincronizacao
+  # ainda feita = cache vazio = todo comando rejeitado localmente ate o primeiro ciclo completar.
   sync-interval: 5
 
 # Fila de fallback SQLite (S3.2) e worker de reenvio (S3.3).

@@ -52,4 +52,35 @@ class SaleApiConfigTest {
     assertEquals(5000, SaleApiConfig.of("https://x.y/api", "k", -1).timeout().toMillis());
     assertEquals(1500, SaleApiConfig.of("https://x.y/api", "k", 1500).timeout().toMillis());
   }
+
+  @Test
+  @DisplayName("itemsSyncEndpoint (S3.1) deriva {base-url}/items/sync junto com salesEndpoint")
+  void derivesItemsSyncEndpoint() {
+    SaleApiConfig config = SaleApiConfig.of("https://sales.austv.net/api", "k", 5000);
+
+    assertEquals("https://sales.austv.net/api/items/sync", config.itemsSyncEndpoint());
+    assertEquals("https://sales.austv.net/api/sales", config.salesEndpoint());
+  }
+
+  @Test
+  @DisplayName("itemsSyncEndpoint tolera barra final na base-url, igual salesEndpoint")
+  void itemsSyncEndpointToleratesTrailingSlash() {
+    assertEquals(
+        "https://sales.austv.net/api/items/sync",
+        SaleApiConfig.of("https://sales.austv.net/api/", "k", 5000).itemsSyncEndpoint());
+  }
+
+  @Test
+  @DisplayName("itemsSyncEndpoint vazio quando a config esta desabilitada (base-url/key ausentes)")
+  void itemsSyncEndpointEmptyWhenMissing() {
+    assertEquals("", SaleApiConfig.of("", "k", 5000).itemsSyncEndpoint());
+    assertEquals("", SaleApiConfig.of("https://sales.austv.net/api", "", 5000).itemsSyncEndpoint());
+  }
+
+  @Test
+  @DisplayName("itemsSyncEndpoint vazio quando a base-url e invalida")
+  void itemsSyncEndpointEmptyWhenBaseUrlInvalid() {
+    assertEquals("", SaleApiConfig.of("sales.austv.net", "k", 5000).itemsSyncEndpoint());
+    assertEquals("", SaleApiConfig.of("ftp://sales.austv.net", "k", 5000).itemsSyncEndpoint());
+  }
 }

@@ -3,6 +3,7 @@ package de.austv.sales.command;
 import de.austv.sales.api.SaleApiClient;
 import de.austv.sales.api.SaleDelivery.Outcome;
 import de.austv.sales.api.SalePayload;
+import de.austv.sales.cache.ItemCache;
 import de.austv.sales.command.SaleCommandParser.ParseResult;
 import de.austv.sales.command.SaleCommandParser.ParsedSale;
 import de.austv.sales.queue.SaleQueue;
@@ -20,16 +21,26 @@ import org.bukkit.plugin.Plugin;
  * SaleCommandParser}; the {@code %price%} placeholder is normalized by {@link PriceNormalizer}
  * before parsing.
  *
- * <p>Happy path (S2.4 + S3.2): resolve {@code player_nick -> player_uuid} from the Bukkit cache,
- * stamp {@code sale_id}/{@code purchased_at} locally, then follow the write-ahead strategy (§2.3
- * of the Sprint 3 spec): the payload is persisted as {@code pending} in the SQLite fallback queue
- * BEFORE any delivery attempt, so a crash between "parsed" and "sent" never loses a sale. Only
- * after the write is durable does the executor dispatch the HTTP delivery asynchronously and act
- * on the resulting {@link Outcome}. No network or SQLite I/O ever touches the main thread.
+ * <p>Happy path (S2.4 + S3.2 + S3.1): resolve {@code player_nick -> player_uuid} from the Bukkit
+ * cache, stamp {@code sale_id}/{@code purchased_at} locally, then follow the write-ahead strategy
+ * (§2.3 of the Sprint 3 spec): the payload is persisted as {@code pending} in the SQLite fallback
+ * queue BEFORE any delivery attempt, so a crash between "parsed" and "sent" never loses a sale.
+ * Only after the write is durable does the executor dispatch the HTTP delivery asynchronously and
+ * act on the resulting {@link Outcome}. No network or SQLite I/O ever touches the main thread.
  *
- * <p>The item-cache validation (S3.1) is intentionally out of scope here; unknown items are
- * rejected authoritatively by the API (which still enqueues as {@code pending} first and then
- * transitions to {@code failed_permanent} on the 422).
+ * <p><b>Item-cache guard (S3.1, §1.3):</b> right after a successful parse - before resolving the
+ * nick, building the payload, or touching the queue - the executor checks {@link
+ * ItemCache#contains(String)}. An unknown/inactive {@code item_id} is rejected locally: no nick
+ * resolution, no enqueue, no send. This is a deliberate, important departure from the S3.2
+ * write-ahead default ("enqueue even with the API disabled"): with an empty cache (first boot
+ * with no network yet, or the API disabled altogether) the plugin has no local catalog to
+ * validate against, so it can never tell a legitimate item from a typo. Enqueueing anyway would
+ * risk silently piling up sales the API would reject as {@code failed_permanent} once it
+ * eventually processes them - worse, with the API disabled they would just sit {@code pending}
+ * forever, never getting the rejection feedback the operator needs. Rejecting fast and loud here
+ * is strictly safer than trusting an empty catalog. The item-cache check is therefore the first
+ * line of defense; the API's own 422 (`PERMANENT`, still authoritative for whatever the cache
+ * does have) is the second, for the case the cache goes briefly stale between syncs.
  */
 public final class SaleCommandExecutor implements CommandExecutor {
 
@@ -38,16 +49,23 @@ public final class SaleCommandExecutor implements CommandExecutor {
   private final Plugin plugin;
   private final SaleApiClient apiClient;
   private final SaleQueue saleQueue;
+  private final ItemCache itemCache;
 
   /**
    * @param apiClient the delivery client, or {@code null} when the API is not configured (fail-safe:
-   *     the command still parses, validates and enqueues, but nothing is sent over the network).
-   * @param saleQueue the SQLite fallback queue; every parsed sale is write-ahead persisted here.
+   *     nothing is sent over the network). Note that a command only reaches the enqueue step at all
+   *     if it first clears the S3.1 item-cache guard below; with the API unconfigured the cache
+   *     stays empty, so those commands are rejected before any enqueue.
+   * @param saleQueue the SQLite fallback queue; a sale that clears the cache guard is write-ahead
+   *     persisted here before any delivery attempt.
+   * @param itemCache the S3.1 local item cache; gates every command before it reaches the queue.
    */
-  public SaleCommandExecutor(Plugin plugin, SaleApiClient apiClient, SaleQueue saleQueue) {
+  public SaleCommandExecutor(
+      Plugin plugin, SaleApiClient apiClient, SaleQueue saleQueue, ItemCache itemCache) {
     this.plugin = plugin;
     this.apiClient = apiClient;
     this.saleQueue = saleQueue;
+    this.itemCache = itemCache;
   }
 
   @Override
@@ -64,6 +82,19 @@ public final class SaleCommandExecutor implements CommandExecutor {
     }
 
     ParsedSale sale = ((ParseResult.Success) result).sale();
+
+    // Item-cache guard (S3.1, §1.3): first line of defense, ahead of nick resolution and the
+    // S3.2 write-ahead enqueue. See the class javadoc for why an empty/stale cache means "reject"
+    // rather than "enqueue anyway" - never auto-create an item (CLAUDE.md business decision).
+    if (!itemCache.contains(sale.itemId())) {
+      String message =
+          "item_id nao cadastrado ou inativo; verifique o catalogo (item_id="
+              + sale.itemId()
+              + ").";
+      plugin.getLogger().warning("Venda rejeitada localmente: " + message);
+      sender.sendMessage(ChatColor.RED + message);
+      return true;
+    }
 
     // Resolve nick -> UUID from the local cache only (non-blocking). An uncached nick is treated
     // as unresolvable: log and abort, never a blocking web lookup on the main thread.
