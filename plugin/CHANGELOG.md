@@ -5,8 +5,7 @@
 
 ### Features
 
-* **plugin:** aplicar auto-update ja no proximo boot via staging no shutdown ([06a9cb5](https://github.com/ZzPowerTech/ausTvSales/commit/06a9cb5f8f719265dd35a5fa5197367fb717c05e))
-* **plugin:** aplicar auto-update já no próximo boot via staging no shutdown ([48f2f2c](https://github.com/ZzPowerTech/ausTvSales/commit/48f2f2c393671dd09b58dc4b4aca389f2f7f1df5))
+* **plugin:** aplicar auto-update já no próximo boot via staging no shutdown ([06a9cb5](https://github.com/ZzPowerTech/ausTvSales/commit/06a9cb5f8f719265dd35a5fa5197367fb717c05e), [48f2f2c](https://github.com/ZzPowerTech/ausTvSales/commit/48f2f2c393671dd09b58dc4b4aca389f2f7f1df5))
 
 
 ### Bug Fixes
