@@ -45,7 +45,7 @@ class SaleQueueTest {
 
   @AfterEach
   void tearDown() {
-    shutdownExecutor();
+    closeAndShutdown(queue, queueIo);
   }
 
   private SaleQueue openQueue() throws Exception {
@@ -55,13 +55,24 @@ class SaleQueueTest {
     return newQueue;
   }
 
-  private void shutdownExecutor() {
-    queueIo.shutdown();
+  /**
+   * Mirrors the real plugin shutdown order (see {@code AusTvSalesPlugin#onDisable}): drain the
+   * {@code queue-io} executor first, then close the connection - closing while a task is still
+   * running would fail that task. Forces {@code shutdownNow()} on timeout/interrupt so a stuck
+   * task can never keep the test JVM alive, and always closes the queue to avoid leaking the
+   * SQLite file handle/lock across tests.
+   */
+  private static void closeAndShutdown(SaleQueue queueToClose, ScheduledExecutorService executor) {
+    executor.shutdown();
     try {
-      queueIo.awaitTermination(5, TimeUnit.SECONDS);
+      if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+        executor.shutdownNow();
+      }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
+      executor.shutdownNow();
     }
+    queueToClose.close();
   }
 
   private static <T> T await(CompletableFuture<T> future) throws Exception {
@@ -145,7 +156,9 @@ class SaleQueueTest {
     SaleQueue.Row row = await(queue.find(payload.saleId())).orElseThrow();
     assertEquals("pending", row.status());
     assertEquals(2, row.attempts());
-    assertEquals(nextAttempt.toString(), row.nextAttemptAt());
+    // Stored in the queue's fixed-width instant format (always 3 fractional digits), not
+    // Instant#toString() - so lexicographic order matches chronological order.
+    assertEquals("2026-07-17T10:05:00.000Z", row.nextAttemptAt());
   }
 
   @Test
@@ -154,10 +167,9 @@ class SaleQueueTest {
     SalePayload payload = payload(new BigDecimal("77.77"));
     await(queue.enqueuePending(payload));
 
-    // Simulates a plugin restart: close this connection/executor, then open a fresh SaleQueue
-    // against the same on-disk file.
-    queue.close();
-    shutdownExecutor();
+    // Simulates a plugin restart using the real shutdown order (drain the executor, then close
+    // the connection), then open a fresh SaleQueue against the same on-disk file.
+    closeAndShutdown(queue, queueIo);
 
     queue = openQueue();
 

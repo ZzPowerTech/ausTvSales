@@ -30,15 +30,24 @@ public final class AusTvSalesPlugin extends JavaPlugin {
     saleQueue = new SaleQueue(getDataFolder(), queueIo, getLogger());
     // The queue must be ready (schema created/migrated) before the first command can enqueue -
     // this is a one-time, short-lived block during boot, same category as saveDefaultConfig().
+    // If it fails we fail fast: without a durable queue the write-ahead guarantee is void, so we
+    // disable the plugin rather than register a command that would report "recorded" while
+    // silently persisting nothing.
     try {
       saleQueue.open().get(10, TimeUnit.SECONDS);
       getLogger().info("Fila de fallback SQLite pronta (sales-queue.db).");
     } catch (Exception e) {
+      if (e instanceof InterruptedException) {
+        Thread.currentThread().interrupt();
+      }
       getLogger()
-          .severe(
-              "Falha ao abrir/migrar a fila de fallback SQLite: "
-                  + e.getMessage()
-                  + ". Vendas nao poderao ser gravadas com seguranca.");
+          .log(
+              java.util.logging.Level.SEVERE,
+              "Falha ao abrir/migrar a fila de fallback SQLite; desabilitando o plugin para nao "
+                  + "aceitar vendas sem persistencia garantida.",
+              e);
+      getServer().getPluginManager().disablePlugin(this);
+      return;
     }
 
     var command = getCommand("austv-sales");

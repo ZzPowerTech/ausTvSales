@@ -10,10 +10,13 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -59,6 +62,17 @@ public final class SaleQueue {
 
   private static final String INDEX_DDL =
       "CREATE INDEX IF NOT EXISTS idx_sale_queue_status ON sale_queue(status, next_attempt_at)";
+
+  /**
+   * Fixed-width instant format for every stored/compared timestamp. {@link Instant#toString()} uses
+   * variable fractional precision (e.g. {@code .9Z} vs {@code .10Z}), so SQLite's lexicographic TEXT
+   * comparison would not match chronological order - breaking {@code cleanupTerminal}'s {@code
+   * created_at < cutoff} and the S3.3 worker's {@code ORDER BY created_at} / {@code next_attempt_at
+   * <= now}. Always emitting 3 fractional digits ({@code appendInstant(3)}) makes the strings
+   * fixed-width, so lexicographic order equals time order.
+   */
+  private static final DateTimeFormatter TIMESTAMP_FORMAT =
+      new DateTimeFormatterBuilder().appendInstant(3).toFormatter();
 
   private final ScheduledExecutorService queueIo;
   private final Logger logger;
@@ -117,8 +131,10 @@ public final class SaleQueue {
             statement.setString(4, payload.nicknameAtPurchase());
             statement.setString(5, payload.totalPrice().toPlainString());
             statement.setInt(6, payload.qtd());
+            // purchased_at keeps Instant#toString() for an exact round-trip when the S3.3 worker
+            // reconstructs and re-sends the payload - it is payload data, never a sort/compare key.
             statement.setString(7, payload.purchasedAt().toString());
-            statement.setString(8, Instant.now().toString());
+            statement.setString(8, formatTimestamp(Instant.now()));
             statement.executeUpdate();
           }
         });
@@ -141,7 +157,7 @@ public final class SaleQueue {
           String sql = "UPDATE sale_queue SET status = ?, last_attempt_at = ? WHERE sale_id = ?";
           try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, status);
-            statement.setString(2, Instant.now().toString());
+            statement.setString(2, formatTimestamp(Instant.now()));
             statement.setString(3, saleId.toString());
             statement.executeUpdate();
           }
@@ -162,8 +178,8 @@ public final class SaleQueue {
               "UPDATE sale_queue SET attempts = attempts + 1, last_attempt_at = ?, "
                   + "next_attempt_at = ? WHERE sale_id = ?";
           try (PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, Instant.now().toString());
-            statement.setString(2, nextAttemptAt == null ? null : nextAttemptAt.toString());
+            statement.setString(1, formatTimestamp(Instant.now()));
+            statement.setString(2, formatTimestamp(nextAttemptAt));
             statement.setString(3, saleId.toString());
             statement.executeUpdate();
           }
@@ -184,7 +200,7 @@ public final class SaleQueue {
             try (ResultSet resultSet = statement.executeQuery()) {
               future.complete(resultSet.next() ? Optional.of(mapRow(resultSet)) : Optional.empty());
             }
-          } catch (SQLException e) {
+          } catch (Exception e) {
             logSevere("find sale_id=" + saleId, e);
             future.completeExceptionally(e);
           }
@@ -207,9 +223,9 @@ public final class SaleQueue {
               "DELETE FROM sale_queue WHERE status IN ('sent', 'failed_permanent') "
                   + "AND created_at < ?";
           try (PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, Instant.now().minus(retention).toString());
+            statement.setString(1, formatTimestamp(Instant.now().minus(retention)));
             future.complete(statement.executeUpdate());
-          } catch (SQLException e) {
+          } catch (Exception e) {
             logSevere("cleanup terminal rows", e);
             future.completeExceptionally(e);
           }
@@ -249,7 +265,12 @@ public final class SaleQueue {
         resultSet.getString("next_attempt_at"));
   }
 
-  /** Submits a write-only SQL action to {@code queue-io} and completes the future when it runs. */
+  /**
+   * Submits a write-only SQL action to {@code queue-io} and completes the future when it runs.
+   * Catches every exception (not just {@link SQLException}): a {@code null} connection, an NPE or any
+   * runtime failure must still complete the future exceptionally and be logged, never leave a caller
+   * hanging or let the single {@code queue-io} thread die silently on an uncaught throwable.
+   */
   private CompletableFuture<Void> runIo(String opName, SqlAction action) {
     CompletableFuture<Void> future = new CompletableFuture<>();
     queueIo.execute(
@@ -257,7 +278,7 @@ public final class SaleQueue {
           try {
             action.run();
             future.complete(null);
-          } catch (SQLException e) {
+          } catch (Exception e) {
             logSevere(opName, e);
             future.completeExceptionally(e);
           }
@@ -265,9 +286,14 @@ public final class SaleQueue {
     return future;
   }
 
-  /** Failure of last-resort per §2.4: SQLite write errors are logged loud and clear. */
-  private void logSevere(String opName, SQLException e) {
-    logger.severe("[queue] Falha de I/O no SQLite (" + opName + "): " + e.getMessage());
+  /** Failure of last-resort per §2.4: SQLite I/O errors are logged loud and clear, with the trace. */
+  private void logSevere(String opName, Exception e) {
+    logger.log(Level.SEVERE, "[queue] Falha de I/O no SQLite (" + opName + ")", e);
+  }
+
+  /** Fixed-width instant string for storage/comparison; {@code null} maps to {@code null}. */
+  private static String formatTimestamp(Instant instant) {
+    return instant == null ? null : TIMESTAMP_FORMAT.format(instant);
   }
 
   @FunctionalInterface
