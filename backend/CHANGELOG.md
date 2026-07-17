@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.3.1...backend-v0.4.0) (2026-07-17)
+
+
+### Features
+
+* **backend:** auth de ingest (API key) + rate limiting + rota stub de vendas [S2.1] ([2afed3d](https://github.com/ZzPowerTech/ausTvSales/commit/2afed3db5ea763f2f076e4d9c45eb6af52ea3066))
+* **backend:** auth de ingest (API key) + rate limiting + rota stub de vendas [S2.1] ([68affc5](https://github.com/ZzPowerTech/ausTvSales/commit/68affc5233b1c052da4312f1423cdedde021556b))
+
 ## [0.3.1](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.3.0...backend-v0.3.1) (2026-07-16)
 
 
