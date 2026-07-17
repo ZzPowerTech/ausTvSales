@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.0](https://github.com/ZzPowerTech/ausTvSales/compare/plugin-v0.2.0...plugin-v0.3.0) (2026-07-17)
+
+
+### Features
+
+* **plugin:** comando austv-sales add com envio autenticado a API [S2.4] ([65aa087](https://github.com/ZzPowerTech/ausTvSales/commit/65aa0874648fe8c298e02fb9f82a8c0200287430))
+* **plugin:** comando austv-sales add com envio autenticado à API [S2.4] ([df1641b](https://github.com/ZzPowerTech/ausTvSales/commit/df1641b54d8f6d07eb43c67e371ccee689d1250c))
+
+
+### Bug Fixes
+
+* **plugin:** ajustes do review do Copilot no PR [#59](https://github.com/ZzPowerTech/ausTvSales/issues/59) ([4e0ad3e](https://github.com/ZzPowerTech/ausTvSales/commit/4e0ad3e82f3f3810b5537506e262cf5609c31026))
+
 ## [0.2.0](https://github.com/ZzPowerTech/ausTvSales/compare/plugin-v0.1.0...plugin-v0.2.0) (2026-07-14)
 
 
