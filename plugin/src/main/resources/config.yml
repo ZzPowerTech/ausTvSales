@@ -13,3 +13,20 @@ auto-update:
 
   # Repositorio (owner/repo) de onde baixar os releases do plugin.
   repository: "ZzPowerTech/ausTvSales"
+
+# Comunicacao com a API de vendas (backend NestJS).
+# ATENCAO: nunca commitar a chave real. Os valores abaixo sao placeholders; injete
+# base-url e api-key via secret no deploy. Com qualquer um dos dois vazio, o envio e
+# DESABILITADO (fail-safe): a venda e apenas parseada e logada, sem derrubar o servidor.
+api:
+  # URL base da API (HTTPS em producao). Barra final e tolerada. Ex: https://sales.austv.example
+  base-url: ""
+
+  # Chave de API enviada no header X-Api-Key. Vazio = envio desabilitado.
+  api-key: ""
+
+  # Timeout de conexao e de requisicao, em milissegundos.
+  timeout-ms: 5000
+
+  # Intervalo (em minutos) de sincronizacao do cache de itens. Uso futuro (S2.3/S3).
+  sync-interval: 5
