@@ -41,7 +41,10 @@ out/
 Thumbs.db
 
 # --- Claude Code ---
+# Worktrees de subagents: cobre tanto o caminho da convenção (.claude/.worktrees/)
+# quanto o usado pela ferramenta de isolamento em worktree (.claude/worktrees/).
 .claude/.worktrees/
+.claude/worktrees/
 .claude/settings.local.json
 
 # --- Logs ---
