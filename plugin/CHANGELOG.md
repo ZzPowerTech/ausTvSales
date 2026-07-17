@@ -5,8 +5,7 @@
 
 ### Features
 
-* **plugin:** comando austv-sales add com envio autenticado a API [S2.4] ([65aa087](https://github.com/ZzPowerTech/ausTvSales/commit/65aa0874648fe8c298e02fb9f82a8c0200287430))
-* **plugin:** comando austv-sales add com envio autenticado à API [S2.4] ([df1641b](https://github.com/ZzPowerTech/ausTvSales/commit/df1641b54d8f6d07eb43c67e371ccee689d1250c))
+* **plugin:** comando austv-sales add com envio autenticado à API [S2.4] ([65aa087](https://github.com/ZzPowerTech/ausTvSales/commit/65aa0874648fe8c298e02fb9f82a8c0200287430), [df1641b](https://github.com/ZzPowerTech/ausTvSales/commit/df1641b54d8f6d07eb43c67e371ccee689d1250c))
 
 
 ### Bug Fixes
