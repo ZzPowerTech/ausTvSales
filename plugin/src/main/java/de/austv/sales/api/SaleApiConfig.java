@@ -1,13 +1,17 @@
 package de.austv.sales.api;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.time.Duration;
 
 /**
  * Resolved configuration of the sales API endpoint, read from {@code config.yml} on enable.
  *
  * <p>The endpoint is derived once from {@code base-url} (trailing slash tolerated). A config is only
- * {@linkplain #enabled() enabled} when both {@code base-url} and {@code api-key} are present — a
- * missing key must fail safe (no send) rather than bring the server down.
+ * {@linkplain #enabled() enabled} when both {@code base-url} and {@code api-key} are present <b>and</b>
+ * {@code base-url} is a valid {@code http(s)} URI — a missing key or a malformed URL must fail safe
+ * (no send) rather than let {@code URI.create} throw later and crash the async delivery with an
+ * unclassified stacktrace.
  */
 public final class SaleApiConfig {
 
@@ -24,18 +28,38 @@ public final class SaleApiConfig {
   }
 
   /**
-   * Builds a config from raw config values. Blank {@code base-url} or {@code apiKey} yields a
-   * disabled config (the caller logs and skips network delivery).
+   * Builds a config from raw config values. A blank {@code base-url}/{@code apiKey}, or a {@code
+   * base-url} that is not a valid {@code http(s)} URI, yields a disabled config (the caller logs and
+   * skips network delivery).
    */
   public static SaleApiConfig of(String baseUrl, String apiKey, long timeoutMs) {
-    boolean enabled = isPresent(baseUrl) && isPresent(apiKey);
-    String endpoint = enabled ? trimTrailingSlash(baseUrl.trim()) + "/sales" : "";
     Duration timeout = Duration.ofMillis(timeoutMs > 0 ? timeoutMs : 5000);
-    return new SaleApiConfig(endpoint, enabled ? apiKey.trim() : "", timeout, enabled);
+    if (!isPresent(baseUrl) || !isPresent(apiKey)) {
+      return new SaleApiConfig("", "", timeout, false);
+    }
+
+    String endpoint = trimTrailingSlash(baseUrl.trim()) + "/sales";
+    if (!isValidHttpUri(endpoint)) {
+      return new SaleApiConfig("", "", timeout, false);
+    }
+    return new SaleApiConfig(endpoint, apiKey.trim(), timeout, true);
   }
 
   private static boolean isPresent(String value) {
     return value != null && !value.isBlank();
+  }
+
+  /** True only for a syntactically valid {@code http(s)} URI with a host (fail-safe gate). */
+  private static boolean isValidHttpUri(String value) {
+    try {
+      URI uri = new URI(value);
+      String scheme = uri.getScheme();
+      return uri.getHost() != null
+          && scheme != null
+          && (scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"));
+    } catch (URISyntaxException e) {
+      return false;
+    }
   }
 
   private static String trimTrailingSlash(String value) {

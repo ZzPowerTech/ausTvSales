@@ -57,6 +57,16 @@ class PriceNormalizerTest {
   }
 
   @Test
+  @DisplayName("inteiro com separador de milhar (sem decimal) nao vira decimal")
+  void treatsLoneThousandsSeparatorAsGrouping() {
+    // Separador unico seguido de exatamente 3 digitos = agrupamento de milhar, nao decimal.
+    assertNormalizesTo("1234", "1.234"); // BR
+    assertNormalizesTo("1234", "1,234"); // EN
+    assertNormalizesTo("1234", "R$ 1.234");
+    assertNormalizesTo("1234567", "1.234.567"); // multiplos separadores = agrupamento
+  }
+
+  @Test
   @DisplayName("valor negativo preserva o sinal")
   void preservesNegativeSign() {
     assertEquals("-9.90", PriceNormalizer.normalize("-9,90"));

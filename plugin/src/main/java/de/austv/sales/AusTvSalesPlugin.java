@@ -45,8 +45,9 @@ public final class AusTvSalesPlugin extends JavaPlugin {
     if (!apiConfig.enabled()) {
       getLogger()
           .severe(
-              "API de vendas nao configurada (api.base-url / api.api-key ausentes em config.yml): "
-                  + "envio DESABILITADO. Vendas serao apenas parseadas e logadas.");
+              "API de vendas nao configurada (api.base-url / api.api-key ausentes ou base-url "
+                  + "invalida em config.yml): envio DESABILITADO. Vendas serao apenas parseadas e "
+                  + "logadas.");
       return null;
     }
 

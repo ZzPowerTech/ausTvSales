@@ -25,7 +25,6 @@ import org.bukkit.plugin.Plugin;
  */
 public final class SaleCommandExecutor implements CommandExecutor {
 
-  private static final String PERMISSION = "austv.sales.admin";
   private static final int PRICE_ARG_INDEX = 3;
 
   private final Plugin plugin;
@@ -42,12 +41,10 @@ public final class SaleCommandExecutor implements CommandExecutor {
 
   @Override
   public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-    // A common player must never forge a sale through chat. Console has all permissions.
-    if (!sender.hasPermission(PERMISSION)) {
-      sender.sendMessage(ChatColor.RED + "Voce nao tem permissao para usar este comando.");
-      return true;
-    }
-
+    // Permission (`austv.sales.admin`, default `op`) is declared on the command in plugin.yml, so
+    // Bukkit already blocks a sender without it — sending the configured permission-message — before
+    // this executor is ever called. A common player therefore cannot forge a sale through chat; no
+    // duplicate manual check here (which would only risk an inconsistent message).
     ParseResult result = SaleCommandParser.parse(normalizePriceArg(args));
 
     if (result instanceof ParseResult.Failure failure) {

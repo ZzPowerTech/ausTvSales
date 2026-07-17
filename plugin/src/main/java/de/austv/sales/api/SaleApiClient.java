@@ -48,15 +48,17 @@ public final class SaleApiClient {
       int status = response.statusCode();
       switch (SaleDelivery.classify(status)) {
         case ACK -> {
-          String kind = status == 201 ? "recorded" : "duplicate/idempotent";
+          // Any 2xx is a definitive ACK (contract §2.3). Our backend uses 201 for a fresh write and
+          // 200 for an idempotent replay, but we don't over-claim "duplicate" from the status alone.
+          String detail = status == 201 ? " (registrada agora)" : " (ACK idempotente)";
           logger.info(
               "Venda confirmada pela API (sale_id="
                   + payload.saleId()
                   + ", HTTP "
                   + status
-                  + ", "
-                  + kind
-                  + ").");
+                  + ")"
+                  + detail
+                  + ".");
         }
         case PERMANENT ->
             logger.warning(
