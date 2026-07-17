@@ -89,7 +89,7 @@ Arquivo `sales-queue.db` na pasta de dados do plugin (`getDataFolder()`), **modo
 
 ```sql
 CREATE TABLE IF NOT EXISTS sale_queue (
-  sale_id              TEXT PRIMARY KEY,          -- UUID gerado no executor (idempotencia)
+  sale_id              TEXT PRIMARY KEY,          -- UUID gerado no executor (idempotência)
   item_id              TEXT NOT NULL,
   player_uuid          TEXT NOT NULL,
   nickname_at_purchase TEXT NOT NULL,
@@ -237,5 +237,3 @@ S3.2 (empacotamento sqlite + schema + SaleQueue + write-ahead no executor)
 - Comportamentos de erro (4xx `PERMANENT` vs 5xx/timeout `TRANSIENT`) consistentes com o contrato §2.3 da S2.2.
 - Runbook de resiliência versionado em `.specs/features/sprint-03-resilience/`.
 - Plugin roda 24h+ no servidor de teste sem leak de memória/timer aparente no log (thread única encerrada no `onDisable`).
-</content>
-</invoke>
