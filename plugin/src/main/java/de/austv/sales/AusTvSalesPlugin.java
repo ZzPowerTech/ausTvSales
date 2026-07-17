@@ -16,6 +16,7 @@ public final class AusTvSalesPlugin extends JavaPlugin {
 
   private static final String QUEUE_IO_THREAD_NAME = "austv-sales-queue-io";
   private static final long QUEUE_IO_SHUTDOWN_TIMEOUT_SECONDS = 5;
+  private static final long UPDATE_SHUTDOWN_TIMEOUT_SECONDS_DEFAULT = 20;
 
   private ScheduledExecutorService queueIo;
   private SaleQueue saleQueue;
@@ -101,8 +102,29 @@ public final class AusTvSalesPlugin extends JavaPlugin {
 
   @Override
   public void onDisable() {
+    stageUpdateBeforeRestart();
     shutdownQueue();
     getLogger().info("AusTvSales disabled.");
+  }
+
+  /**
+   * Baixa e prepara (na pasta de update) uma eventual versao nova ANTES do servidor reiniciar, de
+   * forma que o Paper a aplique ja no proximo boot — assim a nova versao sobe aplicada nesse mesmo
+   * restart, sem exigir um segundo reinicio. Bloqueia o shutdown por no maximo {@code
+   * auto-update.shutdown-timeout-seconds} (padrao {@value #UPDATE_SHUTDOWN_TIMEOUT_SECONDS_DEFAULT}s)
+   * e nunca propaga erro: auto-update e best-effort e jamais deve travar o desligamento.
+   */
+  private void stageUpdateBeforeRestart() {
+    try {
+      long timeoutSeconds =
+          getConfig()
+              .getLong(
+                  "auto-update.shutdown-timeout-seconds",
+                  UPDATE_SHUTDOWN_TIMEOUT_SECONDS_DEFAULT);
+      new UpdateChecker(this).stageOnShutdown(java.time.Duration.ofSeconds(timeoutSeconds));
+    } catch (Exception e) {
+      getLogger().warning("Falha ao preparar atualizacao no shutdown: " + e.getMessage());
+    }
   }
 
   /**

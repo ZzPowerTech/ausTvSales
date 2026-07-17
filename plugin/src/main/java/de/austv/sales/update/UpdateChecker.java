@@ -20,14 +20,29 @@ import java.time.Duration;
 import java.util.Map;
 
 /**
- * Checa os GitHub Releases do plugin no boot e, havendo versao nova estavel, baixa o jar para a
- * pasta de update do servidor. O Paper aplica o jar automaticamente no proximo restart (mecanismo
- * nativo da pasta de update), substituindo o jar instalado que tenha o mesmo nome de arquivo.
+ * Checa os GitHub Releases do plugin e, havendo versao nova estavel, baixa o jar para a pasta de
+ * update do servidor. O Paper aplica o jar da pasta de update <em>durante o boot, antes de carregar
+ * os plugins</em> (mecanismo nativo), substituindo o jar instalado que tenha o mesmo nome de
+ * arquivo. Por isso o download precisa terminar <em>antes</em> do proximo boot para que a nova
+ * versao ja suba aplicada.
  *
- * <p>Toda a operacao roda de forma assincrona e nunca bloqueia o startup: qualquer falha de rede ou
- * parsing e apenas registrada no log, deixando o servidor subir normalmente. As APIs do Bukkit que
- * dependem de estado do servidor (pasta de update, arquivo do plugin, config) sao lidas na main
- * thread em {@link #runAsync()} e passadas prontas para a tarefa assincrona.
+ * <p>A estrategia usa duas janelas complementares:
+ *
+ * <ul>
+ *   <li>{@link #stageOnShutdown} (principal): no {@code onDisable}, imediatamente antes do servidor
+ *       reiniciar, a checagem roda de forma <em>bloqueante e com orcamento de tempo</em>. Se ha
+ *       versao nova, o jar ja fica na pasta de update e o Paper o aplica no boot seguinte — a nova
+ *       versao sobe aplicada nesse mesmo restart, sem exigir um segundo reinicio.
+ *   <li>{@link #runAsync} (rede de seguranca): no {@code onEnable}, roda de forma assincrona sem
+ *       bloquear o startup. Cobre o caso de o servidor ter caido sem {@code onDisable} limpo (a
+ *       janela de shutdown nao rodou), garantindo que a atualizacao seja preparada assim mesmo — ela
+ *       sera aplicada no restart seguinte.
+ * </ul>
+ *
+ * <p>Qualquer falha de rede ou parsing e apenas registrada no log, deixando o servidor subir/descer
+ * normalmente. As APIs do Bukkit que dependem de estado do servidor (pasta de update, arquivo do
+ * plugin, config) sao lidas na main thread em {@link #runAsync()} / {@link #stageOnShutdown} e
+ * passadas prontas para a tarefa em background.
  *
  * <p>Seguranca: as requisicoes so seguem hosts do GitHub (allowlist em {@link #isAllowedHost}), com
  * redirects seguidos manualmente e revalidados a cada hop; e o jar baixado so e gravado apos validar
@@ -42,6 +57,7 @@ public final class UpdateChecker {
   private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
   private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
   private static final int MAX_REDIRECTS = 5;
+  private static final String SHUTDOWN_THREAD_NAME = "austv-sales-update-shutdown";
 
   private final AusTvSalesPlugin plugin;
   private final HttpClient http;
@@ -58,25 +74,78 @@ public final class UpdateChecker {
 
   /**
    * Le a config e o estado do servidor na main thread e agenda a checagem numa thread assincrona,
-   * sem bloquear o boot.
+   * sem bloquear o boot. Rede de seguranca do {@link #stageOnShutdown}: cobre o caso de o servidor
+   * ter caido sem {@code onDisable} limpo, preparando a atualizacao para o restart seguinte.
    */
   public void runAsync() {
+    Job job = buildJob();
+    if (job == null) {
+      return;
+    }
+    plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> check(job));
+  }
+
+  /**
+   * Roda a checagem de forma <em>bloqueante</em> durante o {@code onDisable}, para que o jar novo ja
+   * esteja na pasta de update antes do proximo boot — assim o Paper o aplica nesse mesmo restart.
+   *
+   * <p>Como o scheduler do Bukkit ja esta sendo desligado no shutdown, a tarefa roda numa thread
+   * daemon dedicada e o metodo espera por ela ate {@code budget}. Se estourar o orcamento, apenas
+   * registra no log e retorna: o shutdown nunca fica pendurado, e a thread daemon nao segura a saida
+   * da JVM (a atualizacao sera preparada no boot seguinte via {@link #runAsync}).
+   *
+   * @param budget tempo maximo que o shutdown pode esperar pela checagem terminar
+   */
+  public void stageOnShutdown(Duration budget) {
+    long budgetMillis = budget.toMillis();
+    if (budgetMillis <= 0) {
+      // Orcamento zerado/negativo = admin optou por nao segurar o shutdown; pula a checagem
+      // (evita tambem o join(0), que bloquearia indefinidamente). Cai na rede de seguranca do boot.
+      plugin
+          .getLogger()
+          .info("auto-update.shutdown-timeout-seconds <= 0; checagem no shutdown desativada.");
+      return;
+    }
+    Job job = buildJob();
+    if (job == null) {
+      return;
+    }
+    Thread worker = new Thread(() -> check(job), SHUTDOWN_THREAD_NAME);
+    worker.setDaemon(true);
+    worker.start();
+    try {
+      worker.join(budgetMillis);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return;
+    }
+    if (worker.isAlive()) {
+      plugin
+          .getLogger()
+          .warning(
+              "Checagem de atualizacao no shutdown excedeu "
+                  + budget.toSeconds()
+                  + "s; seguindo com o desligamento (sera preparada no proximo boot).");
+    }
+  }
+
+  /**
+   * Le a config e o estado do servidor na main thread e monta o snapshot imutavel usado pela tarefa
+   * em background — que nunca toca APIs do Bukkit. Retorna {@code null} quando o auto-update esta
+   * desativado.
+   */
+  private Job buildJob() {
     var config = plugin.getConfig();
     if (!config.getBoolean("auto-update.enabled", true)) {
       plugin.getLogger().info("Auto-update desativado (auto-update.enabled: false).");
-      return;
+      return null;
     }
-
-    // Snapshot capturado na main thread: a tarefa assincrona nao toca APIs do Bukkit.
-    Job job =
-        new Job(
-            config.getString("auto-update.repository", ""),
-            config.getBoolean("auto-update.notify-only", false),
-            plugin.getPluginMeta().getVersion(),
-            plugin.getServer().getUpdateFolderFile(),
-            plugin.getPluginFile().getName());
-
-    plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> check(job));
+    return new Job(
+        config.getString("auto-update.repository", ""),
+        config.getBoolean("auto-update.notify-only", false),
+        plugin.getPluginMeta().getVersion(),
+        plugin.getServer().getUpdateFolderFile(),
+        plugin.getPluginFile().getName());
   }
 
   private void check(Job job) {
@@ -211,7 +280,7 @@ public final class UpdateChecker {
     }
     plugin
         .getLogger()
-        .info("Atualizacao " + release.version() + " baixada. Sera aplicada no proximo restart.");
+        .info("Atualizacao " + release.version() + " baixada e preparada. Sera aplicada no proximo boot.");
   }
 
   private HttpRequest apiRequest(URI uri) {
