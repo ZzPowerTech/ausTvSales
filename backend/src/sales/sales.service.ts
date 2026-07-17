@@ -4,7 +4,7 @@ import {
   Logger,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, ne, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDB } from '../db/database.module';
 import { items, players, sales } from '../db/schema';
 import { CreateSaleDto } from './dto/create-sale.dto';
@@ -88,33 +88,39 @@ export class SalesService {
   }
 
   /**
-   * Create the player if unknown; otherwise refresh `last_known_nickname` only
-   * when it differs, avoiding a pointless UPDATE (and `updated_at` bump) on every
-   * purchase from a returning buyer.
+   * Concurrency-safe player upsert.
+   *
+   * A plain SELECT→INSERT would race: two first purchases of the same
+   * `player_uuid` running at once could both see no row, and one INSERT would
+   * then hit the `players.uuid` PK and fail the whole transaction (500). Instead:
+   *  - `INSERT ... ON CONFLICT (uuid) DO NOTHING` creates the player when new and
+   *    is a harmless no-op under the race.
+   *  - a follow-up `UPDATE` guarded by `last_known_nickname <> :nickname` refreshes
+   *    the display nick only when it actually changed, so a returning buyer with
+   *    an unchanged nick never bumps `updated_at`.
+   *
+   * The "only when changed" semantics now live in the SQL predicate (not a
+   * branch on a prior read), which is what makes it both race-free and
+   * write-minimal. Exercising it against a real Postgres is an e2e concern.
    */
   private async upsertPlayer(
     tx: Parameters<Parameters<DrizzleDB['transaction']>[0]>[0],
     playerUuid: string,
     nickname: string,
   ): Promise<void> {
-    const [existing] = await tx
-      .select({ lastKnownNickname: players.lastKnownNickname })
-      .from(players)
-      .where(eq(players.uuid, playerUuid))
-      .limit(1);
+    await tx
+      .insert(players)
+      .values({ uuid: playerUuid, lastKnownNickname: nickname })
+      .onConflictDoNothing({ target: players.uuid });
 
-    if (!existing) {
-      await tx
-        .insert(players)
-        .values({ uuid: playerUuid, lastKnownNickname: nickname });
-      return;
-    }
-
-    if (existing.lastKnownNickname !== nickname) {
-      await tx
-        .update(players)
-        .set({ lastKnownNickname: nickname, updatedAt: sql`now()` })
-        .where(eq(players.uuid, playerUuid));
-    }
+    await tx
+      .update(players)
+      .set({ lastKnownNickname: nickname, updatedAt: sql`now()` })
+      .where(
+        and(
+          eq(players.uuid, playerUuid),
+          ne(players.lastKnownNickname, nickname),
+        ),
+      );
   }
 }

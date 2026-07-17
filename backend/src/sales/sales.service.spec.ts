@@ -1,14 +1,19 @@
 import { UnprocessableEntityException } from '@nestjs/common';
 import type { DrizzleDB } from '../db/database.module';
-import { items, players, sales } from '../db/schema';
+import { players, sales } from '../db/schema';
 import type { CreateSaleDto } from './dto/create-sale.dto';
 import { SalesService } from './sales.service';
 
 /**
  * Unit tests for the S2.2 ingest flow. The Drizzle layer is mocked (like the
- * other `*.spec.ts` here) so `npm test` needs no real Postgres; the ON CONFLICT
- * / PK idempotency itself is exercised against a real DB in the e2e suite
- * (`npm run test:e2e`) — see the note in the task report.
+ * other `*.spec.ts` here) so `npm test` needs no real Postgres.
+ *
+ * These assert the *shape* of the flow (catalog gate, which statements run,
+ * created-vs-duplicate result). The actual SQL-level guarantees — `ON CONFLICT`
+ * idempotency on `sales.id`, the concurrency-safe player upsert and the
+ * "nickname changed" UPDATE predicate — are enforced by Postgres and are not
+ * observable through a mock; a `sales.e2e-spec.ts` against a real DB (not yet
+ * written — Sprint 2 DoD) is the place to verify them end to end.
  */
 
 function baseDto(overrides: Partial<CreateSaleDto> = {}): CreateSaleDto {
@@ -26,7 +31,6 @@ function baseDto(overrides: Partial<CreateSaleDto> = {}): CreateSaleDto {
 
 interface MockConfig {
   itemRows: Array<{ active: boolean }>;
-  playerRows: Array<{ lastKnownNickname: string }>;
   saleReturning: Array<{ id: string }>;
 }
 
@@ -40,13 +44,12 @@ function buildService(config: MockConfig): {
   service: SalesService;
   tx: TxMock;
 } {
+  // Only the catalog gate reads (items); the player upsert no longer does a
+  // read-then-branch, so `select` is items-only now.
   const select = jest.fn(() => ({
-    from: (table: unknown) => ({
+    from: () => ({
       where: () => ({
-        limit: () =>
-          Promise.resolve(
-            table === items ? config.itemRows : config.playerRows,
-          ),
+        limit: () => Promise.resolve(config.itemRows),
       }),
     }),
   }));
@@ -59,7 +62,10 @@ function buildService(config: MockConfig): {
               returning: () => Promise.resolve(config.saleReturning),
             }),
           }
-        : Promise.resolve([]),
+        : // players: INSERT ... ON CONFLICT (uuid) DO NOTHING
+          {
+            onConflictDoNothing: () => Promise.resolve([]),
+          },
   }));
 
   const update = jest.fn(() => ({
@@ -79,25 +85,25 @@ function buildService(config: MockConfig): {
 }
 
 describe('SalesService', () => {
-  it('records a new sale for an active item and a new player (created)', async () => {
+  it('records a new sale for an active item and upserts the player (created)', async () => {
     const { service, tx } = buildService({
       itemRows: [{ active: true }],
-      playerRows: [],
       saleReturning: [{ id: baseDto().sale_id }],
     });
 
     const result = await service.record(baseDto());
 
     expect(result).toEqual({ saleId: baseDto().sale_id, created: true });
-    expect(tx.insert).toHaveBeenCalledWith(players); // player created
-    expect(tx.insert).toHaveBeenCalledWith(sales); // sale inserted
-    expect(tx.update).not.toHaveBeenCalled();
+    // Concurrency-safe upsert always issues both statements; the DB decides via
+    // ON CONFLICT / the WHERE guard whether each actually writes.
+    expect(tx.insert).toHaveBeenCalledWith(players);
+    expect(tx.update).toHaveBeenCalledWith(players);
+    expect(tx.insert).toHaveBeenCalledWith(sales);
   });
 
   it('is idempotent: a replayed sale_id inserts nothing and reports not-created', async () => {
     const { service, tx } = buildService({
       itemRows: [{ active: true }],
-      playerRows: [{ lastKnownNickname: 'Murilo' }],
       saleReturning: [], // ON CONFLICT DO NOTHING → empty RETURNING
     });
 
@@ -109,10 +115,9 @@ describe('SalesService', () => {
     expect(tx.insert).toHaveBeenCalledWith(sales);
   });
 
-  it('rejects an unknown item with 422 and creates neither player nor sale', async () => {
+  it('rejects an unknown item with 422 and touches neither player nor sale', async () => {
     const { service, tx } = buildService({
       itemRows: [], // item_id not in catalog
-      playerRows: [],
       saleReturning: [],
     });
 
@@ -123,10 +128,9 @@ describe('SalesService', () => {
     expect(tx.update).not.toHaveBeenCalled();
   });
 
-  it('rejects an inactive item with 422 (permanent error)', async () => {
+  it('rejects an inactive item with 422 (permanent error) before any write', async () => {
     const { service, tx } = buildService({
       itemRows: [{ active: false }],
-      playerRows: [],
       saleReturning: [],
     });
 
@@ -134,31 +138,22 @@ describe('SalesService', () => {
       UnprocessableEntityException,
     );
     expect(tx.insert).not.toHaveBeenCalled();
-  });
-
-  it('updates last_known_nickname when the purchase nickname changed', async () => {
-    const { service, tx } = buildService({
-      itemRows: [{ active: true }],
-      playerRows: [{ lastKnownNickname: 'OldNick' }],
-      saleReturning: [{ id: baseDto().sale_id }],
-    });
-
-    await service.record(baseDto({ nickname_at_purchase: 'NewNick' }));
-
-    expect(tx.update).toHaveBeenCalledWith(players);
-    expect(tx.insert).not.toHaveBeenCalledWith(players); // player already exists
-  });
-
-  it('does not UPDATE the player when the nickname is unchanged', async () => {
-    const { service, tx } = buildService({
-      itemRows: [{ active: true }],
-      playerRows: [{ lastKnownNickname: 'Murilo' }],
-      saleReturning: [{ id: baseDto().sale_id }],
-    });
-
-    await service.record(baseDto({ nickname_at_purchase: 'Murilo' }));
-
     expect(tx.update).not.toHaveBeenCalled();
-    expect(tx.insert).not.toHaveBeenCalledWith(players);
+  });
+
+  it('runs the player upsert as insert-on-conflict + guarded update, in the tx', async () => {
+    const { service, tx } = buildService({
+      itemRows: [{ active: true }],
+      saleReturning: [{ id: baseDto().sale_id }],
+    });
+
+    await service.record(baseDto());
+
+    // The whole flow runs inside a single transaction, and the player write is
+    // the race-free upsert (INSERT ... ON CONFLICT DO NOTHING, then the guarded
+    // UPDATE) — never a SELECT-then-branch that could 500 on the PK.
+    expect(tx.select.mock.calls.length).toBe(1); // items gate only
+    expect(tx.insert).toHaveBeenCalledWith(players);
+    expect(tx.update).toHaveBeenCalledWith(players);
   });
 });
