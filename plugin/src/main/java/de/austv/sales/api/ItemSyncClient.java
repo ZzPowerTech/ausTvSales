@@ -49,14 +49,17 @@ public final class ItemSyncClient {
    *     any failure (the caller logs and keeps the previous cache).
    */
   public Optional<Set<String>> fetchActiveItemIds() {
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create(config.itemsSyncEndpoint()))
-            .header("X-Api-Key", config.apiKey())
-            .timeout(config.timeout())
-            .GET()
-            .build();
-
     try {
+      // Built inside the try: a blank/invalid itemsSyncEndpoint (e.g. the task scheduled while the
+      // API config is disabled) makes URI.create / newBuilder throw IllegalArgumentException, which
+      // must still resolve to Optional.empty() per this method's contract, never crash the task.
+      HttpRequest request =
+          HttpRequest.newBuilder(URI.create(config.itemsSyncEndpoint()))
+              .header("X-Api-Key", config.apiKey())
+              .timeout(config.timeout())
+              .GET()
+              .build();
+
       HttpResponse<String> response = http.send(request, BodyHandlers.ofString());
       int status = response.statusCode();
       if (status < 200 || status >= 300) {
@@ -71,10 +74,10 @@ public final class ItemSyncClient {
       Thread.currentThread().interrupt();
       logger.warning("Sync de itens interrompido.");
       return Optional.empty();
-    } catch (JsonSyntaxException | IllegalStateException e) {
-      // JsonSyntaxException: malformed JSON. IllegalStateException: valid JSON but not an array
-      // (e.g. the endpoint returned an error object). Both are a bad response body, not a reason
-      // to crash the scheduled sync task.
+    } catch (IllegalArgumentException | JsonSyntaxException | IllegalStateException e) {
+      // IllegalArgumentException: blank/invalid endpoint URI. JsonSyntaxException: malformed JSON.
+      // IllegalStateException: valid JSON but not an array (e.g. the endpoint returned an error
+      // object). None is a reason to crash the scheduled sync task.
       logger.warning("Resposta invalida no sync de itens: " + e.getMessage());
       return Optional.empty();
     }

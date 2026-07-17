@@ -53,8 +53,11 @@ public final class SaleCommandExecutor implements CommandExecutor {
 
   /**
    * @param apiClient the delivery client, or {@code null} when the API is not configured (fail-safe:
-   *     the command still parses, validates and enqueues, but nothing is sent over the network).
-   * @param saleQueue the SQLite fallback queue; every parsed sale is write-ahead persisted here.
+   *     nothing is sent over the network). Note that a command only reaches the enqueue step at all
+   *     if it first clears the S3.1 item-cache guard below; with the API unconfigured the cache
+   *     stays empty, so those commands are rejected before any enqueue.
+   * @param saleQueue the SQLite fallback queue; a sale that clears the cache guard is write-ahead
+   *     persisted here before any delivery attempt.
    * @param itemCache the S3.1 local item cache; gates every command before it reaches the queue.
    */
   public SaleCommandExecutor(

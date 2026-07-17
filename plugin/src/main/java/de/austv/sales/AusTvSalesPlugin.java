@@ -129,8 +129,9 @@ public final class AusTvSalesPlugin extends JavaPlugin {
       getLogger()
           .severe(
               "API de vendas nao configurada (api.base-url / api.api-key ausentes ou base-url "
-                  + "invalida em config.yml): envio DESABILITADO. Vendas serao apenas parseadas e "
-                  + "logadas.");
+                  + "invalida em config.yml): envio DESABILITADO. Sem sync de catalogo, o cache de "
+                  + "itens fica vazio e todo comando /austv-sales sera rejeitado localmente (ver log "
+                  + "do sync abaixo).");
       return null;
     }
 
