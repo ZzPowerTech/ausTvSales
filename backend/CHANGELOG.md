@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.5.0...backend-v0.6.0) (2026-07-17)
+
+
+### Features
+
+* **backend:** POST /sales idempotente com validacao de catalogo [S2.2] ([9d469c0](https://github.com/ZzPowerTech/ausTvSales/commit/9d469c0bdbcb49f16a813492880da4df60d95774))
+* **backend:** POST /sales idempotente com validação de catálogo [S2.2] ([f355927](https://github.com/ZzPowerTech/ausTvSales/commit/f3559271c5ee45ae1a7ca46a000db726b76dfa92))
+
+
+### Bug Fixes
+
+* **backend:** upsert de player concorrencia-safe (review Copilot [#56](https://github.com/ZzPowerTech/ausTvSales/issues/56)) ([91af561](https://github.com/ZzPowerTech/ausTvSales/commit/91af5619dcee267ae43689053248b773b515fa82))
+
 ## [0.5.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.4.0...backend-v0.5.0) (2026-07-17)
 
 
