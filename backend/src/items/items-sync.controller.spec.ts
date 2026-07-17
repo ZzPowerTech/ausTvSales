@@ -99,7 +99,7 @@ describe('ItemsSyncController (GET /items/sync)', () => {
     expect(ids).not.toContain('caixaPascoa2025');
   });
 
-  it('sends a short Cache-Control for cheap plugin polling', async () => {
+  it('caches privately (never public) for an API-key protected route', async () => {
     findActiveForSync.mockResolvedValue(ACTIVE_ONLY);
 
     const res = await http()
@@ -107,6 +107,10 @@ describe('ItemsSyncController (GET /items/sync)', () => {
       .set('X-Api-Key', KEY)
       .expect(200);
 
-    expect(res.headers['cache-control']).toContain('max-age=60');
+    // `private` keeps shared/proxy caches from storing and leaking the catalog
+    // to unauthenticated callers; the short TTL only helps the plugin's client.
+    expect(res.headers['cache-control']).toBe('private, max-age=60');
+    expect(res.headers['cache-control']).not.toContain('public');
+    expect(res.headers['vary']).toContain('X-Api-Key');
   });
 });

@@ -22,6 +22,12 @@ import { ItemsService, type ItemSyncEntry } from './items.service';
  * plugin polls every N minutes (`sync-interval`, S2.4). `ETag`/`If-None-Match` or
  * a `?since=updated_at` delta is a documented future optimization, not needed at
  * this volume.
+ *
+ * Caching is `private`, never `public`: this route is API-key protected, so a
+ * shared/proxy cache must never store the catalog and risk serving it to an
+ * unauthenticated caller. `Vary` on the auth headers is belt-and-suspenders for
+ * any intermediary that ignores `private`. The 60s TTL is only for the plugin's
+ * own client.
  */
 @Controller('items')
 export class ItemsSyncController {
@@ -29,7 +35,8 @@ export class ItemsSyncController {
 
   @IngestAuth()
   @Get('sync')
-  @Header('Cache-Control', 'public, max-age=60')
+  @Header('Cache-Control', 'private, max-age=60')
+  @Header('Vary', 'X-Api-Key, Authorization')
   sync(): Promise<ItemSyncEntry[]> {
     return this.itemsService.findActiveForSync();
   }

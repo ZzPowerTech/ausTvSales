@@ -103,9 +103,12 @@ rede por venda**.
   [ { "itemId": "caixaNatal2026", "active": true }, { "itemId": "vipGold", "active": true } ]
   ```
 - **Estratégia de sync (decisão MVP):** o catálogo é pequeno, então devolvemos a lista ativa
-  **completa** a cada requisição + `Cache-Control: public, max-age=60`. O plugin faz *polling*
-  a cada N minutos (`sync-interval`, S2.4). `ETag`/`If-None-Match` e delta via `?since=updated_at`
-  ficam como otimização futura — desnecessários neste volume.
+  **completa** a cada requisição + `Cache-Control: private, max-age=60` (+ `Vary: X-Api-Key,
+  Authorization`). É **`private`** de propósito: a rota é protegida por API key, então caches
+  compartilhados/proxies não podem armazenar e servir o catálogo a um chamador não autenticado —
+  o TTL de 60s vale só para o cliente do próprio plugin. O plugin faz *polling* a cada N minutos
+  (`sync-interval`, S2.4). `ETag`/`If-None-Match` e delta via `?since=updated_at` ficam como
+  otimização futura — desnecessários neste volume.
 - **Convivência com `GET /items/:id`:** `ItemsSyncController` é registrado **antes** de
   `ItemsController` no módulo, para a rota estática `/items/sync` casar antes da rota param
   `/items/:id` (cujo `ParseIntPipe` rejeitaria `"sync"`).
