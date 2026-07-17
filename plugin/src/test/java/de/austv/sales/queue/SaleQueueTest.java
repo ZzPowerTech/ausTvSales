@@ -210,6 +210,16 @@ class SaleQueueTest {
   }
 
   @Test
+  @DisplayName("findPendingDue com limit <= 0 retorna vazio (nunca vira 'no limit' do SQLite)")
+  void findPendingDueWithNonPositiveLimitReturnsEmpty() throws Exception {
+    await(queue.enqueuePending(payload(new BigDecimal("1.00"))));
+    await(queue.enqueuePending(payload(new BigDecimal("2.00"))));
+
+    assertTrue(await(queue.findPendingDue(0)).isEmpty());
+    assertTrue(await(queue.findPendingDue(-1)).isEmpty());
+  }
+
+  @Test
   @DisplayName("findPendingDue nao retorna pending cujo next_attempt_at ainda esta no futuro")
   void findPendingDueExcludesRowsNotYetDue() throws Exception {
     SalePayload payload = payload(new BigDecimal("1.00"));

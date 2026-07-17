@@ -221,6 +221,12 @@ public final class SaleQueue {
    * <=} comparison SQLite performs on the TEXT column is equivalent to a chronological comparison.
    */
   public CompletableFuture<List<Row>> findPendingDue(int limit) {
+    // Guard against a non-positive limit: SQLite treats a negative LIMIT as "no limit", so a
+    // misconfigured/buggy caller could otherwise drain the entire pending queue in one cycle
+    // (long stalls / memory pressure). Nothing due to fetch with a limit of zero or less.
+    if (limit <= 0) {
+      return CompletableFuture.completedFuture(List.of());
+    }
     CompletableFuture<List<Row>> future = new CompletableFuture<>();
     queueIo.execute(
         () -> {

@@ -266,6 +266,17 @@ public final class AusTvSalesPlugin extends JavaPlugin {
       if (!executor.awaitTermination(timeoutSeconds, TimeUnit.SECONDS)) {
         getLogger().warning(name + " nao encerrou a tempo; forcando shutdown.");
         executor.shutdownNow();
+        // Await again after shutdownNow: shutdownQueue() closes the SQLite connection right after
+        // this returns, and SaleQueue.close() requires the executor to have fully drained. Return
+        // only once the thread actually stopped - or log loud if it still refuses to, since then a
+        // close could race an in-flight write.
+        if (!executor.awaitTermination(timeoutSeconds, TimeUnit.SECONDS)) {
+          getLogger()
+              .severe(
+                  name
+                      + " nao encerrou nem apos shutdownNow; a conexao SQLite pode ser fechada com "
+                      + "uma escrita em curso.");
+        }
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
