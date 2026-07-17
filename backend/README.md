@@ -84,6 +84,35 @@ o decorator `@IngestAuth()` (`@Public()` para escapar do guard de sessão + `Ing
 
 > Estado atual (S2.1): `POST /sales` é **stub 501** — a persistência idempotente é a S2.2.
 
+### Rotas de ingest
+
+| Rota | Auth | Descrição |
+|---|---|---|
+| `POST /sales` | `@IngestAuth()` | Recebe uma venda do plugin (persistência idempotente na S2.2). |
+| `GET /items/sync` | `@IngestAuth()` | Catálogo enxuto para o cache local do plugin (S2.3). |
+
+**`GET /items/sync` (S2.3)** — separado do `GET /items` do dashboard (que é session-guarded
+e devolve o `Item` completo). Serve **apenas itens ativos** (`active = true`) numa projeção
+mínima, para o plugin validar `item_id` localmente antes de aceitar o comando de venda — **zero
+rede por venda**.
+
+- **Resposta:** array ordenado por `itemId` de `{ itemId, active }` (sempre `active: true`; o
+  campo é mantido explícito para deixar o contrato claro e absorver uma futura variação sem
+  quebrar o cliente). Ex.:
+  ```json
+  [ { "itemId": "caixaNatal2026", "active": true }, { "itemId": "vipGold", "active": true } ]
+  ```
+- **Estratégia de sync (decisão MVP):** o catálogo é pequeno, então devolvemos a lista ativa
+  **completa** a cada requisição + `Cache-Control: private, max-age=60` (+ `Vary: X-Api-Key,
+  Authorization`). É **`private`** de propósito: a rota é protegida por API key, então caches
+  compartilhados/proxies não podem armazenar e servir o catálogo a um chamador não autenticado —
+  o TTL de 60s vale só para o cliente do próprio plugin. O plugin faz *polling* a cada N minutos
+  (`sync-interval`, S2.4). `ETag`/`If-None-Match` e delta via `?since=updated_at` ficam como
+  otimização futura — desnecessários neste volume.
+- **Convivência com `GET /items/:id`:** `ItemsSyncController` é registrado **antes** de
+  `ItemsController` no módulo, para a rota estática `/items/sync` casar antes da rota param
+  `/items/:id` (cujo `ParseIntPipe` rejeitaria `"sync"`).
+
 ## Banco de dados (Drizzle)
 
 | Comando | O que faz |

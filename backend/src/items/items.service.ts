@@ -12,6 +12,16 @@ import { categories, items, type Item } from '../db/schema';
 import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 
+/**
+ * Lean catalog entry served to the plugin's local cache (spec S2.3). Only the
+ * fields the plugin needs to validate `item_id` offline before accepting a sale
+ * command — no display name, category or numeric id.
+ */
+export interface ItemSyncEntry {
+  itemId: string;
+  active: boolean;
+}
+
 @Injectable()
 export class ItemsService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDB) {}
@@ -34,6 +44,22 @@ export class ItemsService {
 
   findAll(): Promise<Item[]> {
     return this.db.select().from(items).orderBy(asc(items.itemId));
+  }
+
+  /**
+   * Active-only, lean catalog projection for the plugin cache (spec S2.3).
+   *
+   * Separate from {@link findAll} (which serves the dashboard the full `Item`):
+   * this returns only `active = true` rows and only `{ itemId, active }`, so the
+   * plugin can validate `item_id` locally without a network call per sale.
+   * Ordered by `itemId` for a stable, diff-friendly payload.
+   */
+  findActiveForSync(): Promise<ItemSyncEntry[]> {
+    return this.db
+      .select({ itemId: items.itemId, active: items.active })
+      .from(items)
+      .where(eq(items.active, true))
+      .orderBy(asc(items.itemId));
   }
 
   async findOne(id: number): Promise<Item> {
