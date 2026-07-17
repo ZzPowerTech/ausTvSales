@@ -29,6 +29,10 @@ dependencies {
     testImplementation(platform("org.junit:junit-bom:5.11.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+
+    // Gson e compileOnly no main (o Paper o fornece em runtime); nos testes da serializacao
+    // pura de payload precisamos dele no classpath de teste.
+    testImplementation("com.google.code.gson:gson:2.11.0")
 }
 
 tasks.withType<JavaCompile> {
