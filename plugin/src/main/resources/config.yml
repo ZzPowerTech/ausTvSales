@@ -30,3 +30,15 @@ api:
 
   # Intervalo (em minutos) de sincronizacao do cache de itens. Uso futuro (S2.3/S3).
   sync-interval: 5
+
+# Fila de fallback SQLite (S3.2) e worker de reenvio (S3.3).
+queue:
+  # Retencao de eventos terminais (sent/failed_permanent) antes da limpeza, em horas.
+  retention-hours: 168
+
+  # Intervalo do worker de reenvio, em segundos. Chave usada pela S3.3 (worker ainda nao
+  # agendado nesta versao); documentada aqui para nao precisar de outro deploy de config.
+  worker-interval-seconds: 30
+
+  # Backoff maximo entre tentativas de um mesmo evento, em segundos. Uso futuro (S3.3).
+  max-backoff-seconds: 300

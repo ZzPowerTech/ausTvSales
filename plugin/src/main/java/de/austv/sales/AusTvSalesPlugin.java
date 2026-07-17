@@ -3,11 +3,22 @@ package de.austv.sales;
 import de.austv.sales.api.SaleApiClient;
 import de.austv.sales.api.SaleApiConfig;
 import de.austv.sales.command.SaleCommandExecutor;
+import de.austv.sales.queue.SaleQueue;
 import de.austv.sales.update.UpdateChecker;
 import java.io.File;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class AusTvSalesPlugin extends JavaPlugin {
+
+  private static final String QUEUE_IO_THREAD_NAME = "austv-sales-queue-io";
+  private static final long QUEUE_IO_SHUTDOWN_TIMEOUT_SECONDS = 5;
+
+  private ScheduledExecutorService queueIo;
+  private SaleQueue saleQueue;
 
   @Override
   public void onEnable() {
@@ -15,9 +26,33 @@ public final class AusTvSalesPlugin extends JavaPlugin {
 
     SaleApiClient apiClient = buildApiClient();
 
+    queueIo = Executors.newSingleThreadScheduledExecutor(queueIoThreadFactory());
+    saleQueue = new SaleQueue(getDataFolder(), queueIo, getLogger());
+    // The queue must be ready (schema created/migrated) before the first command can enqueue -
+    // this is a one-time, short-lived block during boot, same category as saveDefaultConfig().
+    // If it fails we fail fast: without a durable queue the write-ahead guarantee is void, so we
+    // disable the plugin rather than register a command that would report "recorded" while
+    // silently persisting nothing.
+    try {
+      saleQueue.open().get(10, TimeUnit.SECONDS);
+      getLogger().info("Fila de fallback SQLite pronta (sales-queue.db).");
+    } catch (Exception e) {
+      if (e instanceof InterruptedException) {
+        Thread.currentThread().interrupt();
+      }
+      getLogger()
+          .log(
+              java.util.logging.Level.SEVERE,
+              "Falha ao abrir/migrar a fila de fallback SQLite; desabilitando o plugin para nao "
+                  + "aceitar vendas sem persistencia garantida.",
+              e);
+      getServer().getPluginManager().disablePlugin(this);
+      return;
+    }
+
     var command = getCommand("austv-sales");
     if (command != null) {
-      command.setExecutor(new SaleCommandExecutor(this, apiClient));
+      command.setExecutor(new SaleCommandExecutor(this, apiClient, saleQueue));
     } else {
       getLogger().severe("Command 'austv-sales' not found in plugin.yml.");
     }
@@ -25,6 +60,15 @@ public final class AusTvSalesPlugin extends JavaPlugin {
     new UpdateChecker(this).runAsync();
 
     getLogger().info("AusTvSales enabled.");
+  }
+
+  /** Names the single {@code queue-io} thread for readable thread dumps/logs. */
+  private static ThreadFactory queueIoThreadFactory() {
+    return runnable -> {
+      Thread thread = new Thread(runnable, QUEUE_IO_THREAD_NAME);
+      thread.setDaemon(true);
+      return thread;
+    };
   }
 
   /**
@@ -57,7 +101,31 @@ public final class AusTvSalesPlugin extends JavaPlugin {
 
   @Override
   public void onDisable() {
+    shutdownQueue();
     getLogger().info("AusTvSales disabled.");
+  }
+
+  /**
+   * Stops accepting new {@code queue-io} work, waits briefly for the in-flight task (if any) to
+   * finish, and only then closes the SQLite connection - closing it while a task is still running
+   * on {@code queue-io} would fail that task mid-write.
+   */
+  private void shutdownQueue() {
+    if (queueIo != null) {
+      queueIo.shutdown();
+      try {
+        if (!queueIo.awaitTermination(QUEUE_IO_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+          getLogger().warning("queue-io nao encerrou a tempo; forcando shutdown.");
+          queueIo.shutdownNow();
+        }
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        queueIo.shutdownNow();
+      }
+    }
+    if (saleQueue != null) {
+      saleQueue.close();
+    }
   }
 
   /**

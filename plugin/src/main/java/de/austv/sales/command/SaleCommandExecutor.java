@@ -1,9 +1,11 @@
 package de.austv.sales.command;
 
 import de.austv.sales.api.SaleApiClient;
+import de.austv.sales.api.SaleDelivery.Outcome;
 import de.austv.sales.api.SalePayload;
 import de.austv.sales.command.SaleCommandParser.ParseResult;
 import de.austv.sales.command.SaleCommandParser.ParsedSale;
+import de.austv.sales.queue.SaleQueue;
 import java.time.Instant;
 import java.util.UUID;
 import org.bukkit.ChatColor;
@@ -18,10 +20,16 @@ import org.bukkit.plugin.Plugin;
  * SaleCommandParser}; the {@code %price%} placeholder is normalized by {@link PriceNormalizer}
  * before parsing.
  *
- * <p>Happy path (S2.4): resolve {@code player_nick → player_uuid} from the Bukkit cache, stamp
- * {@code sale_id}/{@code purchased_at} locally and dispatch the payload asynchronously to the API —
- * no network I/O on the main thread. The item-cache validation (S3.1) and the SQLite fallback queue
- * (S3) are intentionally out of scope here; unknown items are rejected authoritatively by the API.
+ * <p>Happy path (S2.4 + S3.2): resolve {@code player_nick -> player_uuid} from the Bukkit cache,
+ * stamp {@code sale_id}/{@code purchased_at} locally, then follow the write-ahead strategy (§2.3
+ * of the Sprint 3 spec): the payload is persisted as {@code pending} in the SQLite fallback queue
+ * BEFORE any delivery attempt, so a crash between "parsed" and "sent" never loses a sale. Only
+ * after the write is durable does the executor dispatch the HTTP delivery asynchronously and act
+ * on the resulting {@link Outcome}. No network or SQLite I/O ever touches the main thread.
+ *
+ * <p>The item-cache validation (S3.1) is intentionally out of scope here; unknown items are
+ * rejected authoritatively by the API (which still enqueues as {@code pending} first and then
+ * transitions to {@code failed_permanent} on the 422).
  */
 public final class SaleCommandExecutor implements CommandExecutor {
 
@@ -29,14 +37,17 @@ public final class SaleCommandExecutor implements CommandExecutor {
 
   private final Plugin plugin;
   private final SaleApiClient apiClient;
+  private final SaleQueue saleQueue;
 
   /**
    * @param apiClient the delivery client, or {@code null} when the API is not configured (fail-safe:
-   *     the command still parses and validates but nothing is sent).
+   *     the command still parses, validates and enqueues, but nothing is sent over the network).
+   * @param saleQueue the SQLite fallback queue; every parsed sale is write-ahead persisted here.
    */
-  public SaleCommandExecutor(Plugin plugin, SaleApiClient apiClient) {
+  public SaleCommandExecutor(Plugin plugin, SaleApiClient apiClient, SaleQueue saleQueue) {
     this.plugin = plugin;
     this.apiClient = apiClient;
+    this.saleQueue = saleQueue;
   }
 
   @Override
@@ -78,35 +89,82 @@ public final class SaleCommandExecutor implements CommandExecutor {
             sale.qtd(),
             Instant.now());
 
+    // Write-ahead (§2.3 of the Sprint 3 spec): persist as pending BEFORE any delivery is even
+    // attempted, so a crash between "parsed" and "sent" can never lose the sale. Enqueue and
+    // delivery both run off the main thread; the command returns as soon as the enqueue is
+    // submitted to the queue's own single-thread executor.
+    enqueueThenDeliver(payload);
+
     if (apiClient == null) {
       plugin
           .getLogger()
           .severe(
               "API nao configurada (api.base-url / api.api-key ausentes): venda "
                   + payload.saleId()
-                  + " parseada mas NAO enviada.");
+                  + " gravada como pendente na fila local, mas NAO sera enviada automaticamente.");
       sender.sendMessage(
-          ChatColor.RED + "API nao configurada; venda registrada apenas no log, nao enviada.");
+          ChatColor.RED
+              + "API nao configurada; venda gravada na fila local (sale_id="
+              + payload.saleId()
+              + "), nao enviada.");
       return true;
     }
 
-    dispatchAsync(payload);
     sender.sendMessage(
         ChatColor.GREEN
-            + "Venda enviada para "
+            + "Venda registrada para "
             + nickname
             + " (sale_id="
             + payload.saleId()
-            + ").");
+            + "); envio em andamento.");
     return true;
   }
 
-  /** Runs the blocking HTTP delivery off the main thread. */
-  private void dispatchAsync(SalePayload payload) {
-    plugin
-        .getServer()
-        .getScheduler()
-        .runTaskAsynchronously(plugin, () -> apiClient.deliver(payload));
+  /**
+   * Write-ahead: submits the enqueue to the SQLite queue's single-thread executor, and only once
+   * that write is durable dispatches the HTTP delivery asynchronously, applying the resulting
+   * {@link Outcome} back onto the queue row. If the API client is not configured the payload still
+   * ends up {@code pending} - nothing is lost, there is simply nothing to dispatch yet.
+   */
+  private void enqueueThenDeliver(SalePayload payload) {
+    saleQueue
+        .enqueuePending(payload)
+        .whenComplete(
+            (ignored, enqueueError) -> {
+              if (enqueueError != null) {
+                plugin
+                    .getLogger()
+                    .severe(
+                        "Falha ao gravar venda pendente na fila SQLite (sale_id="
+                            + payload.saleId()
+                            + "): "
+                            + enqueueError.getMessage());
+                return;
+              }
+              if (apiClient != null) {
+                plugin
+                    .getServer()
+                    .getScheduler()
+                    .runTaskAsynchronously(plugin, () -> attemptDelivery(payload));
+              }
+            });
+  }
+
+  /**
+   * Runs the blocking HTTP delivery off the main thread and applies the {@link Outcome} to the
+   * queue row: {@code ACK} marks it {@code sent}, {@code PERMANENT} marks it {@code
+   * failed_permanent}. {@code TRANSIENT} intentionally does nothing here - the row stays {@code
+   * pending} and a future worker (S3.3) retries it with backoff; this history does not loop.
+   */
+  private void attemptDelivery(SalePayload payload) {
+    Outcome outcome = apiClient.deliver(payload);
+    switch (outcome) {
+      case ACK -> saleQueue.markSent(payload.saleId());
+      case PERMANENT -> saleQueue.markFailedPermanent(payload.saleId());
+      case TRANSIENT -> {
+        // Stays pending; no retry loop in this history.
+      }
+    }
   }
 
   /**

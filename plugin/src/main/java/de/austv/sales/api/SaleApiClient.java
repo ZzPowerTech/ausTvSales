@@ -15,10 +15,11 @@ import java.util.logging.Logger;
  * X-Api-Key} header over the configured {@link java.net.http.HttpClient}.
  *
  * <p>{@link #deliver(SalePayload)} performs blocking network I/O and MUST be called off the server
- * main thread (the executor dispatches it via {@code runTaskAsynchronously}). The response is mapped
- * to a {@link Outcome} via {@link SaleDelivery#classify(int)} and logged; transient failures
- * (5xx / timeout / IOException) are logged with a {@code // TODO Sprint 3 (queue)} marker but not
- * yet re-enqueued.
+ * main thread (the executor dispatches it via {@code runTaskAsynchronously}). The response is
+ * mapped to an {@link Outcome} via {@link SaleDelivery#classify(int)}, logged, and returned so the
+ * caller (the SQLite fallback queue, S3.2) can act on it: {@code ACK} marks the row {@code sent},
+ * {@code PERMANENT} marks it {@code failed_permanent}, and {@code TRANSIENT} leaves it {@code
+ * pending} for a future retry.
  */
 public final class SaleApiClient {
 
@@ -32,8 +33,14 @@ public final class SaleApiClient {
     this.http = HttpClient.newBuilder().connectTimeout(config.timeout()).build();
   }
 
-  /** Synchronously delivers the payload; safe to call only from an async task. */
-  public void deliver(SalePayload payload) {
+  /**
+   * Synchronously delivers the payload; safe to call only from an async task.
+   *
+   * @return the classified {@link Outcome}. Network failures ({@link IOException}, and an
+   *     interrupted wait) are mapped to {@link Outcome#TRANSIENT} - they are retry candidates,
+   *     never a reason to drop the sale.
+   */
+  public Outcome deliver(SalePayload payload) {
     String body = SaleJson.toJson(payload);
     HttpRequest request =
         HttpRequest.newBuilder(URI.create(config.salesEndpoint()))
@@ -46,7 +53,8 @@ public final class SaleApiClient {
     try {
       HttpResponse<String> response = http.send(request, BodyHandlers.ofString());
       int status = response.statusCode();
-      switch (SaleDelivery.classify(status)) {
+      Outcome outcome = SaleDelivery.classify(status);
+      switch (outcome) {
         case ACK -> {
           // Any 2xx is a definitive ACK (contract §2.3). Our backend uses 201 for a fresh write and
           // 200 for an idempotent replay, but we don't over-claim "duplicate" from the status alone.
@@ -75,21 +83,24 @@ public final class SaleApiClient {
                     + payload.saleId()
                     + ", HTTP "
                     + status
-                    + "). // TODO Sprint 3 (queue)");
+                    + "); permanece pendente na fila para nova tentativa.");
       }
+      return outcome;
     } catch (IOException e) {
       logger.severe(
           "Falha de rede ao enviar venda (sale_id="
               + payload.saleId()
               + "): "
               + e.getMessage()
-              + ". // TODO Sprint 3 (queue)");
+              + "; permanece pendente na fila para nova tentativa.");
+      return Outcome.TRANSIENT;
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       logger.severe(
           "Envio de venda interrompido (sale_id="
               + payload.saleId()
-              + "). // TODO Sprint 3 (queue)");
+              + "); permanece pendente na fila para nova tentativa.");
+      return Outcome.TRANSIENT;
     }
   }
 }
