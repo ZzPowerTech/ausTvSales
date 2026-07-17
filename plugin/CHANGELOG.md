@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0](https://github.com/ZzPowerTech/ausTvSales/compare/plugin-v0.3.0...plugin-v0.4.0) (2026-07-17)
+
+
+### Features
+
+* **plugin:** fila de fallback SQLite com write-ahead [S3.2] ([21bd68a](https://github.com/ZzPowerTech/ausTvSales/commit/21bd68ae428e10c45b9fd15e34398c39b5cff3ce))
+* **plugin:** fila de fallback SQLite com write-ahead [S3.2] ([c77fd94](https://github.com/ZzPowerTech/ausTvSales/commit/c77fd940fb49e712ac87986b2ead29da80288d51))
+
+
+### Bug Fixes
+
+* **plugin:** ajustes do review do Copilot no PR [#62](https://github.com/ZzPowerTech/ausTvSales/issues/62) [S3.2] ([edf223b](https://github.com/ZzPowerTech/ausTvSales/commit/edf223bae064aa91a780bdeccaf4f29289800133))
+
 ## [0.3.0](https://github.com/ZzPowerTech/ausTvSales/compare/plugin-v0.2.0...plugin-v0.3.0) (2026-07-17)
 
 
