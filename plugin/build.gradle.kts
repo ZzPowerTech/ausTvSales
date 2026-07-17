@@ -23,8 +23,9 @@ dependencies {
     // compileOnly: o Paper ja fornece o Gson no classpath em runtime.
     compileOnly("com.google.code.gson:gson:2.11.0")
 
-    // Fila de fallback (Sprint 2) - habilitado desde já para desenvolvimento incremental.
-    implementation("org.xerial:sqlite-jdbc:3.47.1.0")
+    // Fila de fallback (S3.2): o driver e distribuido via plugin.yml `libraries:` (Paper baixa
+    // e disponibiliza em runtime), entao aqui e compileOnly - nao vai empacotado no jar do plugin.
+    compileOnly("org.xerial:sqlite-jdbc:3.47.1.0")
 
     testImplementation(platform("org.junit:junit-bom:5.11.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
@@ -33,6 +34,10 @@ dependencies {
     // Gson e compileOnly no main (o Paper o fornece em runtime); nos testes da serializacao
     // pura de payload precisamos dele no classpath de teste.
     testImplementation("com.google.code.gson:gson:2.11.0")
+
+    // sqlite-jdbc e compileOnly no main (Paper fornece via `libraries:` em runtime); os testes de
+    // SaleQueue precisam do driver de verdade no classpath para exercitar o SQLite real.
+    testImplementation("org.xerial:sqlite-jdbc:3.47.1.0")
 }
 
 tasks.withType<JavaCompile> {

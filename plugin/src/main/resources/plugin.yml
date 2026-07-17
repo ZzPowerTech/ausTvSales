@@ -5,6 +5,12 @@ api-version: '1.21'
 author: AusTV
 description: Registra eventos de venda de itens por cash do servidor AusTV.
 
+# Driver JDBC da fila de fallback SQLite (S3.2). O Paper baixa do Maven Central no boot e
+# disponibiliza no classpath do plugin em runtime; por isso a dependencia e compileOnly no
+# build.gradle.kts (nao vai empacotada no jar).
+libraries:
+  - org.xerial:sqlite-jdbc:3.47.1.0
+
 commands:
   austv-sales:
     description: Gerencia eventos de venda de itens por cash.
