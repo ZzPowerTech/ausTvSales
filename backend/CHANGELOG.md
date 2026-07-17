@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.4.0...backend-v0.5.0) (2026-07-17)
+
+
+### Features
+
+* **backend:** GET /items/sync para cache do plugin [S2.3] ([f3f02ca](https://github.com/ZzPowerTech/ausTvSales/commit/f3f02ca88208b27e29bf85bc4b0dca77c03a4714))
+* **backend:** GET /items/sync para cache do plugin [S2.3] ([64e2bf5](https://github.com/ZzPowerTech/ausTvSales/commit/64e2bf53a0124e6b6a577217ca91fb32a405e695))
+
+
+### Bug Fixes
+
+* **backend:** Cache-Control private no /items/sync (review Copilot [#54](https://github.com/ZzPowerTech/ausTvSales/issues/54)) ([7826d5b](https://github.com/ZzPowerTech/ausTvSales/commit/7826d5b7010b7934742643708ed451ba4d9b45cb))
+
 ## [0.4.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.3.1...backend-v0.4.0) (2026-07-17)
 
 
