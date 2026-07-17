@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.0](https://github.com/ZzPowerTech/ausTvSales/compare/plugin-v0.5.0...plugin-v0.6.0) (2026-07-17)
+
+
+### Features
+
+* **plugin:** worker de reprocessamento da fila SQLite [S3.3] ([9579304](https://github.com/ZzPowerTech/ausTvSales/commit/9579304e97da0fc03b058c8dd38b69a0aaf4d103))
+* **plugin:** worker de reprocessamento da fila SQLite [S3.3] ([bcd37b0](https://github.com/ZzPowerTech/ausTvSales/commit/bcd37b0d0d57f5bf8bb0af12eb85fa43393f94d6))
+
+
+### Bug Fixes
+
+* **plugin:** ajustes do review do Copilot no PR [#67](https://github.com/ZzPowerTech/ausTvSales/issues/67) [S3.3] ([3b3a625](https://github.com/ZzPowerTech/ausTvSales/commit/3b3a62500a373deb03591b86af62d3b2318d1eea))
+
 ## [0.5.0](https://github.com/ZzPowerTech/ausTvSales/compare/plugin-v0.4.0...plugin-v0.5.0) (2026-07-17)
 
 
