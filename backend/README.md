@@ -82,7 +82,33 @@ o decorator `@IngestAuth()` (`@Public()` para escapar do guard de sessão + `Ing
 - **Borda no Nginx** (repo de infra, fora daqui): `allow <ip da VPS do jogo>; deny all;`
   + `limit_req` no `location` do ingest. O throttler é a segunda linha se alguém furar o proxy.
 
-> Estado atual (S2.1): `POST /sales` é **stub 501** — a persistência idempotente é a S2.2.
+### `POST /sales` — persistência idempotente (S2.2)
+
+Fluxo numa transação única (`SalesService`):
+
+1. **Validação de catálogo:** busca o `item_id` em `items`. Item inexistente **ou** inativo
+   (`active = false`) → **422**, sem criar player nem venda (item inativo é erro permanente).
+2. **Upsert de player** por `player_uuid`: cria se novo; se o `nickname_at_purchase` mudou,
+   atualiza `last_known_nickname` + `updated_at` — o nick igual não dispara UPDATE.
+3. **Insert em `sales`** com `ON CONFLICT (id) DO NOTHING`: reenviar o mesmo `sale_id` não
+   duplica. `purchased_at` vem do payload; `created_at` é carimbado pelo banco.
+
+Status de sucesso: **201 Created** quando a venda é gravada agora; **200 OK** quando o
+`sale_id` já existia (reenvio idempotente). Ambos são 2xx (ACK) — a distinção é só
+observabilidade; o plugin trata os dois igual.
+
+### Contrato de status codes (insumo do worker do Sprint 3)
+
+O worker da fila SQLite decide reenfileirar ou não **pela classe do status HTTP**:
+
+| Código | Significado | Ação do plugin/worker |
+|---|---|---|
+| **2xx** (201 gravada, 200 já existia) | ACK definitivo | marcar `sent`, **não** reenfileirar |
+| **4xx** (422 item inexistente/inativo, 400 payload inválido, 401 auth) | erro **permanente** | **não** reenfileirar; logar para investigação |
+| **5xx** / timeout / sem rede | **transitório** | reenfileirar (fila SQLite chega na S3) |
+
+> Regra de ouro do worker: só reenfileira 5xx/timeout. Qualquer resposta HTTP definitiva
+> (2xx ou 4xx) encerra a tentativa daquele `sale_id`.
 
 ### Rotas de ingest
 

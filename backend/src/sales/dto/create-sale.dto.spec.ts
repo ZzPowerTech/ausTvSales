@@ -6,6 +6,7 @@ const validPayload = {
   sale_id: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
   item_id: 'caixaNatal2026',
   player_uuid: '9c858901-8a57-4791-81fe-4c455b099bc9',
+  nickname_at_purchase: 'Murilo',
   total_price: 19.9,
   qtd: 1,
   purchased_at: '2026-07-12T10:30:00.000Z',
@@ -51,6 +52,27 @@ describe('CreateSaleDto', () => {
     });
 
     expect(errors.some((error) => error.property === 'player_uuid')).toBe(true);
+  });
+
+  it('rejects an empty nickname_at_purchase', async () => {
+    const errors = await validatePayload({
+      ...validPayload,
+      nickname_at_purchase: '',
+    });
+
+    expect(
+      errors.some((error) => error.property === 'nickname_at_purchase'),
+    ).toBe(true);
+  });
+
+  it('rejects a missing nickname_at_purchase', async () => {
+    const withoutNick: Record<string, unknown> = { ...validPayload };
+    delete withoutNick.nickname_at_purchase;
+    const errors = await validatePayload(withoutNick);
+
+    expect(
+      errors.some((error) => error.property === 'nickname_at_purchase'),
+    ).toBe(true);
   });
 
   it('rejects a zero total_price', async () => {
