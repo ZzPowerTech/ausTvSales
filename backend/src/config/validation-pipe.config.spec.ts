@@ -10,6 +10,7 @@ const validPayload = {
   sale_id: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
   item_id: 'caixaNatal2026',
   player_uuid: '9c858901-8a57-4791-81fe-4c455b099bc9',
+  nickname_at_purchase: 'Murilo',
   total_price: 19.9,
   qtd: 1,
   purchased_at: '2026-07-12T10:30:00.000Z',

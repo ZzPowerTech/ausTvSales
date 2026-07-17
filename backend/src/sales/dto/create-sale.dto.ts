@@ -20,6 +20,12 @@ export class CreateSaleDto {
   @IsUUID()
   player_uuid!: string;
 
+  // Nickname snapshot at the moment of purchase (spec S2.2 §2.1). Stored verbatim
+  // on the sale for historical accuracy and used to refresh players.last_known_nickname.
+  @IsString()
+  @IsNotEmpty()
+  nickname_at_purchase!: string;
+
   @IsNumber({ maxDecimalPlaces: 2 })
   @IsPositive()
   total_price!: number;
