@@ -116,10 +116,16 @@ public final class UpdateChecker {
     try {
       worker.join(budgetMillis);
     } catch (InterruptedException e) {
+      // Propaga o cancelamento ao worker (best-effort) antes de restaurar o flag da thread atual.
+      worker.interrupt();
       Thread.currentThread().interrupt();
       return;
     }
     if (worker.isAlive()) {
+      // Estourou o orcamento: sinaliza cancelamento para o worker abortar o download em andamento
+      // (o HttpClient responde a interrupt) e limpar o *.jar.part pelo finally, em vez de segui-lo
+      // rodando as cegas — gastando rede/CPU — durante o resto do shutdown.
+      worker.interrupt();
       plugin
           .getLogger()
           .warning(

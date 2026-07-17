@@ -123,7 +123,11 @@ public final class AusTvSalesPlugin extends JavaPlugin {
                   UPDATE_SHUTDOWN_TIMEOUT_SECONDS_DEFAULT);
       new UpdateChecker(this).stageOnShutdown(java.time.Duration.ofSeconds(timeoutSeconds));
     } catch (Exception e) {
-      getLogger().warning("Falha ao preparar atualizacao no shutdown: " + e.getMessage());
+      getLogger()
+          .log(
+              java.util.logging.Level.WARNING,
+              "Falha ao preparar atualizacao no shutdown.",
+              e);
     }
   }
 
