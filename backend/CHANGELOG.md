@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.6.0...backend-v0.7.0) (2026-07-18)
+
+
+### Features
+
+* **backend:** allowlist de IP no ingest + trust proxy (ADR-0001, defesa em profundidade) ([58356af](https://github.com/ZzPowerTech/ausTvSales/commit/58356afbd0441ff903e6734de8f849e7006b2ef3))
+* **backend:** allowlist de IP no ingest + trust proxy (ADR-0001, defesa em profundidade) ([d8589ec](https://github.com/ZzPowerTech/ausTvSales/commit/d8589ec41617fb4fa6ad1953e077a7ef6b0b2993))
+
 ## [0.6.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.5.0...backend-v0.6.0) (2026-07-17)
 
 
