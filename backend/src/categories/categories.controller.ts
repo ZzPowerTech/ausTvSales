@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { CategoriesService } from './categories.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
+import { ReorderCategoriesDto } from './dto/reorder-categories.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import type { Category } from '../db/schema';
 
@@ -34,6 +35,19 @@ export class CategoriesController {
   @Get(':id')
   findOne(@Param('id', ParseIntPipe) id: number): Promise<Category> {
     return this.categoriesService.findOne(id);
+  }
+
+  /**
+   * Atomic sidebar reordering (spec S4.0).
+   *
+   * ⚠️ Declaration order matters: this must stay **above** `@Patch(':id')`.
+   * Nest matches routes in declaration order, so with `:id` first a request to
+   * `/categories/reorder` would hit `ParseIntPipe` and fail as a malformed id
+   * instead of reaching this handler. Covered by a test.
+   */
+  @Patch('reorder')
+  reorder(@Body() dto: ReorderCategoriesDto): Promise<Category[]> {
+    return this.categoriesService.reorder(dto);
   }
 
   @Patch(':id')
