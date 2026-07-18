@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.0](https://github.com/ZzPowerTech/ausTvSales/compare/frontend-v1.2.0...frontend-v1.3.0) (2026-07-18)
+
+
+### Features
+
+* **frontend:** tela de gestao de categorias [S4.2] ([4d21118](https://github.com/ZzPowerTech/ausTvSales/commit/4d21118c9accddb6089843ce3ad8ef673ea32c93)), closes [#21](https://github.com/ZzPowerTech/ausTvSales/issues/21)
+* **frontend:** tela de gestão de categorias [S4.2] ([f257d0d](https://github.com/ZzPowerTech/ausTvSales/commit/f257d0df35a3f1926753f1ce194f438c1ea0bbb2))
+
 ## [1.2.0](https://github.com/ZzPowerTech/ausTvSales/compare/frontend-v1.1.0...frontend-v1.2.0) (2026-07-18)
 
 
