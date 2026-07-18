@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.0](https://github.com/ZzPowerTech/ausTvSales/compare/frontend-v1.1.0...frontend-v1.2.0) (2026-07-18)
+
+
+### Features
+
+* **frontend:** shell com navegacao lateral e 401 global [S4.1] ([51a3d9b](https://github.com/ZzPowerTech/ausTvSales/commit/51a3d9b6c3ff9085c67c41cc7f1c88f48342f003)), closes [#20](https://github.com/ZzPowerTech/ausTvSales/issues/20)
+* **frontend:** shell com navegação lateral e 401 global [S4.1] ([aa9ab72](https://github.com/ZzPowerTech/ausTvSales/commit/aa9ab729a198a2c2bbb9e4f4837e3569abc3d93b))
+
+
+### Bug Fixes
+
+* **frontend:** corrige estado dos servicos de catalogo e 401 concorrente [S4.1] ([0872c80](https://github.com/ZzPowerTech/ausTvSales/commit/0872c80a189c89eacd98f80278d3ea8194cf57f3))
+
 ## [1.1.0](https://github.com/ZzPowerTech/ausTvSales/compare/frontend-v1.0.0...frontend-v1.1.0) (2026-07-16)
 
 
