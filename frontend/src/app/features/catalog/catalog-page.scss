@@ -1,0 +1,18 @@
+// Shared chrome for the catalog screens (S4.2 / S4.3 build on this).
+.page__eyebrow {
+  font-size: var(--text-xs);
+  letter-spacing: 0.18em;
+  color: var(--color-primary-light);
+  margin: 0 0 var(--space-3);
+}
+
+.page__title {
+  font-size: var(--text-2xl);
+  line-height: 1.12;
+  margin: 0 0 var(--space-3);
+}
+
+.page__lead {
+  color: var(--color-ink-muted);
+  margin: 0;
+}
