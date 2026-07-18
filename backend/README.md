@@ -146,6 +146,42 @@ rede por venda**.
   `ItemsController` no módulo, para a rota estática `/items/sync` casar antes da rota param
   `/items/:id` (cujo `ParseIntPipe` rejeitaria `"sync"`).
 
+## Administração do catálogo (dashboard)
+
+Rotas protegidas pela sessão do dashboard (guard global) — consumidas pelas telas do
+Sprint 4. Categoria e item **nunca** são apagados fisicamente: vendas históricas os
+referenciam por chave estrangeira.
+
+| Rota | O que faz |
+|---|---|
+| `POST/GET/PATCH /categories` | CRUD de categorias (S1.5) |
+| `PATCH /categories/reorder` | Reordenação atômica da sidebar (S4.0) |
+| `POST/GET/PATCH /items` | CRUD de itens (S1.6); `item_id` é imutável após a criação |
+
+**Unicidade de nome de categoria (S4.0)** — garantida em duas camadas:
+
+1. `CategoriesService.assertNameAvailable` pré-checa e devolve um 409 com mensagem
+   legível (é a proteção contra typo que o usuário vê no formulário).
+2. O índice único funcional `categories_name_lower_unique` (`lower(name)`) é a garantia
+   real: o par checa-depois-insere é uma corrida, e o índice fecha essa janela. Uma
+   violação `23505` é traduzida para o **mesmo 409**, nunca um 500.
+
+**`PATCH /categories/reorder` (S4.0)** — recebe o conjunto **completo** de ids na ordem
+desejada e grava `display_order` por posição, dentro de **uma transação**.
+
+```jsonc
+// PATCH /categories/reorder
+{ "order": [3, 1, 2] }   // → 200, Category[] já reordenado
+```
+
+- **Por que o conjunto completo:** um cliente defasado (segunda aba que nunca viu uma
+  categoria nova) falha com **400** em vez de gravar uma ordem com buracos.
+- **Por que transacional:** uma falha no meio deixa a ordem anterior intacta, então o
+  dashboard pode reordenar otimisticamente e reverter para um estado coerente.
+- **Convivência com `PATCH /categories/:id`:** `@Patch('reorder')` é declarado **antes**
+  de `@Patch(':id')` no controller — mesma armadilha de `/items/sync` vs `/items/:id`
+  (o `ParseIntPipe` do `:id` rejeitaria `"reorder"`). Coberto por teste e2e.
+
 ## Banco de dados (Drizzle)
 
 | Comando | O que faz |

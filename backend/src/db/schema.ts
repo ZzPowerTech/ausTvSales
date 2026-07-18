@@ -8,6 +8,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 
@@ -26,11 +27,21 @@ import {
  *   deactivated (`active = false`), never hard-deleted — historical sales stay intact.
  */
 
-export const categories = pgTable('categories', {
-  id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
-  name: text('name').notNull(),
-  displayOrder: integer('display_order').notNull().default(0),
-});
+export const categories = pgTable(
+  'categories',
+  {
+    id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+    name: text('name').notNull(),
+    displayOrder: integer('display_order').notNull().default(0),
+  },
+  (table) => [
+    // Case-insensitive uniqueness of the category name (spec S4.0). The service
+    // pre-checks to produce a friendly 409, but the check-then-insert pair is a
+    // race: this index is the data-layer guarantee that a duplicate can never
+    // land, no matter how the write arrives.
+    uniqueIndex('categories_name_lower_unique').on(sql`lower(${table.name})`),
+  ],
+);
 
 export const items = pgTable('items', {
   id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
