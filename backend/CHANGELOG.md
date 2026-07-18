@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.7.0...backend-v0.8.0) (2026-07-18)
+
+
+### Features
+
+* **backend:** unicidade de categoria no banco e reordenacao atomica [S4.0] ([bb9c352](https://github.com/ZzPowerTech/ausTvSales/commit/bb9c35205b082f01caf2bec64b30c4f20d595e44)), closes [#72](https://github.com/ZzPowerTech/ausTvSales/issues/72)
+* **backend:** unicidade de categoria no banco e reordenação atômica [S4.0] ([61b2154](https://github.com/ZzPowerTech/ausTvSales/commit/61b21541f0bf7747838fb31f9c98b4dd43886331))
+
 ## [0.7.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.6.0...backend-v0.7.0) (2026-07-18)
 
 
