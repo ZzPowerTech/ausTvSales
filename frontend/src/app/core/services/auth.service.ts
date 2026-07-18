@@ -54,10 +54,21 @@ export class AuthService {
       .pipe(
         catchError(() => of(undefined)),
         map(() => undefined),
-        tap(() => {
-          this.userSignal.set(null);
-          this.meRequest = undefined;
-        }),
+        tap(() => this.reset()),
       );
+  }
+
+  /**
+   * Drop the local session state without calling the API.
+   *
+   * Used by `authErrorInterceptor` when the server has already rejected us with
+   * a 401: the cookie is gone or expired, so asking the backend to log us out
+   * would just be a second failing round-trip. Clearing `meRequest` matters as
+   * much as the signal — otherwise the cached `/auth/me` observable would keep
+   * replaying the stale user to the next guard run.
+   */
+  reset(): void {
+    this.userSignal.set(null);
+    this.meRequest = undefined;
   }
 }

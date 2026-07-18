@@ -14,6 +14,8 @@ const ERROR_MESSAGES: Record<string, string> = {
     'Esta conta do Discord não tem acesso ao painel. Fale com o administrador.',
   oauth_failed: 'Não foi possível concluir o login com o Discord. Tente novamente.',
   invalid_request: 'Sessão de login expirada. Tente novamente.',
+  // Set by `authErrorInterceptor` when the API answers 401 mid-session.
+  session_expired: 'Sua sessão expirou. Entre novamente para continuar.',
 };
 
 @Component({

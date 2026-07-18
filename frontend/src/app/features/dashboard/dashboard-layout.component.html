@@ -1,0 +1,41 @@
+<header class="topbar">
+  <p class="u-label topbar__brand">AusTV · Sales Dashboard</p>
+  @if (user(); as currentUser) {
+    <div class="topbar__user">
+      <span class="topbar__name">{{ currentUser.username }}</span>
+      <button type="button" class="topbar__logout" (click)="logout()">
+        Sair
+      </button>
+    </div>
+  }
+</header>
+
+<div class="layout">
+  <nav class="sidenav" aria-label="Administração do catálogo">
+    <p class="u-label sidenav__heading">Catálogo</p>
+    <ul class="sidenav__list">
+      <li>
+        <a
+          class="sidenav__link"
+          routerLink="/catalog/categories"
+          routerLinkActive="sidenav__link--active"
+          ariaCurrentWhenActive="page"
+          >Categorias</a
+        >
+      </li>
+      <li>
+        <a
+          class="sidenav__link"
+          routerLink="/catalog/items"
+          routerLinkActive="sidenav__link--active"
+          ariaCurrentWhenActive="page"
+          >Itens</a
+        >
+      </li>
+    </ul>
+  </nav>
+
+  <main class="content">
+    <router-outlet />
+  </main>
+</div>
