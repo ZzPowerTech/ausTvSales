@@ -8,6 +8,7 @@ import {
   Max,
   Min,
   MinLength,
+  ValidateIf,
   validateSync,
 } from 'class-validator';
 
@@ -91,6 +92,32 @@ export class EnvironmentVariables {
       'INGEST_API_KEYS must be a comma-separated list of 64-char hex keys (openssl rand -hex 32)',
   })
   INGEST_API_KEYS!: string;
+
+  // Comma-separated list of exact source IPs allowed to reach the ingest routes
+  // (ADR-0001, defense in depth over the Nginx `allow/deny` edge rule): a leaked
+  // API key must not be enough to submit sales from anywhere but the game VPS.
+  // Required in production (fail-closed); optional in dev/test so local runs are
+  // not blocked (unset there disables the app-level allowlist). Exact IPs only —
+  // use Nginx for CIDR ranges. Per-IP well-formedness is enforced at boot by
+  // IngestIpAllowlistService; this rule only checks the comma-separated shape.
+  @ValidateIf(
+    (o: EnvironmentVariables) =>
+      o.NODE_ENV === Environment.Production ||
+      o.INGEST_ALLOWED_IPS !== undefined,
+  )
+  @Matches(/^\s*\S+\s*(,\s*\S+\s*)*$/, {
+    message:
+      'INGEST_ALLOWED_IPS must be a comma-separated list of IP addresses (required in production)',
+  })
+  INGEST_ALLOWED_IPS?: string;
+
+  // Express `trust proxy` setting, applied in main.ts so `req.ip` reflects the
+  // real client from the Nginx-supplied X-Forwarded-For (and a header forged by a
+  // direct client is ignored). A number = trust that many hops; otherwise a
+  // preset ('loopback') or a comma-separated list of trusted proxy IPs/subnets.
+  // Defaults to 'loopback' when unset. Must match how Nginx reaches the container.
+  @IsOptional()
+  TRUST_PROXY?: string;
 }
 
 export function validateEnv(

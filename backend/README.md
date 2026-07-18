@@ -79,8 +79,15 @@ o decorator `@IngestAuth()` (`@Public()` para escapar do guard de sessão + `Ing
   short-circuit entre chaves) — não vaza qual/quantas chaves casaram nem o tamanho.
 - **Rate limiting** (`@nestjs/throttler`) aplicado só ao grupo de ingest: ~10 req/s
   (calibrável em `src/ingest/ingest.throttle.ts`) → `429` ao estourar.
-- **Borda no Nginx** (repo de infra, fora daqui): `allow <ip da VPS do jogo>; deny all;`
-  + `limit_req` no `location` do ingest. O throttler é a segunda linha se alguém furar o proxy.
+- **Allowlist de IP no app** (`IngestIpAllowlistGuard`, defesa em profundidade sobre o Nginx):
+  primeiro guard do `@IngestAuth()`, roda **antes** da checagem de key — uma chave vazada é inútil
+  fora do IP da VPS do jogo. `INGEST_ALLOWED_IPS` = lista de IPs exatos (obrigatória em produção,
+  opcional em dev; vazio = desabilitada). IP de origem lido de `req.ip`, confiável porque o app
+  fixa `trust proxy` no hop do Nginx (`TRUST_PROXY`, `main.ts`) — assim um `X-Forwarded-For` forjado
+  por conexão direta é ignorado. Fora da allowlist → **403**.
+- **Borda no Nginx:** `allow <ip da VPS do jogo>; deny all;` + `limit_req` no `location` do ingest.
+  A allowlist do app é a **segunda linha** caso a regra do Nginx falte/esteja errada. Trecho de
+  referência versionado em [`docs/nginx-ingest.md`](docs/nginx-ingest.md).
 
 ### `POST /sales` — persistência idempotente (S2.2)
 

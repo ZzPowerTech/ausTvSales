@@ -7,6 +7,8 @@ import { App } from 'supertest/types';
 import { validationPipeOptions } from '../config/validation-pipe.config';
 import { IngestApiKeyGuard } from '../ingest/ingest-api-key.guard';
 import { IngestApiKeyService } from '../ingest/ingest-api-key.service';
+import { IngestIpAllowlistGuard } from '../ingest/ingest-ip-allowlist.guard';
+import { IngestIpAllowlistService } from '../ingest/ingest-ip-allowlist.service';
 import { ingestThrottlerOptions } from '../ingest/ingest.throttle';
 import { ItemsSyncController } from './items-sync.controller';
 import { ItemsService, type ItemSyncEntry } from './items.service';
@@ -29,14 +31,24 @@ describe('ItemsSyncController (GET /items/sync)', () => {
       getOrThrow: jest.fn().mockReturnValue(KEY),
     } as unknown as ConfigService;
 
+    // IP allowlist unset → disabled (allow-all); see SalesController spec note.
+    const ipConfigStub = {
+      get: jest.fn().mockReturnValue(undefined),
+    } as unknown as ConfigService;
+
     const moduleRef = await Test.createTestingModule({
       imports: [ThrottlerModule.forRoot(ingestThrottlerOptions)],
       controllers: [ItemsSyncController],
       providers: [
         IngestApiKeyGuard,
+        IngestIpAllowlistGuard,
         {
           provide: IngestApiKeyService,
           useValue: new IngestApiKeyService(configStub),
+        },
+        {
+          provide: IngestIpAllowlistService,
+          useValue: new IngestIpAllowlistService(ipConfigStub),
         },
         { provide: ItemsService, useValue: { findActiveForSync } },
       ],

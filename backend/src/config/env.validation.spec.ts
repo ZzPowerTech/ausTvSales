@@ -13,6 +13,7 @@ const AUTH_ENV = {
   ALLOWED_DISCORD_IDS: '111111111111111111,222222222222222222',
   SESSION_JWT_SECRET: 'a-session-secret-that-is-long-enough-000000',
   INGEST_API_KEYS: VALID_INGEST_KEY,
+  INGEST_ALLOWED_IPS: '203.0.113.10',
 };
 
 describe('validateEnv', () => {
@@ -162,5 +163,37 @@ describe('validateEnv', () => {
         INGEST_API_KEYS: 'g'.repeat(64),
       }),
     ).toThrow(/INGEST_API_KEYS/);
+  });
+
+  it('accepts a comma-separated INGEST_ALLOWED_IPS list', () => {
+    const result = validateEnv({
+      DATABASE_URL: VALID_DB_URL,
+      ...AUTH_ENV,
+      INGEST_ALLOWED_IPS: '203.0.113.10, 198.51.100.5',
+    });
+    expect(result.INGEST_ALLOWED_IPS).toBe('203.0.113.10, 198.51.100.5');
+  });
+
+  it('rejects a missing INGEST_ALLOWED_IPS in production (fail-closed)', () => {
+    const withoutIps: Partial<typeof AUTH_ENV> = { ...AUTH_ENV };
+    delete withoutIps.INGEST_ALLOWED_IPS;
+    expect(() =>
+      validateEnv({
+        NODE_ENV: 'production',
+        DATABASE_URL: VALID_DB_URL,
+        ...withoutIps,
+      }),
+    ).toThrow(/INGEST_ALLOWED_IPS/);
+  });
+
+  it('allows a missing INGEST_ALLOWED_IPS outside production (optional in dev)', () => {
+    const withoutIps: Partial<typeof AUTH_ENV> = { ...AUTH_ENV };
+    delete withoutIps.INGEST_ALLOWED_IPS;
+    const result = validateEnv({
+      NODE_ENV: 'development',
+      DATABASE_URL: VALID_DB_URL,
+      ...withoutIps,
+    });
+    expect(result.INGEST_ALLOWED_IPS).toBeUndefined();
   });
 });

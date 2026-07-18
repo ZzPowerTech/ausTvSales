@@ -7,6 +7,8 @@ import { App } from 'supertest/types';
 import { validationPipeOptions } from '../config/validation-pipe.config';
 import { IngestApiKeyGuard } from '../ingest/ingest-api-key.guard';
 import { IngestApiKeyService } from '../ingest/ingest-api-key.service';
+import { IngestIpAllowlistGuard } from '../ingest/ingest-ip-allowlist.guard';
+import { IngestIpAllowlistService } from '../ingest/ingest-ip-allowlist.service';
 import { ingestThrottlerOptions } from '../ingest/ingest.throttle';
 import { SalesController } from './sales.controller';
 import { SalesService } from './sales.service';
@@ -32,15 +34,27 @@ describe('SalesController (ingest)', () => {
       getOrThrow: jest.fn().mockReturnValue(KEY),
     } as unknown as ConfigService;
 
+    // IP allowlist unset → disabled (allow-all), so these tests exercise the
+    // API-key/throttler behavior over loopback without the IP guard interfering.
+    // The allowlist's own enforcement is covered by its unit specs.
+    const ipConfigStub = {
+      get: jest.fn().mockReturnValue(undefined),
+    } as unknown as ConfigService;
+
     const moduleRef = await Test.createTestingModule({
       imports: [ThrottlerModule.forRoot(ingestThrottlerOptions)],
       controllers: [SalesController],
       providers: [
         IngestApiKeyGuard,
+        IngestIpAllowlistGuard,
         { provide: SalesService, useValue: { record } },
         {
           provide: IngestApiKeyService,
           useValue: new IngestApiKeyService(configStub),
+        },
+        {
+          provide: IngestIpAllowlistService,
+          useValue: new IngestIpAllowlistService(ipConfigStub),
         },
       ],
     }).compile();
