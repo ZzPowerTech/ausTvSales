@@ -47,6 +47,209 @@ h5 {
   font-variant-numeric: tabular-nums;
 }
 
+// ============================================================ primitives
+//
+// Design-system layer shared across screens: button, input, field, notice and
+// badge. Global rather than per-component because every admin screen composes
+// the same controls — scoping them into each component duplicated the CSS and
+// pushed component styles past the `anyComponentStyle` budget.
+//
+// Rules from `styles/_tokens.scss` that these must honour:
+//   - Accent is for one primary action per screen, never data.
+//   - State is never colour-alone — pair it with a textual label.
+
+.button {
+  font-family: var(--font-label);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: var(--text-xs);
+  color: var(--color-ink-muted);
+  background: transparent;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-pill);
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+
+  &:hover:not(:disabled) {
+    color: var(--color-ink);
+    border-color: var(--color-primary-light);
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+}
+
+.button--primary {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-ink);
+
+  &:hover:not(:disabled) {
+    background: var(--color-primary-hover);
+    border-color: var(--color-primary-hover);
+  }
+}
+
+.button--danger {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+
+  &:hover:not(:disabled) {
+    background: rgba(255, 107, 107, 0.12);
+    border-color: var(--color-danger);
+    color: var(--color-danger);
+  }
+}
+
+.button--icon {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-base);
+  line-height: 1;
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  padding: var(--space-2) var(--space-3);
+
+  &::placeholder {
+    color: var(--color-ink-muted);
+  }
+
+  &:focus {
+    border-color: var(--color-primary-light);
+    outline: none;
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  // Never colour-alone: the invalid border is always paired with the textual
+  // error message rendered next to the field.
+  &[aria-invalid="true"] {
+    border-color: var(--color-danger);
+  }
+}
+
+select.input {
+  cursor: pointer;
+}
+
+.field {
+  margin-bottom: var(--space-4);
+  min-width: 0;
+}
+
+.field--inline {
+  margin-bottom: 0;
+  flex: 1;
+  max-width: 16rem;
+}
+
+.field__hint {
+  font-size: var(--text-sm);
+  color: var(--color-ink-muted);
+  margin: var(--space-2) 0 0;
+}
+
+.form__label {
+  display: block;
+  font-family: var(--font-label);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: var(--text-xs);
+  color: var(--color-ink-muted);
+  margin-bottom: var(--space-2);
+}
+
+.form__error {
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+  margin: var(--space-2) 0 0;
+}
+
+.notice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-4);
+  margin: 0 0 var(--space-4);
+  max-width: 44rem;
+  font-size: var(--text-sm);
+}
+
+.notice--error {
+  background: rgba(255, 107, 107, 0.12);
+  border: 1px solid var(--color-danger);
+  color: var(--color-danger);
+}
+
+// Confirmation before a destructive change (deactivating an item).
+.notice--warning {
+  align-items: flex-start;
+  justify-content: space-between;
+  background: rgba(255, 152, 0, 0.1);
+  border: 1px solid var(--color-warning);
+  color: var(--color-ink);
+}
+
+.notice__title {
+  font-weight: 600;
+  margin: 0 0 var(--space-2);
+}
+
+.notice__body {
+  margin: 0;
+  color: var(--color-ink-muted);
+}
+
+.notice__actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+// Status badge — always spells the state out, never colour-alone.
+.badge {
+  font-family: var(--font-label);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: var(--text-xs);
+  border-radius: var(--radius-pill);
+  padding: 2px var(--space-3);
+  border: 1px solid var(--color-success);
+  color: var(--color-success);
+}
+
+.badge--inactive {
+  border-color: var(--color-ink-muted);
+  color: var(--color-ink-muted);
+}
+
+// Inline code, for identifiers and commands shown in prose.
+code {
+  font-family: var(--font-mono);
+  background: var(--color-surface-2);
+  border-radius: var(--radius-sm);
+  padding: 0 4px;
+}
+
 a {
   color: var(--color-primary-light);
   text-decoration: underline;

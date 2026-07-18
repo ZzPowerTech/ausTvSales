@@ -47,6 +47,9 @@
   --font-display: "Montserrat", "Segoe UI", sans-serif;
   --font-body: "Roboto", system-ui, sans-serif;
   --font-label: "Roboto Condensed", "Arial Narrow", sans-serif;
+  // Identifiers and commands (item_id, the reward line). A fixed pitch makes a
+  // typo in an opaque key visible, which is the whole point of showing them.
+  --font-mono: ui-monospace, "Cascadia Mono", "Consolas", monospace;
 
   // Type scale
   --text-xs: 0.75rem; // 12px — labels, badges

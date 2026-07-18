@@ -1,0 +1,274 @@
+<h1 class="page__title">Itens</h1>
+<p class="page__lead">
+  Um item precisa estar cadastrado e ativo antes de qualquer venda dele ser
+  aceita.
+</p>
+
+<form class="form" (submit)="create(); $event.preventDefault()">
+  <div class="field">
+    <label class="form__label" for="new-item-id">Identificador (item_id)</label>
+    <input
+      id="new-item-id"
+      class="input"
+      type="text"
+      autocomplete="off"
+      placeholder="Ex.: caixaNatal2026"
+      [value]="newItemId()"
+      (input)="newItemId.set($any($event.target).value)"
+      [attr.aria-invalid]="newItemId() && !itemIdValid() ? 'true' : null"
+      [attr.aria-describedby]="'item-id-hint'"
+    />
+    <p class="field__hint" id="item-id-hint">
+      Letras, números, <code>_</code> e <code>-</code>. Sem espaços. Não pode ser
+      alterado depois — vendas históricas apontam para ele.
+    </p>
+    @if (newItemId() && !itemIdValid()) {
+      <p class="form__error" role="alert">
+        Identificador inválido. Comece com letra ou número e evite espaços.
+      </p>
+    }
+  </div>
+
+  <div class="field">
+    <label class="form__label" for="new-item-name">Nome exibido</label>
+    <input
+      id="new-item-name"
+      class="input"
+      type="text"
+      autocomplete="off"
+      placeholder="Ex.: Caixa de Natal 2026"
+      [value]="newDisplayName()"
+      (input)="newDisplayName.set($any($event.target).value)"
+    />
+  </div>
+
+  <div class="field">
+    <label class="form__label" for="new-item-category">Categoria</label>
+    <select
+      id="new-item-category"
+      class="input"
+      [value]="newCategoryId() ?? ''"
+      (change)="newCategoryId.set(+$any($event.target).value || null)"
+    >
+      <option value="">Selecione uma categoria</option>
+      @for (category of categoryList(); track category.id) {
+        <option [value]="category.id">{{ category.name }}</option>
+      }
+    </select>
+    @if (categoryList().length === 0) {
+      <p class="field__hint">
+        Nenhuma categoria cadastrada. Crie uma em <strong>Categorias</strong>
+        antes de cadastrar itens.
+      </p>
+    }
+  </div>
+
+  <button class="button button--primary" type="submit" [disabled]="!canCreate()">
+    Cadastrar item
+  </button>
+
+  @if (createError(); as message) {
+    <p class="form__error" role="alert">{{ message }}</p>
+  }
+</form>
+
+@if (justCreated(); as created) {
+  <div class="helper" role="status">
+    <p class="helper__title">
+      Item <strong>{{ created.displayName }}</strong> cadastrado.
+    </p>
+    <p class="helper__lead">
+      Cole este comando no reward da crate no Genesis:
+    </p>
+    <div class="helper__row">
+      <code class="helper__command">{{ rewardCommand() }}</code>
+      <button class="button" type="button" (click)="copyCommand()">
+        {{ commandCopied() ? 'Copiado' : 'Copiar' }}
+      </button>
+      <button class="button" type="button" (click)="dismissCreated()">
+        Fechar
+      </button>
+    </div>
+  </div>
+}
+
+@if (listError(); as message) {
+  <div class="notice notice--error" role="alert">
+    <span>{{ message }}</span>
+    <button class="button" type="button" (click)="load()">Tentar de novo</button>
+  </div>
+}
+
+@if (pendingDeactivation(); as item) {
+  <div class="notice notice--warning" role="alertdialog">
+    <div>
+      <p class="notice__title">Desativar "{{ item.displayName }}"?</p>
+      <p class="notice__body">
+        Vendas novas com o identificador <code>{{ item.itemId }}</code> passarão
+        a ser <strong>rejeitadas</strong>, tanto pelo plugin quanto pela API.
+        Vendas já registradas não são afetadas.
+      </p>
+    </div>
+    <div class="notice__actions">
+      <button
+        class="button button--danger"
+        type="button"
+        [disabled]="busy()"
+        (click)="confirmDeactivation()"
+      >
+        Desativar
+      </button>
+      <button class="button" type="button" (click)="cancelDeactivation()">
+        Cancelar
+      </button>
+    </div>
+  </div>
+}
+
+<div class="filters">
+  <div class="field field--inline">
+    <label class="form__label" for="filter-category">Filtrar por categoria</label>
+    <select
+      id="filter-category"
+      class="input"
+      [value]="filterCategoryId() ?? ''"
+      (change)="filterCategoryId.set(+$any($event.target).value || null)"
+    >
+      <option value="">Todas</option>
+      @for (category of categoryList(); track category.id) {
+        <option [value]="category.id">{{ category.name }}</option>
+      }
+    </select>
+  </div>
+
+  <div class="field field--inline">
+    <label class="form__label" for="filter-status">Status</label>
+    <select
+      id="filter-status"
+      class="input"
+      [value]="filterStatus()"
+      (change)="filterStatus.set($any($event.target).value)"
+    >
+      <option value="all">Todos</option>
+      <option value="active">Ativos</option>
+      <option value="inactive">Inativos</option>
+    </select>
+  </div>
+</div>
+
+@if (loaded() && allItems().length === 0) {
+  <p class="empty">Nenhum item cadastrado ainda.</p>
+} @else if (loaded() && visibleItems().length === 0) {
+  <p class="empty">Nenhum item corresponde aos filtros selecionados.</p>
+}
+
+@if (visibleItems().length > 0) {
+  <ul class="rows">
+    @for (item of visibleItems(); track item.id) {
+      <li class="row">
+        @if (editingId() === item.id) {
+          <div class="row__edit row__edit--stacked">
+            <div class="field">
+              <label class="form__label" [attr.for]="'edit-name-' + item.id">
+                Nome exibido
+              </label>
+              <input
+                [id]="'edit-name-' + item.id"
+                class="input"
+                type="text"
+                [value]="editingName()"
+                (input)="editingName.set($any($event.target).value)"
+              />
+            </div>
+            <div class="field">
+              <label class="form__label" [attr.for]="'edit-category-' + item.id">
+                Categoria
+              </label>
+              <select
+                [id]="'edit-category-' + item.id"
+                class="input"
+                [value]="editingCategoryId() ?? ''"
+                (change)="
+                  editingCategoryId.set(+$any($event.target).value || null)
+                "
+              >
+                @for (category of categoryList(); track category.id) {
+                  <option [value]="category.id">{{ category.name }}</option>
+                }
+              </select>
+            </div>
+            <div class="field">
+              <label class="form__label" [attr.for]="'edit-id-' + item.id">
+                Identificador (não editável)
+              </label>
+              <input
+                [id]="'edit-id-' + item.id"
+                class="input"
+                type="text"
+                [value]="item.itemId"
+                disabled
+              />
+            </div>
+            <div class="row__actions">
+              <button
+                class="button button--primary"
+                type="button"
+                [disabled]="busy()"
+                (click)="saveEditing()"
+              >
+                Salvar
+              </button>
+              <button class="button" type="button" (click)="cancelEditing()">
+                Cancelar
+              </button>
+            </div>
+            @if (editError(); as message) {
+              <p class="form__error" role="alert">{{ message }}</p>
+            }
+          </div>
+        } @else {
+          <div class="row__main">
+            <span class="row__name">{{ item.displayName }}</span>
+            <code class="row__id">{{ item.itemId }}</code>
+            <span class="row__meta">{{ categoryName(item.categoryId) }}</span>
+            <!-- State is never colour-alone: the badge carries the word too. -->
+            <span
+              class="badge"
+              [class.badge--inactive]="!item.active"
+              >{{ item.active ? 'Ativo' : 'Inativo' }}</span
+            >
+          </div>
+          <div class="row__actions">
+            <button
+              class="button"
+              type="button"
+              [disabled]="busy()"
+              (click)="startEditing(item)"
+            >
+              Editar
+            </button>
+            @if (item.active) {
+              <button
+                class="button"
+                type="button"
+                [disabled]="busy()"
+                (click)="askToDeactivate(item)"
+              >
+                Desativar
+              </button>
+            } @else {
+              <button
+                class="button"
+                type="button"
+                [disabled]="busy()"
+                (click)="activate(item)"
+              >
+                Ativar
+              </button>
+            }
+          </div>
+        }
+      </li>
+    }
+  </ul>
+}
