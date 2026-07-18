@@ -1,6 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { Observable, map, switchMap, tap } from 'rxjs';
+import { Observable, catchError, map, switchMap, tap, throwError } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
 import {
@@ -68,13 +68,31 @@ export class CategoriesService {
    * protects a stale tab from writing an order with holes in it.
    *
    * The response is already the full reordered list, so this needs no refetch.
+   *
+   * Applied **optimistically**: the list moves under the user's finger and is
+   * rolled back wholesale if the request fails. That is only safe because the
+   * backend writes the new order in one transaction — there is no partial
+   * server state for the rollback to disagree with.
    */
   reorder(orderedIds: number[]): Observable<Category[]> {
+    const previous = this.categoriesSignal();
+    const byId = new Map(previous.map((c) => [c.id, c]));
+    const optimistic = orderedIds
+      .map((id) => byId.get(id))
+      .filter((c): c is Category => c !== undefined);
+    this.categoriesSignal.set(optimistic);
+
     return this.http
       .patch<Category[]>(`${this.baseUrl}/categories/reorder`, {
         order: orderedIds,
       })
-      .pipe(tap((categories) => this.categoriesSignal.set(categories)));
+      .pipe(
+        tap((categories) => this.categoriesSignal.set(categories)),
+        catchError((error: unknown) => {
+          this.categoriesSignal.set(previous);
+          return throwError(() => error);
+        }),
+      );
   }
 
   /** Re-read the list after a mutation, still handing the caller its entity. */

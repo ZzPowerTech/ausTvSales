@@ -1,0 +1,112 @@
+<h1 class="page__title">Categorias</h1>
+<p class="page__lead">
+  A ordem definida aqui é a ordem da sidebar do painel.
+</p>
+
+<form class="form" (submit)="create(); $event.preventDefault()">
+  <label class="form__label" for="new-category">Nova categoria</label>
+  <div class="form__row">
+    <input
+      id="new-category"
+      class="input"
+      type="text"
+      autocomplete="off"
+      placeholder="Ex.: Caixas"
+      [value]="newName()"
+      (input)="newName.set($any($event.target).value)"
+      [attr.aria-invalid]="createError() ? 'true' : null"
+      [attr.aria-describedby]="createError() ? 'create-error' : null"
+    />
+    <button class="button button--primary" type="submit" [disabled]="!canCreate()">
+      Adicionar
+    </button>
+  </div>
+  @if (createError(); as message) {
+    <p class="form__error" id="create-error" role="alert">{{ message }}</p>
+  }
+</form>
+
+@if (listError(); as message) {
+  <div class="notice notice--error" role="alert">
+    <span>{{ message }}</span>
+    <button class="button" type="button" (click)="load()">Tentar de novo</button>
+  </div>
+}
+
+@if (reorderError(); as message) {
+  <p class="notice notice--error" role="alert">{{ message }}</p>
+}
+
+@if (loaded() && categories().length === 0) {
+  <p class="empty">
+    Nenhuma categoria cadastrada ainda. Crie a primeira acima — itens só podem
+    ser cadastrados dentro de uma categoria.
+  </p>
+}
+
+@if (categories().length > 0) {
+  <ul class="rows">
+    @for (category of categories(); track category.id; let i = $index) {
+      <li class="row">
+        @if (editingId() === category.id) {
+          <div class="row__edit">
+            <input
+              class="input"
+              type="text"
+              aria-label="Novo nome da categoria"
+              [value]="editingName()"
+              (input)="editingName.set($any($event.target).value)"
+              (keydown.enter)="saveEditing()"
+              (keydown.escape)="cancelEditing()"
+              [attr.aria-invalid]="editError() ? 'true' : null"
+            />
+            <button
+              class="button button--primary"
+              type="button"
+              [disabled]="busy()"
+              (click)="saveEditing()"
+            >
+              Salvar
+            </button>
+            <button class="button" type="button" (click)="cancelEditing()">
+              Cancelar
+            </button>
+          </div>
+          @if (editError(); as message) {
+            <p class="form__error" role="alert">{{ message }}</p>
+          }
+        } @else {
+          <span class="row__name">{{ category.name }}</span>
+          <div class="row__actions">
+            <button
+              class="button button--icon"
+              type="button"
+              [attr.aria-label]="'Mover ' + category.name + ' para cima'"
+              [disabled]="i === 0 || busy()"
+              (click)="move(i, -1)"
+            >
+              ↑
+            </button>
+            <button
+              class="button button--icon"
+              type="button"
+              [attr.aria-label]="'Mover ' + category.name + ' para baixo'"
+              [disabled]="i === categories().length - 1 || busy()"
+              (click)="move(i, 1)"
+            >
+              ↓
+            </button>
+            <button
+              class="button"
+              type="button"
+              [disabled]="busy()"
+              (click)="startEditing(category)"
+            >
+              Renomear
+            </button>
+          </div>
+        }
+      </li>
+    }
+  </ul>
+}

@@ -8,7 +8,6 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
   selector: 'app-items-page',
   imports: [],
   template: `
-    <p class="u-label page__eyebrow">Catálogo</p>
     <h1 class="page__title">Itens</h1>
     <p class="page__lead">
       O cadastro de itens e os filtros por categoria e status chegam na S4.3.
