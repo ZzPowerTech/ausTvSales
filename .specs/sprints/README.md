@@ -46,7 +46,7 @@ Sprint 6  Migração histórica + cutover no Genesis + validação de segurança
 | CA3 | Sidebar por categoria dinâmica (tabela `categories`) | S5.2 |
 | CA4 | Por item, top 5 jogadores com mais compras (nickname atual) | S5.1, S5.3 |
 | CA5 | Gráfico de vendas por item ao longo do tempo, granularidade de evento | S5.1, S5.4 |
-| CA6 | Cadastro manual de item/categoria funcional antes de aceitar vendas | S1.4, S1.5, S1.6, S4.1, S4.2, S4.3 |
+| CA6 | Cadastro manual de item/categoria funcional antes de aceitar vendas | S1.4, S1.5, S1.6, S4.0, S4.1, S4.2, S4.3 |
 | CA7 | Migração histórica única, `historical_import = true`, fora da série temporal | S6.1 (+ regra de exclusão em S5.1/S5.4) |
 | CA8 | Comunicação plugin→API autenticada, validada pelo `cybersecurity-validator` | S1.3 (spike), S2.1, S6.3 (validação final) |
 | CA9 | Comandos antigos do MyCommand removidos dos rewards do Genesis | S6.2 |
@@ -57,7 +57,7 @@ Sprint 6  Migração histórica + cutover no Genesis + validação de segurança
 |---|---|---|
 | Mecanismo exato de auth plugin→API (API key vs mTLS) | **S1.3 (spike)** — decisão registrada em ADR | 1 |
 | Confirmar NTP sincronizado nas duas VPS | **S1.7 (tarefa ops)** + re-checagem em S6.3 | 1 e 6 |
-| Desenhar tela de cadastro (permissões, fluxo) | **S4.1** (decisão de permissões) + S4.2/S4.3 | 4 |
+| Desenhar tela de cadastro (permissões, fluxo) | **S4.1** — decisão registrada em [ADR-0002](../decisions/ADR-0002-permissoes-dashboard.md) ✅ + S4.2/S4.3 | 4 |
 
 ## Backlog priorizado (visão macro)
 
@@ -75,7 +75,7 @@ Sprint 6  Migração histórica + cutover no Genesis + validação de segurança
 - [sprint-01.md](sprint-01.md) — Fundação: schema, API de catálogo e decisões de segurança
 - [sprint-02.md](sprint-02.md) — Ingestão de vendas autenticada + comando do plugin
 - [sprint-03.md](sprint-03.md) — Resiliência do plugin: cache, fila SQLite e reenvio
-- [sprint-04.md](sprint-04.md) — Dashboard: auth e cadastro de catálogo
+- [sprint-04.md](sprint-04.md) — Dashboard: administração de catálogo *(escopo revisado em 2026-07-18)*
 - [sprint-05.md](sprint-05.md) — Dashboard: visualização (sidebar, ranking, gráfico)
 - [sprint-06.md](sprint-06.md) — Migração histórica, cutover e go-live
 
