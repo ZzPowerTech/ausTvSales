@@ -9,6 +9,7 @@ novo ADR que substitui (`Substitui: ADR-XXXX`) o anterior.
 | # | Título | Status |
 |---|---|---|
 | [ADR-0001](ADR-0001-auth-plugin-api.md) | Autenticação plugin→API (API key vs mTLS) | Aceito (2026-07-16) |
+| [ADR-0002](ADR-0002-permissoes-dashboard.md) | Modelo de permissões do dashboard (admin único) | Aceito (2026-07-18) |
 | [S1.7](S1.7-verificacao-ntp.md) | Verificação de NTP nas duas VPS (runbook) | Verificado — sincronizado nas duas VPS |
 
 ## Convenção de status
