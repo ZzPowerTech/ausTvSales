@@ -16,6 +16,10 @@ import { AuthService } from '../services/auth.service';
  * "not signed in" and is already handled by `AuthService.ensureLoaded()`; the
  * guard turns it into a redirect. Reacting here as well would fire a second,
  * competing navigation during boot.
+ *
+ * Tearing down is **idempotent**: a screen that loads categories and items in
+ * parallel gets two 401s at once, and without the guard below each would fire
+ * its own `navigate`, cancelling the other mid-flight.
  */
 export const authErrorInterceptor: HttpInterceptorFn = (req, next) => {
   const auth = inject(AuthService);
@@ -24,7 +28,13 @@ export const authErrorInterceptor: HttpInterceptorFn = (req, next) => {
   return next(req).pipe(
     catchError((error: unknown) => {
       const isSessionProbe = req.url.endsWith('/auth/me');
-      if (error instanceof HttpErrorResponse && error.status === 401 && !isSessionProbe) {
+      const isUnauthorized =
+        error instanceof HttpErrorResponse && error.status === 401;
+      // `null` means the session was already torn down by an earlier 401;
+      // `undefined` (still resolving) and a real user both need handling.
+      const alreadySignedOut = auth.user() === null;
+
+      if (isUnauthorized && !isSessionProbe && !alreadySignedOut) {
         auth.reset();
         void router.navigate(['/login'], {
           queryParams: { error: 'session_expired' },

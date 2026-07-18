@@ -28,9 +28,10 @@ describe('CategoriesService', () => {
 
   afterEach(() => controller.verify());
 
-  it('keeps the list sorted by display_order, then name', () => {
+  it('stores the list exactly as the API ordered it', () => {
     service.list().subscribe();
-    controller.expectOne(`${base}/categories`).flush([CAIXAS, VIP]);
+    // The server owns the ordering rule; the client must not re-sort.
+    controller.expectOne(`${base}/categories`).flush([VIP, CAIXAS]);
 
     expect(service.categories().map((c) => c.name)).toEqual(['VIP', 'Caixas']);
     expect(service.loaded()).toBeTrue();
@@ -44,26 +45,43 @@ describe('CategoriesService', () => {
     expect(service.byId().get(99)).toBeUndefined();
   });
 
-  it('adds a created category to local state', () => {
-    service.list().subscribe();
-    controller.expectOne(`${base}/categories`).flush([VIP]);
+  it('re-reads the list after a create, and returns the created entity', () => {
+    let returned: Category | undefined;
+    service.create({ name: 'Caixas' }).subscribe((c) => (returned = c));
 
-    service.create({ name: 'Caixas' }).subscribe();
     controller.expectOne(`${base}/categories`).flush(CAIXAS);
+    // The refetch is what establishes the order, not a client-side splice.
+    controller.expectOne(`${base}/categories`).flush([VIP, CAIXAS]);
 
+    expect(returned).toEqual(CAIXAS);
     expect(service.categories().map((c) => c.name)).toEqual(['VIP', 'Caixas']);
   });
 
-  it('replaces the renamed category in place', () => {
-    service.list().subscribe();
+  it('does not mark the catalog loaded from a create alone', () => {
+    // Regression: `loaded` used to be set by every mutation, so a create that
+    // landed before the initial list made one row look like the whole catalog.
+    service.create({ name: 'Caixas' }).subscribe();
+    controller.expectOne(`${base}/categories`).flush(CAIXAS);
+
+    expect(service.loaded()).toBeFalse();
+
     controller.expectOne(`${base}/categories`).flush([CAIXAS]);
+    expect(service.loaded()).toBeTrue();
+  });
 
-    service.update(1, { name: 'Caixas de Natal' }).subscribe();
-    controller
-      .expectOne(`${base}/categories/1`)
-      .flush({ ...CAIXAS, name: 'Caixas de Natal' });
+  it('keeps an updated category that was never in local state', () => {
+    // Regression: mapping over an empty local list silently dropped the row.
+    let returned: Category | undefined;
+    service
+      .update(1, { name: 'Caixas de Natal' })
+      .subscribe((c) => (returned = c));
 
-    expect(service.categories()[0].name).toBe('Caixas de Natal');
+    const renamed = { ...CAIXAS, name: 'Caixas de Natal' };
+    controller.expectOne(`${base}/categories/1`).flush(renamed);
+    controller.expectOne(`${base}/categories`).flush([renamed]);
+
+    expect(returned).toEqual(renamed);
+    expect(service.categories()).toEqual([renamed]);
   });
 
   it('sends the complete id set to the atomic reorder endpoint', () => {
@@ -73,6 +91,7 @@ describe('CategoriesService', () => {
     expect(req.request.method).toBe('PATCH');
     expect(req.request.body).toEqual({ order: [2, 1] });
 
+    // The response is already the full reordered list — no refetch needed.
     req.flush([
       { ...VIP, displayOrder: 0 },
       { ...CAIXAS, displayOrder: 1 },
@@ -88,7 +107,10 @@ describe('CategoriesService', () => {
     service.reorder([1, 2]).subscribe({ error: () => undefined });
     controller
       .expectOne(`${base}/categories/reorder`)
-      .flush({ message: 'Bad Request' }, { status: 400, statusText: 'Bad Request' });
+      .flush(
+        { message: 'Bad Request' },
+        { status: 400, statusText: 'Bad Request' },
+      );
 
     expect(service.categories()).toBe(before);
   });

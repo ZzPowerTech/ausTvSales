@@ -8,30 +8,40 @@ import {
   provideHttpClientTesting,
 } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
+import { signal } from '@angular/core';
 import { Router } from '@angular/router';
 
+import { AuthUser } from '../models/auth-user.model';
 import { environment } from '../../../environments/environment';
 import { AuthService } from '../services/auth.service';
 import { authErrorInterceptor } from './auth-error.interceptor';
+
+const USER: AuthUser = {
+  discordId: '111111111111111111',
+  username: 'Murilo',
+  avatar: null,
+};
 
 describe('authErrorInterceptor', () => {
   let http: HttpClient;
   let controller: HttpTestingController;
   let navigate: jasmine.Spy;
   let reset: jasmine.Spy;
+  let user: ReturnType<typeof signal<AuthUser | null | undefined>>;
 
   const base = environment.apiBaseUrl;
 
   beforeEach(() => {
     navigate = jasmine.createSpy('navigate').and.resolveTo(true);
-    reset = jasmine.createSpy('reset');
+    user = signal<AuthUser | null | undefined>(USER);
+    reset = jasmine.createSpy('reset').and.callFake(() => user.set(null));
 
     TestBed.configureTestingModule({
       providers: [
         provideHttpClient(withInterceptors([authErrorInterceptor])),
         provideHttpClientTesting(),
         { provide: Router, useValue: { navigate } },
-        { provide: AuthService, useValue: { reset } },
+        { provide: AuthService, useValue: { reset, user } },
       ],
     });
 
@@ -85,6 +95,34 @@ describe('authErrorInterceptor', () => {
     controller
       .expectOne(`${base}/categories`)
       .flush({ message: 'Boom' }, { status: 500, statusText: 'Server Error' });
+  });
+
+  it('tears down only once when parallel requests all 401', (done) => {
+    // Regression: the S4.3 screen loads categories and items together. Without
+    // an idempotence guard each 401 fired its own navigate, cancelling the
+    // other mid-flight.
+    let errors = 0;
+    const settle = (): void => {
+      if (++errors === 2) {
+        expect(reset).toHaveBeenCalledTimes(1);
+        expect(navigate).toHaveBeenCalledTimes(1);
+        done();
+      }
+    };
+
+    http.get(`${base}/categories`).subscribe({ error: settle });
+    http.get(`${base}/items`).subscribe({ error: settle });
+
+    const unauthorized = {
+      status: 401,
+      statusText: 'Unauthorized',
+    };
+    controller
+      .expectOne(`${base}/categories`)
+      .flush({ message: 'Unauthorized' }, unauthorized);
+    controller
+      .expectOne(`${base}/items`)
+      .flush({ message: 'Unauthorized' }, unauthorized);
   });
 
   it('re-throws the error so callers can still handle it', (done) => {
