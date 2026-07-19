@@ -1,4 +1,10 @@
-import { ArrayNotEmpty, ArrayUnique, IsArray, IsInt, Min } from 'class-validator';
+import {
+  ArrayNotEmpty,
+  ArrayUnique,
+  IsArray,
+  IsInt,
+  Min,
+} from 'class-validator';
 
 /**
  * Atomic reordering of the sidebar (spec S4.0).

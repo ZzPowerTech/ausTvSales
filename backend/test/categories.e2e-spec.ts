@@ -136,7 +136,10 @@ describe('Categories (e2e)', () => {
     };
 
     it('requires authentication (401)', async () => {
-      await http().patch('/categories/reorder').send({ order: [1] }).expect(401);
+      await http()
+        .patch('/categories/reorder')
+        .send({ order: [1] })
+        .expect(401);
     });
 
     it('routes /categories/reorder to the reorder handler, not to :id', async () => {
@@ -160,11 +163,9 @@ describe('Categories (e2e)', () => {
         .send({ order: [vip, extras, caixas] })
         .expect(200);
 
-      expect((reordered.body as Array<{ name: string }>).map((c) => c.name)).toEqual([
-        'VIP',
-        'Extras',
-        'Caixas',
-      ]);
+      expect(
+        (reordered.body as Array<{ name: string }>).map((c) => c.name),
+      ).toEqual(['VIP', 'Extras', 'Caixas']);
       // And the order survives a fresh read.
       await expect(listNames()).resolves.toEqual(['VIP', 'Extras', 'Caixas']);
     });
