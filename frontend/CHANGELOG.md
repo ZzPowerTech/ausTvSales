@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.0](https://github.com/ZzPowerTech/ausTvSales/compare/frontend-v1.3.0...frontend-v1.4.0) (2026-07-18)
+
+
+### Features
+
+* **frontend:** tela de gestao de itens [S4.3] ([af5505b](https://github.com/ZzPowerTech/ausTvSales/commit/af5505b2c51c8e7f32f4743a7f5c840cbacf0199)), closes [#22](https://github.com/ZzPowerTech/ausTvSales/issues/22)
+* **frontend:** tela de gestão de itens [S4.3] ([92efc4f](https://github.com/ZzPowerTech/ausTvSales/commit/92efc4ff871fd96238ce3ab19b63eec7e523884a))
+
 ## [1.3.0](https://github.com/ZzPowerTech/ausTvSales/compare/frontend-v1.2.0...frontend-v1.3.0) (2026-07-18)
 
 
