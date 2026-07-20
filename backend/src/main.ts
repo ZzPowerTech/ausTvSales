@@ -6,19 +6,8 @@ import cookieParser from 'cookie-parser';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { AppModule } from './app.module';
 import { validationPipeOptions } from './config/validation-pipe.config';
+import { resolveTrustProxy } from './config/trust-proxy';
 import { DRIZZLE, type DrizzleDB } from './db/database.module';
-
-/**
- * Parses the `TRUST_PROXY` env into an Express `trust proxy` value: a bare
- * integer becomes the hop count; anything else ('loopback', an IP, a
- * comma-separated list of trusted proxies) is passed through as-is. Defaults to
- * 'loopback'. This governs how `req.ip` is derived from `X-Forwarded-For`, which
- * the ingest IP allowlist relies on being trustworthy (ADR-0001).
- */
-function resolveTrustProxy(raw: string | undefined): string | number {
-  const value = (raw ?? 'loopback').trim();
-  return /^\d+$/.test(value) ? Number(value) : value;
-}
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -27,9 +16,18 @@ async function bootstrap() {
   // Trust only the Nginx hop so req.ip is the real client from X-Forwarded-For
   // and a forged header from a direct connection is ignored — the ingest IP
   // allowlist (ADR-0001) is only as trustworthy as this setting.
-  app.set(
-    'trust proxy',
-    resolveTrustProxy(configService.get<string>('TRUST_PROXY')),
+  const trustProxy = resolveTrustProxy(
+    configService.get<string>('TRUST_PROXY'),
+  );
+  app.set('trust proxy', trustProxy);
+
+  // Logado no boot de proposito: este valor decide de onde sai o `req.ip` que a
+  // allowlist de ingest compara, e um valor errado se manifesta la na frente
+  // como um 403 em trafego legitimo — sem nada no boot que aponte para ca.
+  Logger.log(
+    `Trust proxy: ${JSON.stringify(trustProxy)} ` +
+      '(define o req.ip usado pela allowlist de ingest)',
+    'Bootstrap',
   );
 
   // Aplica migrations pendentes no boot. O drizzle-kit (CLI) e devDependency e

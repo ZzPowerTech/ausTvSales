@@ -35,11 +35,54 @@ export class IngestIpAllowlistGuard implements CanActivate {
 
     if (!this.allowlist.isAllowed(ip)) {
       this.logger.warn(
-        `Rejected ingest request ${request.method} ${request.originalUrl} from ${ip ?? 'unknown'}: source IP not in allowlist`,
+        `Rejected ingest request ${request.method} ${request.originalUrl} from ${ip ?? 'unknown'}: source IP not in allowlist${IngestIpAllowlistGuard.proxyHint(ip)}`,
       );
       throw new ForbiddenException();
     }
 
     return true;
+  }
+
+  /**
+   * A private/loopback address here almost never means "a foreign caller was
+   * blocked" — it means the app is reading the proxy hop instead of the real
+   * client, i.e. `trust proxy` does not match how the proxy reaches this
+   * process. That is a config mistake whose symptom is legitimate traffic being
+   * refused, so the log points at it directly instead of leaving the operator to
+   * recognise a bridge-gateway address on their own.
+   */
+  private static proxyHint(ip: string | undefined): string {
+    if (!ip || !IngestIpAllowlistGuard.isPrivateAddress(ip)) {
+      return '';
+    }
+    return (
+      ' — endereco privado/loopback: provavelmente o proxy, nao o cliente real.' +
+      ' Verifique TRUST_PROXY (logado no boot) e se o proxy envia X-Forwarded-For'
+    );
+  }
+
+  /** RFC1918 and loopback, including their IPv4-mapped IPv6 forms. */
+  private static isPrivateAddress(ip: string): boolean {
+    const value = ip.trim().toLowerCase();
+    const bare = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(value)?.[1] ?? value;
+
+    if (bare === '::1') {
+      return true;
+    }
+
+    const octets = bare.split('.');
+    if (octets.length !== 4) {
+      return false;
+    }
+    const [a, b] = octets.map(Number);
+    if (!Number.isInteger(a) || !Number.isInteger(b)) {
+      return false;
+    }
+    return (
+      a === 127 ||
+      a === 10 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168)
+    );
   }
 }
