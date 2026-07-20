@@ -76,4 +76,8 @@ Lista completa em [`.specs/project/PROJECT.md`](.specs/project/PROJECT.md) seç�
 
 ## Estado atual
 
-Fase 1 (SDD) concluída — spec aprovado. Próximo passo: quebra em sprints (`scrum-master`).
+Sprints 1–4 entregues (fundação + ingestão + resiliência do plugin + administração de catálogo
+no dashboard). **Sprint 5 em planejamento aprovado** (visualização: navegação de análise, ranking
+top 5, gráfico temporal) — plano em [`.specs/sprints/sprint-05.md`](.specs/sprints/sprint-05.md),
+design em [`.specs/features/sprint-05-dashboard-analytics/spec.md`](.specs/features/sprint-05-dashboard-analytics/spec.md).
+Próximo passo: implementar a S5.0 (gerador de vendas sintéticas), primeiro PR do sprint.
