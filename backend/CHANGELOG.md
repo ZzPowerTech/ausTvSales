@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.8.1...backend-v0.9.0) (2026-07-20)
+
+
+### Features
+
+* **backend:** gerador de vendas sinteticas [S5.0] ([b02d1ac](https://github.com/ZzPowerTech/ausTvSales/commit/b02d1ac70c6a729ea03a4cb6a15f5281e6bf4d2f))
+* **backend:** gerador de vendas sinteticas [S5.0] ([c16a4d8](https://github.com/ZzPowerTech/ausTvSales/commit/c16a4d8e26d44c1b593eb5cd8550d8868e980f3a))
+
 ## [0.8.1](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.8.0...backend-v0.8.1) (2026-07-20)
 
 
