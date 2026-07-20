@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.0](https://github.com/ZzPowerTech/ausTvSales/compare/frontend-v1.4.0...frontend-v1.5.0) (2026-07-20)
+
+
+### Features
+
+* **frontend:** navegacao de analise por categoria [S5.2] ([c9d3a2f](https://github.com/ZzPowerTech/ausTvSales/commit/c9d3a2f93f05072d29265641885b73921b426dec))
+* **frontend:** navegacao de analise por categoria [S5.2] ([46d3894](https://github.com/ZzPowerTech/ausTvSales/commit/46d3894deddd327e231edb9a66760586d206bb18))
+
 ## [1.4.0](https://github.com/ZzPowerTech/ausTvSales/compare/frontend-v1.3.0...frontend-v1.4.0) (2026-07-18)
 
 
