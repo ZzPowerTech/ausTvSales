@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.1](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.8.0...backend-v0.8.1) (2026-07-20)
+
+
+### Bug Fixes
+
+* **backend:** torna o 403 do ingest autodiagnosticavel ([02fa74c](https://github.com/ZzPowerTech/ausTvSales/commit/02fa74cbe4d8522de152ce2f19b9e8591a8c6da2))
+* **backend:** torna o 403 do ingest autodiagnosticável ([c346192](https://github.com/ZzPowerTech/ausTvSales/commit/c3461928ff43c477e324058a0910d664fd64270b))
+
 ## [0.8.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.7.0...backend-v0.8.0) (2026-07-18)
 
 
