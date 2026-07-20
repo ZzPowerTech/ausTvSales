@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.9.0...backend-v0.10.0) (2026-07-20)
+
+
+### Features
+
+* **backend:** endpoints de analise de vendas [S5.1] ([1294fed](https://github.com/ZzPowerTech/ausTvSales/commit/1294fedd19140e3d6595f18b546158522e91a88a))
+* **backend:** endpoints de analise de vendas [S5.1] ([5d5eaf2](https://github.com/ZzPowerTech/ausTvSales/commit/5d5eaf27f0739d554c6396502ae4910eaf470b12))
+
 ## [0.9.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.8.1...backend-v0.9.0) (2026-07-20)
 
 
