@@ -1,0 +1,73 @@
+<section class="chart" aria-labelledby="chart-heading">
+  <header class="chart__head">
+    <h2 class="chart__title" id="chart-heading">Vendas ao longo do tempo</h2>
+
+    <div class="chart__toggle" role="group" aria-label="Medida do gráfico">
+      <button
+        type="button"
+        class="button"
+        [class.button--primary]="mode() === 'qty'"
+        [attr.aria-pressed]="mode() === 'qty'"
+        (click)="setMode('qty')"
+      >
+        Quantidade
+      </button>
+      <button
+        type="button"
+        class="button"
+        [class.button--primary]="mode() === 'revenue'"
+        [attr.aria-pressed]="mode() === 'revenue'"
+        (click)="setMode('revenue')"
+      >
+        Receita
+      </button>
+    </div>
+  </header>
+
+  @if (loading()) {
+    <p class="chart__state" role="status">Carregando série…</p>
+  } @else if (loadError()) {
+    <p class="chart__state chart__state--error" role="alert">
+      Não foi possível carregar a série. Tente de novo.
+    </p>
+  } @else if (isEmpty()) {
+    <p class="chart__state">Sem vendas no período.</p>
+  } @else if (hasData()) {
+    <div class="chart__canvas-wrap">
+      <canvas
+        #canvas
+        class="chart__canvas"
+        role="img"
+        [attr.aria-label]="ariaLabel()"
+      ></canvas>
+    </div>
+
+    <!-- Accessible equivalent of the plotted line: the same points as a table,
+         visually hidden but available to screen readers. -->
+    <table class="sr-only">
+      <caption>
+        {{ ariaLabel() }}
+      </caption>
+      <thead>
+        <tr>
+          <th scope="col">Dia</th>
+          <th scope="col">Quantidade</th>
+          <th scope="col">Receita</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (point of points(); track point.at) {
+          <tr>
+            <td>{{ point.at }}</td>
+            <td>{{ point.qty }}</td>
+            <td>{{ formatMoney(point.revenue) }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  }
+
+  @if (excludedHistoricalLabel(); as baseline) {
+    <p class="chart__baseline">{{ baseline }}</p>
+  }
+</section>
