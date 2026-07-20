@@ -33,6 +33,15 @@ export const routes: Routes = [
             (m) => m.ItemsPageComponent,
           ),
       },
+      {
+        // Sales analysis by category (S5.2). Nested here so it inherits the
+        // parent's authGuard; S5.3/S5.4 fill the shell in.
+        path: 'sales/categories/:categoryId',
+        loadComponent: () =>
+          import(
+            './features/analytics/category-analytics-page.component'
+          ).then((m) => m.CategoryAnalyticsPageComponent),
+      },
     ],
   },
   { path: '**', redirectTo: '' },
