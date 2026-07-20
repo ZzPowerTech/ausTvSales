@@ -68,6 +68,24 @@
   margin: 0 0 var(--space-3);
 }
 
+// Second section ("Vendas") sits under the catalog links with breathing room.
+.sidenav__heading--sales {
+  margin-top: var(--space-5);
+}
+
+// Loading / empty placeholders — never colour-alone, just muted prose so the
+// rest of the sidenav stays up while categories load.
+.sidenav__hint {
+  font-size: var(--text-sm);
+  color: var(--color-ink-muted);
+  margin: 0;
+  padding: 0 var(--space-3);
+}
+
+.sidenav__hint-link {
+  font-size: var(--text-sm);
+}
+
 .sidenav__list {
   list-style: none;
   margin: 0;

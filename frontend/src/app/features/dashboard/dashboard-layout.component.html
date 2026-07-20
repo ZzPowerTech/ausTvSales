@@ -11,7 +11,7 @@
 </header>
 
 <div class="layout">
-  <nav class="sidenav" aria-label="Administração do catálogo">
+  <nav class="sidenav" aria-label="Navegação principal">
     <p class="u-label sidenav__heading">Catálogo</p>
     <ul class="sidenav__list">
       <li>
@@ -33,6 +33,32 @@
         >
       </li>
     </ul>
+
+    <p class="u-label sidenav__heading sidenav__heading--sales">Vendas</p>
+    @if (!categoriesLoaded()) {
+      <p class="sidenav__hint">Carregando categorias…</p>
+    } @else if (categories().length === 0) {
+      <p class="sidenav__hint">
+        Nenhuma categoria cadastrada.
+        <a class="sidenav__hint-link" routerLink="/catalog/categories"
+          >Cadastrar</a
+        >
+      </p>
+    } @else {
+      <ul class="sidenav__list">
+        @for (category of categories(); track category.id) {
+          <li>
+            <a
+              class="sidenav__link"
+              [routerLink]="['/sales/categories', category.id]"
+              routerLinkActive="sidenav__link--active"
+              ariaCurrentWhenActive="page"
+              >{{ category.name }}</a
+            >
+          </li>
+        }
+      </ul>
+    }
   </nav>
 
   <main class="content">
