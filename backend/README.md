@@ -196,10 +196,55 @@ desejada e grava `display_order` por posição, dentro de **uma transação**.
 > **Fluxo forward-only:** o `drizzle-kit` gera apenas migrations de avanço. Para recomeçar em
 > dev, `docker compose down -v` recria o volume do Postgres do zero. Rollback granular não é usado.
 
+## Gerador de vendas sintéticas (S5.0)
+
+Ferramenta **de desenvolvimento** para popular `sales` com volume realista — necessária para
+demonstrar as telas da Sprint 5 e para medir as agregações da S5.1 com `EXPLAIN` sobre dados
+reais em vez de tabela vazia.
+
+```bash
+# dataset de ~50k vendas usado na DoD da Sprint 5
+SEED_ALLOW=true npm run seed:sales -- --count=50000 --from=2026-01-01 --to=2026-07-20
+```
+
+| Flag | Padrão | O que faz |
+|---|---|---|
+| `--count` | `50000` | Total de vendas geradas |
+| `--from` / `--to` | últimos 180 dias | Janela em `America/Sao_Paulo`; `--to` é **inclusivo como dia** |
+| `--seed` | `austv` | Semente do PRNG. Mesma seed = mesmo dataset; seed nova = dataset disjunto |
+| `--players` | `500` | Tamanho do pool de jogadores sintéticos |
+| `--historical-ratio` | `0.1` | Fração de linhas com `historical_import = true` |
+
+**Guardas (o script aborta com exit 1, sem perguntar):**
+
+- `NODE_ENV=production`;
+- `SEED_ALLOW` diferente de `true` — opt-in explícito, ausente de qualquer `.env` versionado;
+- host do `DATABASE_URL` listado em `SEED_FORBIDDEN_HOSTS`.
+
+Prompt de confirmação seria inútil aqui: o dano acontece justamente quando o script roda dentro
+de um pipeline, onde não há ninguém para responder.
+
+**Propriedades que o dataset garante** (spec [S5.0](../.specs/features/sprint-05-dashboard-analytics/spec.md#1-s50--gerador-de-vendas-sintéticas)):
+
+- **Idempotente** — `sale_id` é derivado de `<seed>:<índice>`, então re-rodar o mesmo comando é
+  no-op via `ON CONFLICT DO NOTHING`. Dá para somar volume trocando só `--seed`.
+- **Determinístico** — nenhum `Math.random()`; dois `EXPLAIN` só são comparáveis se as linhas
+  embaixo forem idênticas.
+- **Troca de nickname** — ~20% dos jogadores renomeiam dentro da janela, com
+  `nickname_at_purchase` congelado no nick da época. É o que permite provar o CA4 na tela
+  (ranking mostra `last_known_nickname`), e não só em teste unitário.
+- **`historical_import` num único instante** anterior à janela, espelhando a migração da
+  Sprint 6 — inventar granularidade falsa é exatamente o que o CA7 proíbe.
+- **Distribuição enviesada** por item e por jogador; um dataset uniforme renderiza um gráfico
+  plano e faz a demo do CA5 não provar nada.
+
+O código vive em `scripts/` e é excluído do `tsconfig.build.json` — **nunca vai para o `dist/`**
+da imagem de produção.
+
 ## Testes
 
 ```bash
-npm test          # unitários (sem banco)
+npm test          # unitários (sem banco) — inclui as regras do gerador em scripts/seed/
 npm run test:e2e  # e2e — requer Postgres no ar + migrations aplicadas
 ```
 
