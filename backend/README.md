@@ -182,6 +182,50 @@ desejada e grava `display_order` por posição, dentro de **uma transação**.
   de `@Patch(':id')` no controller — mesma armadilha de `/items/sync` vs `/items/:id`
   (o `ParseIntPipe` do `:id` rejeitaria `"reorder"`). Coberto por teste e2e.
 
+## Análise de vendas (dashboard)
+
+Leituras agregadas para as telas de visualização (S5.1), atrás da **sessão do dashboard**
+(guard global — módulo `analytics` separado de `sales`, que é o caminho de escrita do plugin
+com API key). `:id` de categoria é inteiro; `:itemId` é a chave de negócio opaca (texto).
+
+| Rota | O que faz |
+|---|---|
+| `GET /analytics/categories/:id/items` | Itens da categoria com contagem, quantidade e receita no período |
+| `GET /analytics/items/:itemId/top-buyers` | Top compradores por receita (`limit`, padrão 5) |
+| `GET /analytics/items/:itemId/series` | Série temporal por bucket (`day`\|`week`\|`month`, padrão `day`) |
+
+**Período** (`?from=&to=`, `YYYY-MM-DD`, opcionais) — datas em **America/Sao_Paulo**, janela
+semiaberta `[from 00:00, to+1d 00:00)`. Omitir ambos = toda a história. `from > to` → **400**
+igual nas três rotas. Categoria/item inexistente → **404**; período sem vendas → **200** com
+zeros/array vazio (não é erro).
+
+**Regra do `historical_import`** (spec §2.4) — a migração histórica conta para apuração mas
+não tem timestamp real por evento:
+
+| Agregação | Linhas históricas |
+|---|---|
+| Totais por item / receita | **incluídas** |
+| Top compradores | **incluídas** |
+| Série temporal | **excluídas** — vêm no campo `excludedHistorical` como baseline, nunca como ponto datado (CA7) |
+
+**Duas armadilhas fechadas por teste e2e:**
+
+- **Fuso (§2.3):** o bucket usa `date_trunc(bucket, purchased_at AT TIME ZONE 'America/Sao_Paulo')`.
+  Sem o `AT TIME ZONE`, uma venda às 21h BRT cairia no bucket do dia seguinte em UTC e o pico de
+  lançamento de crate apareceria partido em dois dias.
+- **Dinheiro (§2.5):** `SUM(total_price)` trafega como **string** de ponta a ponta; o driver `pg`
+  devolve `numeric` como string e um `parseFloat` no meio reintroduziria o erro de ponto flutuante
+  que a coluna `numeric(12,2)` existe para evitar.
+
+Janela ampla demais na série (> 366 buckets) → **400** (§2.8): protege o gráfico e é um vetor de
+DoS barato mesmo atrás de sessão.
+
+> **Índices (S5.1):** o top-N filtra por `item_id` + período e agrupa por `player_uuid`.
+> `sales_item_purchased_at_idx (item_id, purchased_at)` atende o filtro; `sales_player_item_idx`
+> tem `player_uuid` como coluna líder e **não** serve a esse acesso. O `EXPLAIN` sobre o dataset
+> de 50k (S5.0) confirma o plano; um índice de cobertura, se necessário, é débito documentado —
+> não migration de última hora.
+
 ## Banco de dados (Drizzle)
 
 | Comando | O que faz |

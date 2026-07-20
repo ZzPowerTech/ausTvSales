@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { AnalyticsModule } from './analytics/analytics.module';
 import { AuthModule } from './auth/auth.module';
 import { CategoriesModule } from './categories/categories.module';
 import { validateEnv } from './config/env.validation';
@@ -22,6 +23,7 @@ import { SalesModule } from './sales/sales.module';
     CategoriesModule,
     ItemsModule,
     SalesModule,
+    AnalyticsModule,
   ],
 })
 export class AppModule {}
