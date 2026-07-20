@@ -76,7 +76,7 @@ Sprint 6  Migração histórica + cutover no Genesis + validação de segurança
 - [sprint-02.md](sprint-02.md) — Ingestão de vendas autenticada + comando do plugin
 - [sprint-03.md](sprint-03.md) — Resiliência do plugin: cache, fila SQLite e reenvio
 - [sprint-04.md](sprint-04.md) — Dashboard: administração de catálogo *(escopo revisado em 2026-07-18)*
-- [sprint-05.md](sprint-05.md) — Dashboard: visualização (sidebar, ranking, gráfico)
+- [sprint-05.md](sprint-05.md) — Dashboard: visualização (sidebar, ranking, gráfico) *(escopo revisado em 2026-07-20)*
 - [sprint-06.md](sprint-06.md) — Migração histórica, cutover e go-live
 
 ## Convenções deste plano
