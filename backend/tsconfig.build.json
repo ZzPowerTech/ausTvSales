@@ -8,6 +8,7 @@
     "test",
     "dist",
     "drizzle.config.ts",
+    "scripts",
     "**/*spec.ts"
   ]
 }
