@@ -1,0 +1,185 @@
+// Layout of the category analytics page (S5.3).
+//
+// Mirrors the catalog screens: page title/lead, `.rows` list, `.row__*` blocks
+// and `.empty` follow the same shape as `catalog-page.scss`. Only page-level
+// composition lives here — button, input, field, notice and badge come from the
+// global design-system layer in `styles.scss`. Every value is a token; no
+// hardcoded colour.
+
+.page__title {
+  font-size: var(--text-2xl);
+  line-height: 1.12;
+  margin: 0 0 var(--space-3);
+}
+
+.page__lead {
+  color: var(--color-ink-muted);
+  margin: 0 0 var(--space-5);
+}
+
+// ---------------------------------------------------------------- period
+
+.period {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-4);
+  margin: 0 0 var(--space-6);
+  max-width: 48rem;
+}
+
+.period__presets {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.period__custom {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+// ---------------------------------------------------------------- list
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-width: 48rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.item {
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-4);
+}
+
+// Inactive items stay visible (deactivating never erases sales) but read as
+// muted history — the textual badge, not colour alone, states the status.
+.item--inactive {
+  opacity: 0.72;
+  border-style: dashed;
+}
+
+.item__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.row__main {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.row__name {
+  font-size: var(--text-base);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.row__id {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-ink-muted);
+  background: var(--color-surface-2);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
+  overflow-wrap: anywhere;
+}
+
+.item__stats {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.2;
+}
+
+.stat__value {
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+
+.stat__label {
+  font-size: var(--text-xs);
+}
+
+// ---------------------------------------------------------------- detail
+
+.item__detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-line);
+}
+
+.detail__block {
+  flex: 1;
+  min-width: 15rem;
+}
+
+.detail__title {
+  font-size: var(--text-xs);
+  margin: 0 0 var(--space-3);
+}
+
+.buyers {
+  list-style: decimal inside;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.buyer {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.buyer__name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.buyer__qty {
+  color: var(--color-ink-muted);
+  font-size: var(--text-sm);
+  margin-left: auto;
+}
+
+.buyer__revenue {
+  font-weight: 600;
+}
+
+.detail__chart .empty {
+  border: 1px dashed var(--color-line);
+  border-radius: var(--radius-sm);
+  padding: var(--space-4);
+  text-align: center;
+}
+
+.empty {
+  color: var(--color-ink-muted);
+  max-width: 48rem;
+  margin: 0;
+}

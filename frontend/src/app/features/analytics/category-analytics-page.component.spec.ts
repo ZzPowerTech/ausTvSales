@@ -1,71 +1,209 @@
+import { provideHttpClient } from '@angular/common/http';
+import {
+  HttpTestingController,
+  provideHttpClientTesting,
+} from '@angular/common/http/testing';
 import { WritableSignal, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { of } from 'rxjs';
+import { ActivatedRoute, Router } from '@angular/router';
 
+import { environment } from '../../../environments/environment';
+import {
+  CategoryItemTotals,
+  TopBuyer,
+} from '../../core/models/analytics.model';
 import { Category } from '../../core/models/category.model';
 import { CategoriesService } from '../../core/services/categories.service';
 import { CategoryAnalyticsPageComponent } from './category-analytics-page.component';
 
+const base = environment.apiBaseUrl;
 const CAIXAS: Category = { id: 1, name: 'Caixas', displayOrder: 0 };
+
+const NATAL: CategoryItemTotals = {
+  itemId: 'caixaNatal2026',
+  displayName: 'Caixa de Natal',
+  active: true,
+  salesCount: 4,
+  totalQty: 10,
+  revenue: '1440.00',
+};
+const GOLD: CategoryItemTotals = {
+  itemId: 'caixaGold',
+  displayName: 'Caixa Gold',
+  active: false,
+  salesCount: 1,
+  totalQty: 1,
+  // 0.1 + 0.2 territory — proves the format runs off the string, not a float sum.
+  revenue: '0.30',
+};
+
+const BUYER: TopBuyer = {
+  playerUuid: 'uuid-1',
+  nickname: 'Pikeno',
+  salesCount: 3,
+  totalQty: 7,
+  revenue: '1008.00',
+};
 
 describe('CategoryAnalyticsPageComponent', () => {
   let fixture: ComponentFixture<CategoryAnalyticsPageComponent>;
+  let component: CategoryAnalyticsPageComponent;
+  let controller: HttpTestingController;
+  let router: jasmine.SpyObj<Router>;
   let loadedSignal: WritableSignal<boolean>;
+  let byIdSignal: WritableSignal<Map<number, Category>>;
   let list: jasmine.Spy;
 
-  const setup = (categoryId: string): void => {
+  const itemsUrl = (id: number): string =>
+    `${base}/analytics/categories/${id}/items`;
+  const topBuyersUrl = (itemId: string): string =>
+    `${base}/analytics/items/${itemId}/top-buyers`;
+
+  const el = (): HTMLElement => fixture.nativeElement as HTMLElement;
+
+  /** Boot the page and answer the initial category-items request. */
+  const boot = (
+    items: CategoryItemTotals[],
+    opts: { categoryId?: string; from?: string; to?: string } = {},
+  ): void => {
+    const categoryId = opts.categoryId ?? '1';
     fixture = TestBed.createComponent(CategoryAnalyticsPageComponent);
+    component = fixture.componentInstance;
     fixture.componentRef.setInput('categoryId', categoryId);
+    if (opts.from !== undefined) {
+      fixture.componentRef.setInput('from', opts.from);
+    }
+    if (opts.to !== undefined) {
+      fixture.componentRef.setInput('to', opts.to);
+    }
+    fixture.detectChanges();
+
+    const req = controller.expectOne((r) => r.url === itemsUrl(+categoryId));
+    req.flush({ categoryId: +categoryId, items });
     fixture.detectChanges();
   };
 
   beforeEach(() => {
-    loadedSignal = signal(false);
-    list = jasmine.createSpy('list').and.returnValue(of([]));
+    loadedSignal = signal(true);
+    byIdSignal = signal(new Map<number, Category>([[1, CAIXAS]]));
+    list = jasmine.createSpy('list');
+    router = jasmine.createSpyObj<Router>('Router', ['navigate']);
+    router.navigate.and.resolveTo(true);
 
     TestBed.configureTestingModule({
       imports: [CategoryAnalyticsPageComponent],
       providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: Router, useValue: router },
+        { provide: ActivatedRoute, useValue: {} },
         {
           provide: CategoriesService,
           useValue: {
-            byId: signal(new Map<number, Category>()).asReadonly(),
+            byId: byIdSignal.asReadonly(),
             loaded: loadedSignal.asReadonly(),
             list,
           },
         },
       ],
     });
+    controller = TestBed.inject(HttpTestingController);
   });
 
-  it('loads the catalog when it is not yet loaded, to resolve the title', () => {
-    setup('1');
-    expect(list).toHaveBeenCalled();
+  afterEach(() => controller.verify());
+
+  it('resolves the category name from the catalog cache', () => {
+    boot([NATAL]);
+    expect(el().textContent).toContain('Caixas');
   });
 
-  it('does not refetch the catalog when it is already loaded', () => {
-    loadedSignal.set(true);
-    setup('1');
-    expect(list).not.toHaveBeenCalled();
+  it('applies a 7-day preset by writing from/to to the URL', () => {
+    boot([]);
+    component.applyPreset(7);
+
+    const day = 24 * 60 * 60 * 1000;
+    const nowSp = Date.now() - 3 * 60 * 60 * 1000; // fixed -03:00 São Paulo offset
+    const iso = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
+
+    const [commands, extras] = router.navigate.calls.mostRecent().args;
+    expect(commands).toEqual([]);
+    expect((extras?.queryParams as Record<string, string>)['from']).toBe(
+      iso(nowSp - 6 * day),
+    );
+    expect((extras?.queryParams as Record<string, string>)['to']).toBe(
+      iso(nowSp),
+    );
   });
 
-  it('shows the resolved category name when the catalog knows it', () => {
-    TestBed.overrideProvider(CategoriesService, {
-      useValue: {
-        byId: signal(new Map([[1, CAIXAS]])).asReadonly(),
-        loaded: signal(true).asReadonly(),
-        list,
-      },
+  it('sends the URL window as query params to the items endpoint', () => {
+    fixture = TestBed.createComponent(CategoryAnalyticsPageComponent);
+    fixture.componentRef.setInput('categoryId', '1');
+    fixture.componentRef.setInput('from', '2026-01-01');
+    fixture.componentRef.setInput('to', '2026-01-31');
+    fixture.detectChanges();
+
+    const req = controller.expectOne((r) => r.url === itemsUrl(1));
+    expect(req.request.params.get('from')).toBe('2026-01-01');
+    expect(req.request.params.get('to')).toBe('2026-01-31');
+    req.flush({ categoryId: 1, items: [] });
+  });
+
+  it('marks an inactive item as distinct and keeps it visible', () => {
+    boot([GOLD]);
+    const row = el().querySelector('.item');
+    expect(row?.classList).toContain('item--inactive');
+    expect(row?.textContent).toContain('Inativo');
+    expect(row?.textContent).toContain('Caixa Gold');
+  });
+
+  it('formats revenue as BRL from the API string', () => {
+    boot([NATAL, GOLD]);
+    const expected = new Intl.NumberFormat('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
     });
-    setup('1');
-
-    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
-    expect(text).toContain('Caixas');
+    expect(el().textContent).toContain(expected.format(1440));
+    expect(el().textContent).toContain(expected.format(0.3));
   });
 
-  it('falls back to the id while the category is unresolved', () => {
-    setup('7');
-    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
-    expect(text).toContain('Categoria #7');
+  it('does not request top buyers on load, only when an item is expanded', () => {
+    boot([NATAL]);
+    // Nothing expanded yet: no drilldown request must have gone out.
+    controller.expectNone((r) => r.url === topBuyersUrl(NATAL.itemId));
+
+    component.toggle(NATAL.itemId);
+    fixture.detectChanges();
+
+    const req = controller.expectOne((r) => r.url === topBuyersUrl(NATAL.itemId));
+    expect(req.request.params.get('limit')).toBe('5');
+    req.flush({ itemId: NATAL.itemId, buyers: [BUYER] });
+    fixture.detectChanges();
+
+    expect(el().textContent).toContain('Pikeno');
+  });
+
+  it('does not refetch top buyers on a second expand of the same item', () => {
+    boot([NATAL]);
+
+    component.toggle(NATAL.itemId);
+    fixture.detectChanges();
+    controller
+      .expectOne((r) => r.url === topBuyersUrl(NATAL.itemId))
+      .flush({ itemId: NATAL.itemId, buyers: [BUYER] });
+    fixture.detectChanges();
+
+    component.toggle(NATAL.itemId); // collapse
+    fixture.detectChanges();
+    component.toggle(NATAL.itemId); // expand again — cached, no new request
+    fixture.detectChanges();
+
+    controller.expectNone((r) => r.url === topBuyersUrl(NATAL.itemId));
+    // Cached data is still what renders, proving no refetch was needed.
+    expect(el().textContent).toContain('Pikeno');
+  });
+
+  it('shows the empty-category state when there are no items', () => {
+    boot([]);
+    expect(el().textContent).toContain('Sem vendas no período');
   });
 });

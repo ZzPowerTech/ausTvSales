@@ -1,4 +1,174 @@
 <h1 class="page__title">
   {{ category()?.name ?? 'Categoria #' + categoryId() }}
 </h1>
-<p class="page__lead">Em construção (S5.3/S5.4).</p>
+<p class="page__lead">
+  Itens vendidos e principais compradores no período selecionado.
+</p>
+
+<!-- ------------------------------------------------------------- period -->
+<section class="period" aria-label="Filtro de período">
+  <div class="period__presets" role="group" aria-label="Atalhos de período">
+    <button
+      class="button"
+      type="button"
+      [class.button--primary]="activePreset() === '7d'"
+      [attr.aria-pressed]="activePreset() === '7d'"
+      (click)="applyPreset(7)"
+    >
+      7 dias
+    </button>
+    <button
+      class="button"
+      type="button"
+      [class.button--primary]="activePreset() === '30d'"
+      [attr.aria-pressed]="activePreset() === '30d'"
+      (click)="applyPreset(30)"
+    >
+      30 dias
+    </button>
+    <button
+      class="button"
+      type="button"
+      [class.button--primary]="activePreset() === 'all'"
+      [attr.aria-pressed]="activePreset() === 'all'"
+      (click)="clearPeriod()"
+    >
+      Todo o período
+    </button>
+  </div>
+
+  <form
+    class="period__custom"
+    (submit)="applyCustom(); $event.preventDefault()"
+  >
+    <div class="field field--inline">
+      <label class="form__label" for="period-from">De</label>
+      <input
+        id="period-from"
+        class="input"
+        type="date"
+        [value]="customFrom()"
+        (input)="customFrom.set($any($event.target).value)"
+      />
+    </div>
+    <div class="field field--inline">
+      <label class="form__label" for="period-to">Até</label>
+      <input
+        id="period-to"
+        class="input"
+        type="date"
+        [value]="customTo()"
+        (input)="customTo.set($any($event.target).value)"
+      />
+    </div>
+    <button
+      class="button"
+      type="submit"
+      [class.button--primary]="activePreset() === 'custom'"
+    >
+      Aplicar
+    </button>
+  </form>
+</section>
+
+<!-- ------------------------------------------------------------- states -->
+@if (itemsLoading()) {
+  <p class="empty" role="status">Carregando itens…</p>
+} @else if (itemsError()) {
+  <div class="notice notice--error" role="alert">
+    <span>
+      Não foi possível carregar os itens da categoria. Verifique a conexão e
+      tente de novo.
+    </span>
+    <button class="button" type="button" (click)="retry()">
+      Tentar de novo
+    </button>
+  </div>
+} @else if (emptyCategory()) {
+  <p class="empty">Sem vendas no período para esta categoria.</p>
+} @else {
+  <!-- ----------------------------------------------------------- items -->
+  <ul class="rows">
+    @for (item of items(); track item.itemId) {
+      <li class="item" [class.item--inactive]="!item.active">
+        <div class="item__head">
+          <div class="row__main">
+            <span class="row__name">{{ item.displayName }}</span>
+            <code class="row__id">{{ item.itemId }}</code>
+            @if (!item.active) {
+              <!-- State is never colour-alone: the badge carries the word. -->
+              <span class="badge badge--inactive">Inativo</span>
+            }
+          </div>
+
+          <div class="item__stats">
+            <span class="stat">
+              <span class="stat__value u-tnum">{{ item.totalQty }}</span>
+              <span class="stat__label u-label">vendidos</span>
+            </span>
+            <span class="stat">
+              <span class="stat__value u-tnum">
+                {{ formatRevenue(item.revenue) }}
+              </span>
+              <span class="stat__label u-label">receita</span>
+            </span>
+            <button
+              class="button"
+              type="button"
+              [attr.aria-expanded]="isExpanded(item.itemId)"
+              (click)="toggle(item.itemId)"
+            >
+              {{ isExpanded(item.itemId) ? 'Recolher' : 'Top 5' }}
+            </button>
+          </div>
+        </div>
+
+        @if (isExpanded(item.itemId)) {
+          <div class="item__detail">
+            @let buyers = buyersFor(item.itemId);
+
+            <section class="detail__block" aria-label="Top 5 compradores">
+              <h2 class="detail__title u-label">Top 5 compradores</h2>
+              @if (buyers?.loading) {
+                <p class="empty" role="status">Carregando compradores…</p>
+              } @else if (buyers?.error) {
+                <div class="notice notice--error" role="alert">
+                  <span>Não foi possível carregar os compradores.</span>
+                  <button
+                    class="button"
+                    type="button"
+                    (click)="retryBuyers(item.itemId)"
+                  >
+                    Tentar de novo
+                  </button>
+                </div>
+              } @else if (buyers?.buyers?.length) {
+                <ol class="buyers">
+                  @for (buyer of buyers?.buyers; track buyer.playerUuid) {
+                    <li class="buyer">
+                      <span class="buyer__name">{{ buyer.nickname }}</span>
+                      <span class="buyer__qty u-tnum">
+                        {{ buyer.totalQty }} un.
+                      </span>
+                      <span class="buyer__revenue u-tnum">
+                        {{ formatRevenue(buyer.revenue) }}
+                      </span>
+                    </li>
+                  }
+                </ol>
+              } @else {
+                <p class="empty">Sem vendas no período.</p>
+              }
+            </section>
+
+            <!-- TODO(S5.4): gráfico de série temporal aqui -->
+            <section class="detail__block detail__chart" aria-label="Série temporal">
+              <h2 class="detail__title u-label">Série temporal</h2>
+              <p class="empty">Gráfico em breve.</p>
+            </section>
+          </div>
+        }
+      </li>
+    }
+  </ul>
+}
