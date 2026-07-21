@@ -183,8 +183,8 @@ export class AnalyticsService {
     bucket: SeriesBucket = DEFAULT_SERIES_BUCKET,
   ): Promise<SeriesReport> {
     await this.assertItemExists(itemId);
-    const window = this.periodBounds(period);
-    await this.assertBucketCountWithinLimit(itemId, period, bucket, window);
+    const eligible = this.seriesEligibility(itemId, this.periodBounds(period));
+    await this.assertBucketCountWithinLimit(period, bucket, eligible);
 
     // Series EXCLUDES historical_import (§2.4, CA7): those rows have no real
     // per-event timestamp to plot. The truncation runs in São Paulo local time
@@ -198,9 +198,7 @@ export class AnalyticsService {
         sum(${sales.qtd})::int AS qty,
         sum(${sales.totalPrice})::text AS revenue
       FROM ${sales}
-      WHERE ${sales.itemId} = ${itemId}
-        AND ${sales.historicalImport} = false
-        ${window ? sql`AND ${window}` : sql``}
+      WHERE ${eligible}
       GROUP BY 1
       ORDER BY 1 ASC
     `);
@@ -267,6 +265,20 @@ export class AnalyticsService {
   }
 
   /**
+   * Predicate selecting the rows a series may plot: the item's dated
+   * (non-historical) sales inside the window. Built once per request and shared
+   * by the points query and the bucket-cap estimate, so what §2.8 counts can
+   * never drift from what §2.4 plots.
+   */
+  private seriesEligibility(itemId: string, window: SQL | undefined): SQL {
+    const base = and(
+      eq(sales.itemId, itemId),
+      eq(sales.historicalImport, false),
+    ) as SQL;
+    return window ? (and(base, window) as SQL) : base;
+  }
+
+  /**
    * Reject a series whose window would produce more than {@link MAX_SERIES_BUCKETS}
    * points (§2.8). When the caller gives no bounds, the effective span is derived
    * from the item's own min/max eligible (non-historical) sale, so an open-ended
@@ -274,10 +286,9 @@ export class AnalyticsService {
    * points — a cheap DoS even behind a session.
    */
   private async assertBucketCountWithinLimit(
-    itemId: string,
     period: PeriodQueryDto,
     bucket: SeriesBucket,
-    window: SQL | undefined,
+    eligible: SQL,
   ): Promise<void> {
     let fromDate = period.from;
     let toDate = period.to;
@@ -288,9 +299,7 @@ export class AnalyticsService {
           to_char(min(${sales.purchasedAt} AT TIME ZONE ${TZ}), 'YYYY-MM-DD') AS min_at,
           to_char(max(${sales.purchasedAt} AT TIME ZONE ${TZ}), 'YYYY-MM-DD') AS max_at
         FROM ${sales}
-        WHERE ${sales.itemId} = ${itemId}
-          AND ${sales.historicalImport} = false
-          ${window ? sql`AND ${window}` : sql``}
+        WHERE ${eligible}
       `);
       const row = bounds.rows[0];
       // No eligible rows: the series will be empty, nothing to cap.

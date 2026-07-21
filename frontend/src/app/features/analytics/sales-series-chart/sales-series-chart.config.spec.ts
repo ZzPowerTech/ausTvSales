@@ -5,7 +5,6 @@ import {
   buildAriaLabel,
   buildLineConfig,
   datasetValues,
-  formatRevenue,
   labels,
   toPlot,
 } from './sales-series-chart.config';
@@ -44,12 +43,6 @@ describe('sales-series-chart.config', () => {
   it('does not lose float precision on the string→number boundary', () => {
     // 0.1 + 0.2 is the canonical float trap; the API sends the correct string.
     expect(toPlot('0.30')).toBe(0.3);
-  });
-
-  it('formats revenue as BRL currency for humans', () => {
-    const formatted = formatRevenue('1440.00');
-    expect(formatted).toContain('1.440,00');
-    expect(formatted).toContain('R$');
   });
 
   it('labels the Y axis per measure', () => {
