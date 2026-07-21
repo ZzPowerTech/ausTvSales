@@ -58,6 +58,35 @@ describe('CategoryAnalyticsPageComponent', () => {
     `${base}/analytics/categories/${id}/items`;
   const topBuyersUrl = (itemId: string): string =>
     `${base}/analytics/items/${itemId}/top-buyers`;
+  const seriesUrl = (itemId: string): string =>
+    `${base}/analytics/items/${itemId}/series`;
+
+  /**
+   * Answer the series request(s) the embedded chart (S5.4) fires on expand.
+   *
+   * The chart mounts with the item's detail panel, so every expand issues one
+   * `series` call. Collapsing destroys the chart, so re-expanding issues another
+   * — unlike the top-5, which is cached by the page. Tests that expand must
+   * drain these or `controller.verify()` fails on the open request.
+   */
+  const flushSeries = (itemId: string, times = 1): void => {
+    const requests = controller.match((r) => r.url === seriesUrl(itemId));
+    expect(requests.length).toBe(times);
+    for (const req of requests) {
+      // Collapsing tears the chart down, which unsubscribes and cancels its
+      // in-flight request. Matching it clears it from the outstanding list;
+      // flushing a cancelled request would throw.
+      if (!req.cancelled) {
+        req.flush({
+          itemId,
+          bucket: 'day',
+          points: [],
+          excludedHistorical: { qty: 0, revenue: '0.00' },
+        });
+      }
+    }
+    fixture.detectChanges();
+  };
 
   const el = (): HTMLElement => fixture.nativeElement as HTMLElement;
 
@@ -178,6 +207,7 @@ describe('CategoryAnalyticsPageComponent', () => {
     expect(req.request.params.get('limit')).toBe('5');
     req.flush({ itemId: NATAL.itemId, buyers: [BUYER] });
     fixture.detectChanges();
+    flushSeries(NATAL.itemId);
 
     expect(el().textContent).toContain('Pikeno');
   });
@@ -198,6 +228,9 @@ describe('CategoryAnalyticsPageComponent', () => {
     fixture.detectChanges();
 
     controller.expectNone((r) => r.url === topBuyersUrl(NATAL.itemId));
+    // Two series calls: the chart is destroyed on collapse and refetches when it
+    // mounts again. Only the top-5 is page-cached.
+    flushSeries(NATAL.itemId, 2);
     // Cached data is still what renders, proving no refetch was needed.
     expect(el().textContent).toContain('Pikeno');
   });
@@ -205,5 +238,36 @@ describe('CategoryAnalyticsPageComponent', () => {
   it('shows the empty-category state when there are no items', () => {
     boot([]);
     expect(el().textContent).toContain('Sem vendas no período');
+  });
+
+  it('mounts the series chart inside the expanded item, on the URL window (S5.4)', () => {
+    boot([NATAL], { from: '2026-03-01', to: '2026-03-31' });
+
+    // Nothing expanded: no chart in the DOM and no series request.
+    expect(el().querySelector('app-sales-series-chart')).toBeNull();
+    controller.expectNone((r) => r.url === seriesUrl(NATAL.itemId));
+
+    component.toggle(NATAL.itemId);
+    fixture.detectChanges();
+    controller
+      .expectOne((r) => r.url === topBuyersUrl(NATAL.itemId))
+      .flush({ itemId: NATAL.itemId, buyers: [BUYER] });
+    fixture.detectChanges();
+
+    // The chart inherits the page's window, so the whole screen reads one period.
+    const series = controller.expectOne((r) => r.url === seriesUrl(NATAL.itemId));
+    expect(series.request.params.get('from')).toBe('2026-03-01');
+    expect(series.request.params.get('to')).toBe('2026-03-31');
+    series.flush({
+      itemId: NATAL.itemId,
+      bucket: 'day',
+      points: [{ at: '2026-03-10', qty: 2, revenue: '100.00' }],
+      excludedHistorical: { qty: 300, revenue: '36000.00' },
+    });
+    fixture.detectChanges();
+
+    expect(el().querySelector('app-sales-series-chart')).not.toBeNull();
+    // The CA7 baseline is rendered as text, never as a dated point.
+    expect(el().textContent).toContain('Histórico pré-migração');
   });
 });

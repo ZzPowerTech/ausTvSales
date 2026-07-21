@@ -161,11 +161,14 @@
               }
             </section>
 
-            <!-- TODO(S5.4): gráfico de série temporal aqui -->
-            <section class="detail__block detail__chart" aria-label="Série temporal">
-              <h2 class="detail__title u-label">Série temporal</h2>
-              <p class="empty">Gráfico em breve.</p>
-            </section>
+            <!-- Mounted only while the item is expanded, so a 30-item category
+                 never instantiates 30 charts. It reads the same URL-owned window
+                 as the list above, which is what keeps the page on one period. -->
+            <app-sales-series-chart
+              class="detail__block detail__chart"
+              [itemId]="item.itemId"
+              [period]="period()"
+            />
           </div>
         }
       </li>

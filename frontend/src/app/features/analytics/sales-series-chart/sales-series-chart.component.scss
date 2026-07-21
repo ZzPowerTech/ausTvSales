@@ -1,0 +1,74 @@
+// Time-series chart card (S5.4). Colours and fonts come from the global tokens
+// in `_tokens.scss`; nothing here invents a value. The Chart.js series/grid/tick
+// colours are injected into the options object at runtime (see the component),
+// so this file only styles the frame around the canvas.
+
+.chart {
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius);
+  padding: var(--space-5);
+  box-shadow: var(--shadow-panel);
+  max-width: 52rem;
+}
+
+.chart__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-4);
+}
+
+.chart__title {
+  font-size: var(--text-lg);
+  color: var(--color-ink);
+  margin: 0;
+}
+
+.chart__toggle {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.chart__canvas-wrap {
+  position: relative;
+  height: 20rem;
+}
+
+.chart__canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.chart__state {
+  color: var(--color-ink-muted);
+  margin: var(--space-4) 0 0;
+}
+
+.chart__state--error {
+  color: var(--color-danger);
+}
+
+.chart__baseline {
+  color: var(--color-ink-muted);
+  font-size: var(--text-sm);
+  margin: var(--space-4) 0 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-line);
+}
+
+// Visually hidden but exposed to assistive tech — the tabular equivalent of the
+// plotted line (a11y requirement from ADR-0003).
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

@@ -17,6 +17,7 @@ import {
 } from '../../core/models/analytics.model';
 import { AnalyticsService } from '../../core/services/analytics.service';
 import { CategoriesService } from '../../core/services/categories.service';
+import { SalesSeriesChartComponent } from './sales-series-chart/sales-series-chart.component';
 
 /** Per-item top-5 drilldown state, loaded on demand when the item is expanded. */
 interface BuyersState {
@@ -43,11 +44,13 @@ type ActivePreset = '7d' | '30d' | 'custom' | 'all';
  * Top-5 buyers are **never** fetched on load (a 30-item category would fire 30
  * calls for data nobody looked at, §4.2): the request goes out only when an item
  * is expanded, and its cache is dropped whenever the window changes because those
- * buyers belong to the old period.
+ * buyers belong to the old period. The series chart (S5.4) mounts under the same
+ * expansion for the same reason, and is handed the URL-owned window so the whole
+ * page always reads one period.
  */
 @Component({
   selector: 'app-category-analytics-page',
-  imports: [],
+  imports: [SalesSeriesChartComponent],
   templateUrl: './category-analytics-page.component.html',
   styleUrl: './category-analytics-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
