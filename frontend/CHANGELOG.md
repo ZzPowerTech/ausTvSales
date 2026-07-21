@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.0](https://github.com/ZzPowerTech/ausTvSales/compare/frontend-v1.5.0...frontend-v1.6.0) (2026-07-21)
+
+
+### Features
+
+* **frontend:** pagina de categoria com itens e top 5 [S5.3] ([5ea30ea](https://github.com/ZzPowerTech/ausTvSales/commit/5ea30ea1499c946a91e5ab7abdb117930b296649))
+* **frontend:** pagina de categoria com itens e top 5 [S5.3] ([c27a8c5](https://github.com/ZzPowerTech/ausTvSales/commit/c27a8c5769ef90c274d5fea49e877d597c4232a7))
+
 ## [1.5.0](https://github.com/ZzPowerTech/ausTvSales/compare/frontend-v1.4.0...frontend-v1.5.0) (2026-07-20)
 
 
