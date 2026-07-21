@@ -17,6 +17,8 @@ import {
 } from '../../core/models/analytics.model';
 import { AnalyticsService } from '../../core/services/analytics.service';
 import { CategoriesService } from '../../core/services/categories.service';
+import { formatBRL } from '../../core/utils/currency';
+import { presetRange } from '../../core/utils/period';
 import { SalesSeriesChartComponent } from './sales-series-chart/sales-series-chart.component';
 
 /** Per-item top-5 drilldown state, loaded on demand when the item is expanded. */
@@ -61,10 +63,6 @@ export class CategoryAnalyticsPageComponent {
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
 
-  /** Fixed America/Sao_Paulo offset — Brazil dropped DST, so -03:00 is constant. */
-  private static readonly SP_OFFSET_MS = 3 * 60 * 60 * 1000;
-  private static readonly DAY_MS = 24 * 60 * 60 * 1000;
-
   /** Route param — a string, per the URL (`:categoryId`). */
   readonly categoryId = input.required<string>();
 
@@ -92,11 +90,11 @@ export class CategoryAnalyticsPageComponent {
     if (!from && !to) {
       return 'all';
     }
-    const p7 = this.presetRange(7);
+    const p7 = presetRange(7);
     if (from === p7.from && to === p7.to) {
       return '7d';
     }
-    const p30 = this.presetRange(30);
+    const p30 = presetRange(30);
     if (from === p30.from && to === p30.to) {
       return '30d';
     }
@@ -136,11 +134,6 @@ export class CategoryAnalyticsPageComponent {
    */
   private loadToken = 0;
 
-  private readonly currencyFormat = new Intl.NumberFormat('pt-BR', {
-    style: 'currency',
-    currency: 'BRL',
-  });
-
   constructor() {
     // A shared/reloaded URL may hit this before the sidenav fetched the catalog.
     // Trigger the (cached) load so the title resolves; the service no-ops if it
@@ -161,7 +154,7 @@ export class CategoryAnalyticsPageComponent {
   // ---------------------------------------------------------------- period
 
   applyPreset(days: number): void {
-    const { from, to } = this.presetRange(days);
+    const { from, to } = presetRange(days);
     this.writePeriod(from, to);
   }
 
@@ -183,22 +176,6 @@ export class CategoryAnalyticsPageComponent {
       queryParams: { from: from ?? null, to: to ?? null },
       queryParamsHandling: 'merge',
     });
-  }
-
-  /** `[today - (days - 1), today]` inclusive, in America/Sao_Paulo. */
-  private presetRange(days: number): { from: string; to: string } {
-    const nowSp = Date.now() - CategoryAnalyticsPageComponent.SP_OFFSET_MS;
-    return {
-      to: this.toIsoDate(nowSp),
-      from: this.toIsoDate(
-        nowSp - (days - 1) * CategoryAnalyticsPageComponent.DAY_MS,
-      ),
-    };
-  }
-
-  /** UTC calendar date of an already SP-shifted timestamp — no DST to trip on. */
-  private toIsoDate(ms: number): string {
-    return new Date(ms).toISOString().slice(0, 10);
   }
 
   // ---------------------------------------------------------------- list
@@ -309,12 +286,8 @@ export class CategoryAnalyticsPageComponent {
 
   // ---------------------------------------------------------------- display
 
-  /**
-   * Format BRL **from the string** the API returns (§2.5). `Number()` lives only
-   * here, at the display boundary — a `parseFloat` upstream would reintroduce the
-   * float error the `numeric` column exists to avoid.
-   */
+  /** Format BRL **from the string** the API returns (§2.5). */
   formatRevenue(revenue: string): string {
-    return this.currencyFormat.format(Number(revenue));
+    return formatBRL(revenue);
   }
 }

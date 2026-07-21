@@ -15,6 +15,7 @@
 import type { ChartConfiguration, ChartDataset } from 'chart.js';
 
 import { SeriesPoint, SeriesReport } from '../../../core/models/analytics.model';
+import { formatBRL } from '../../../core/utils/currency';
 
 /** Which measure the line plots. */
 export type ChartMode = 'qty' | 'revenue';
@@ -34,16 +35,6 @@ export interface ChartTokens {
   inkMuted: string;
   /** `--font-body` — tick/label/tooltip typeface. */
   fontFamily: string;
-}
-
-const BRL = new Intl.NumberFormat('pt-BR', {
-  style: 'currency',
-  currency: 'BRL',
-});
-
-/** Format a `numeric(12,2)` string as BRL currency for a human to read. */
-export function formatRevenue(revenue: string): string {
-  return BRL.format(Number(revenue));
 }
 
 /**
@@ -95,7 +86,7 @@ export function buildAriaLabel(report: SeriesReport, mode: ChartMode): string {
   const total =
     mode === 'qty'
       ? `${points.reduce((sum, point) => sum + point.qty, 0)} unidades`
-      : formatRevenue(
+      : formatBRL(
           points
             .reduce((sum, point) => sum + toPlot(point.revenue), 0)
             .toFixed(2),
@@ -109,7 +100,7 @@ export function buildAriaLabel(report: SeriesReport, mode: ChartMode): string {
 
 /** Tick/tooltip value formatter for the active measure. */
 export function formatValue(value: number, mode: ChartMode): string {
-  return mode === 'qty' ? String(value) : BRL.format(value);
+  return mode === 'qty' ? String(value) : formatBRL(value);
 }
 
 /** Build the single line dataset for the active measure. */

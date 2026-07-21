@@ -29,6 +29,7 @@ import {
   SeriesReport,
 } from '../../../core/models/analytics.model';
 import { AnalyticsService } from '../../../core/services/analytics.service';
+import { formatBRL } from '../../../core/utils/currency';
 import {
   type ChartMode,
   type ChartTokens,
@@ -36,7 +37,6 @@ import {
   buildAriaLabel,
   buildLineConfig,
   datasetValues,
-  formatRevenue,
 } from './sales-series-chart.config';
 
 /**
@@ -153,7 +153,7 @@ export class SalesSeriesChartComponent {
       return null;
     }
     const sales = `${excluded.qty} ${excluded.qty === 1 ? 'venda' : 'vendas'}`;
-    return `Histórico pré-migração: ${sales}, ${formatRevenue(excluded.revenue)}`;
+    return `Histórico pré-migração: ${sales}, ${formatBRL(excluded.revenue)}`;
   });
 
   /** Spoken summary for the chart's `role="img"` element. */
@@ -228,7 +228,7 @@ export class SalesSeriesChartComponent {
 
   /** Format a `numeric(12,2)` string as BRL for the screen-reader table. */
   formatMoney(revenue: string): string {
-    return formatRevenue(revenue);
+    return formatBRL(revenue);
   }
 
   /** @internal Test seam: whether a live Chart.js instance currently exists. */
