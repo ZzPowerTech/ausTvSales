@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.7.0](https://github.com/ZzPowerTech/ausTvSales/compare/frontend-v1.6.0...frontend-v1.7.0) (2026-07-21)
+
+
+### Features
+
+* **frontend:** grafico de serie temporal por item [S5.4] ([d1158dc](https://github.com/ZzPowerTech/ausTvSales/commit/d1158dca3bb2ab78c1e963818300a51721cafdf6))
+* **frontend:** grafico de serie temporal por item [S5.4] ([c8307cf](https://github.com/ZzPowerTech/ausTvSales/commit/c8307cfa5023e240e76a529d604f6e2e3b23877f))
+* **frontend:** integra o grafico na pagina de categoria [S5.4] ([5782dd7](https://github.com/ZzPowerTech/ausTvSales/commit/5782dd7b68011244c77147dac7937c1877dbd6a0))
+
 ## [1.6.0](https://github.com/ZzPowerTech/ausTvSales/compare/frontend-v1.5.0...frontend-v1.6.0) (2026-07-21)
 
 
