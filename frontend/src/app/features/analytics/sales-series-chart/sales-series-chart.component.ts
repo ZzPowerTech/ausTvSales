@@ -100,6 +100,16 @@ export class SalesSeriesChartComponent {
   /** `qty` vs `revenue` — flips the plotted dataset and the Y axis (§5.3). */
   readonly mode = signal<ChartMode>('qty');
 
+  /** Declared before `headingId`, which consumes it during field initialisation. */
+  private static nextInstanceId = 0;
+
+  /**
+   * Per-instance heading id. The category page mounts one chart per **expanded**
+   * item and lets several stay open at once, so a fixed id would repeat in the
+   * DOM and every `aria-labelledby` would resolve to the first one.
+   */
+  readonly headingId = `sales-series-chart-${SalesSeriesChartComponent.nextInstanceId++}`;
+
   private readonly reportSignal = signal<SeriesReport | null>(null);
   private readonly loadingSignal = signal(false);
   private readonly errorSignal = signal(false);

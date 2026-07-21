@@ -1,6 +1,6 @@
-<section class="chart" aria-labelledby="chart-heading">
+<section class="chart" [attr.aria-labelledby]="headingId">
   <header class="chart__head">
-    <h2 class="chart__title" id="chart-heading">Vendas ao longo do tempo</h2>
+    <h2 class="chart__title" [id]="headingId">Vendas ao longo do tempo</h2>
 
     <div class="chart__toggle" role="group" aria-label="Medida do gráfico">
       <button
