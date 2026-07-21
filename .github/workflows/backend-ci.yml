@@ -13,6 +13,10 @@ on:
       - 'backend/**'
       - '.github/workflows/backend-ci.yml'
 
+# Menor privilégio: o job só precisa clonar o repositório.
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest

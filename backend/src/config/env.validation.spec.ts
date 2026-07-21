@@ -174,6 +174,16 @@ describe('validateEnv', () => {
     expect(result.INGEST_ALLOWED_IPS).toBe('203.0.113.10, 198.51.100.5');
   });
 
+  it('rejects an INGEST_ALLOWED_IPS list with a stray comma', () => {
+    expect(() =>
+      validateEnv({
+        DATABASE_URL: VALID_DB_URL,
+        ...AUTH_ENV,
+        INGEST_ALLOWED_IPS: '203.0.113.10,,198.51.100.5',
+      }),
+    ).toThrow(/INGEST_ALLOWED_IPS/);
+  });
+
   it('rejects a missing INGEST_ALLOWED_IPS in production (fail-closed)', () => {
     const withoutIps: Partial<typeof AUTH_ENV> = { ...AUTH_ENV };
     delete withoutIps.INGEST_ALLOWED_IPS;

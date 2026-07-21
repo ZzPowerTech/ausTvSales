@@ -12,34 +12,34 @@ function buildService(raw: string): IngestApiKeyService {
 }
 
 describe('IngestApiKeyService', () => {
-  it('matches the single configured key', () => {
+  it('matches the single configured key', async () => {
     const service = buildService(KEY_A);
-    expect(service.matches(KEY_A)).toBe(true);
+    await expect(service.matches(KEY_A)).resolves.toBe(true);
   });
 
-  it('rejects an unknown key', () => {
+  it('rejects an unknown key', async () => {
     const service = buildService(KEY_A);
-    expect(service.matches(KEY_B)).toBe(false);
+    await expect(service.matches(KEY_B)).resolves.toBe(false);
   });
 
-  it('matches either key when two are configured (rotation window)', () => {
+  it('matches either key when two are configured (rotation window)', async () => {
     const service = buildService(`${KEY_A},${KEY_B}`);
-    expect(service.matches(KEY_A)).toBe(true);
-    expect(service.matches(KEY_B)).toBe(true);
+    await expect(service.matches(KEY_A)).resolves.toBe(true);
+    await expect(service.matches(KEY_B)).resolves.toBe(true);
   });
 
-  it('tolerates surrounding whitespace in the key list', () => {
+  it('tolerates surrounding whitespace in the key list', async () => {
     const service = buildService(` ${KEY_A} , ${KEY_B} `);
-    expect(service.matches(KEY_A)).toBe(true);
-    expect(service.matches(KEY_B)).toBe(true);
+    await expect(service.matches(KEY_A)).resolves.toBe(true);
+    await expect(service.matches(KEY_B)).resolves.toBe(true);
   });
 
-  it('handles candidates of different length without crashing', () => {
+  it('handles candidates of different length without crashing', async () => {
     const service = buildService(KEY_A);
-    // Digest comparison normalizes length, so no RangeError from timingSafeEqual.
-    expect(service.matches('')).toBe(false);
-    expect(service.matches('short')).toBe(false);
-    expect(service.matches('x'.repeat(1000))).toBe(false);
+    // Derived digests have a fixed length, so no RangeError from timingSafeEqual.
+    await expect(service.matches('')).resolves.toBe(false);
+    await expect(service.matches('short')).resolves.toBe(false);
+    await expect(service.matches('x'.repeat(1000))).resolves.toBe(false);
   });
 
   it('throws when the configured key set is empty', () => {

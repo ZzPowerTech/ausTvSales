@@ -26,11 +26,11 @@ export class IngestApiKeyGuard implements CanActivate {
 
   constructor(private readonly apiKeys: IngestApiKeyService) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<Request>();
     const key = this.extractKey(request);
 
-    if (key === null || !this.apiKeys.matches(key)) {
+    if (key === null || !(await this.apiKeys.matches(key))) {
       this.logger.warn(
         `Rejected ingest request ${request.method} ${request.originalUrl} from ${IngestApiKeyGuard.clientIp(request)}: missing or invalid API key`,
       );
@@ -46,12 +46,16 @@ export class IngestApiKeyGuard implements CanActivate {
       return apiKeyHeader;
     }
 
-    // Optional fallback transport allowed by ADR-0001.
+    // Optional fallback transport allowed by ADR-0001. Parsed with plain
+    // string operations — this header is attacker-controlled, so no regex with
+    // backtracking potential may touch it (CodeQL js/polynomial-redos).
     const authorization = request.headers['authorization'];
     if (typeof authorization === 'string') {
-      const match = /^Bearer\s+(.+)$/i.exec(authorization.trim());
-      if (match) {
-        const token = match[1].trim();
+      const trimmed = authorization.trim();
+      const scheme = trimmed.slice(0, 6);
+      const separator = trimmed.charAt(6);
+      if (scheme.toLowerCase() === 'bearer' && /^\s$/.test(separator)) {
+        const token = trimmed.slice(7).trim();
         if (token.length > 0) {
           return token;
         }
