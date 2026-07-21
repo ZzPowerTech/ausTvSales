@@ -33,41 +33,68 @@ function buildGuard(raw: string): IngestApiKeyGuard {
 }
 
 describe('IngestApiKeyGuard', () => {
-  it('accepts a request carrying a valid X-Api-Key', () => {
+  it('accepts a request carrying a valid X-Api-Key', async () => {
     const guard = buildGuard(KEY_A);
-    expect(guard.canActivate(buildContext({ 'x-api-key': KEY_A }))).toBe(true);
+    await expect(
+      guard.canActivate(buildContext({ 'x-api-key': KEY_A })),
+    ).resolves.toBe(true);
   });
 
-  it('accepts the second key during a rotation window', () => {
+  it('accepts the second key during a rotation window', async () => {
     const guard = buildGuard(`${KEY_A},${KEY_B}`);
-    expect(guard.canActivate(buildContext({ 'x-api-key': KEY_B }))).toBe(true);
+    await expect(
+      guard.canActivate(buildContext({ 'x-api-key': KEY_B })),
+    ).resolves.toBe(true);
   });
 
-  it('accepts a valid key via Authorization: Bearer fallback', () => {
+  it('accepts a valid key via Authorization: Bearer fallback', async () => {
     const guard = buildGuard(KEY_A);
-    expect(
+    await expect(
       guard.canActivate(buildContext({ authorization: `Bearer ${KEY_A}` })),
-    ).toBe(true);
+    ).resolves.toBe(true);
   });
 
-  it('rejects a request with no credential (401)', () => {
+  it('accepts a case-insensitive Bearer scheme with extra whitespace', async () => {
     const guard = buildGuard(KEY_A);
-    expect(() => guard.canActivate(buildContext({}))).toThrow(
+    await expect(
+      guard.canActivate(
+        buildContext({ authorization: `  bearer   ${KEY_A}  ` }),
+      ),
+    ).resolves.toBe(true);
+  });
+
+  it('rejects an Authorization header with a scheme but no token (401)', async () => {
+    const guard = buildGuard(KEY_A);
+    await expect(
+      guard.canActivate(buildContext({ authorization: 'Bearer   ' })),
+    ).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('rejects a non-Bearer Authorization scheme (401)', async () => {
+    const guard = buildGuard(KEY_A);
+    await expect(
+      guard.canActivate(buildContext({ authorization: `Basic ${KEY_A}` })),
+    ).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('rejects a request with no credential (401)', async () => {
+    const guard = buildGuard(KEY_A);
+    await expect(guard.canActivate(buildContext({}))).rejects.toThrow(
       UnauthorizedException,
     );
   });
 
-  it('rejects a request with an invalid key (401)', () => {
+  it('rejects a request with an invalid key (401)', async () => {
     const guard = buildGuard(KEY_A);
-    expect(() =>
+    await expect(
       guard.canActivate(buildContext({ 'x-api-key': KEY_B })),
-    ).toThrow(UnauthorizedException);
+    ).rejects.toThrow(UnauthorizedException);
   });
 
-  it('rejects a key of a different length without crashing (401)', () => {
+  it('rejects a key of a different length without crashing (401)', async () => {
     const guard = buildGuard(KEY_A);
-    expect(() =>
+    await expect(
       guard.canActivate(buildContext({ 'x-api-key': 'short' })),
-    ).toThrow(UnauthorizedException);
+    ).rejects.toThrow(UnauthorizedException);
   });
 });

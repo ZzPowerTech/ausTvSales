@@ -105,7 +105,9 @@ export class EnvironmentVariables {
       o.NODE_ENV === Environment.Production ||
       o.INGEST_ALLOWED_IPS !== undefined,
   )
-  @Matches(/^\s*\S+\s*(,\s*\S+\s*)*$/, {
+  // Token charset excludes ',' so the alternation is unambiguous (no
+  // backtracking blowup — CodeQL js/redos); it also rejects stray commas.
+  @Matches(/^\s*[^\s,]+\s*(,\s*[^\s,]+\s*)*$/, {
     message:
       'INGEST_ALLOWED_IPS must be a comma-separated list of IP addresses (required in production)',
   })

@@ -13,6 +13,11 @@ on:
       - 'plugin/**'
       - '.github/workflows/plugin-ci.yml'
 
+# Menor privilégio: o job só precisa clonar o repositório e subir artefatos
+# de teste (upload-artifact não exige escopo extra do GITHUB_TOKEN).
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
