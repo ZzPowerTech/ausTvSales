@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.1](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.10.0...backend-v0.10.1) (2026-07-21)
+
+
+### Bug Fixes
+
+* **security:** resolve os 6 alertas do CodeQL (regex, hash de API key, permissions de CI) ([2e69c7b](https://github.com/ZzPowerTech/ausTvSales/commit/2e69c7b9db63d646f25e666e712ad21b30374493))
+* **security:** resolve os 6 alertas do CodeQL (regex, hash de API key, permissions de CI) ([a7147f5](https://github.com/ZzPowerTech/ausTvSales/commit/a7147f5918e2bf53a2c2c9f627bcb93dcf9c32b9))
+
 ## [0.10.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.9.0...backend-v0.10.0) (2026-07-20)
 
 
