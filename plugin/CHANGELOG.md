@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.0](https://github.com/ZzPowerTech/ausTvSales/compare/plugin-v0.6.0...plugin-v0.7.0) (2026-07-22)
+
+
+### Features
+
+* **plugin:** adiciona tab complete ao comando /austv-sales ([831c679](https://github.com/ZzPowerTech/ausTvSales/commit/831c6795593a17ae4f545c0d6f25005ace79fa3c))
+* **plugin:** adiciona tab complete ao comando /austv-sales ([67fb55e](https://github.com/ZzPowerTech/ausTvSales/commit/67fb55e8cd2268e7b87b7b05398e004cd5dafcc7))
+
 ## [0.6.0](https://github.com/ZzPowerTech/ausTvSales/compare/plugin-v0.5.0...plugin-v0.6.0) (2026-07-17)
 
 
