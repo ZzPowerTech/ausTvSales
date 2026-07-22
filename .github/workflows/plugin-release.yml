@@ -4,24 +4,45 @@ name: plugin-release
 # cria uma tag `plugin-vX.Y.Z`. Gera tambem um .jar.sha256 usado pelo auto-update
 # do plugin (PR #3) para validar a integridade do download antes de aplicar.
 #
-# Requer que o release do plugin tenha sido criado por um PAT (RELEASE_PLEASE_TOKEN):
-# releases criados pelo GITHUB_TOKEN nativo nao disparam o evento `release`.
-
+# Disparo:
+#  - release: published — fluxo normal (release-please cria a tag). Releases criados
+#    pelo GITHUB_TOKEN nativo nao disparam o evento; requer PAT (RELEASE_PLEASE_TOKEN).
+#  - workflow_dispatch — re-disparo manual por tag. Um run de release que azara um
+#    hiccup de runner (job preso em `queued`) fica marcado como nao-reexecutavel
+#    pelo GitHub; este gatilho reconstroi e reanexa os assets a mesma tag sem
+#    depender do "re-run" nativo nem de deletar/recriar o release.
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag do release cujos assets serao (re)construidos (ex.: plugin-v0.7.0)'
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 jobs:
   publish-jar:
-    # release-please cria um release por componente; reage apenas aos do plugin.
-    if: startsWith(github.event.release.tag_name, 'plugin-v')
+    # release-please cria um release por componente; reage apenas aos do plugin
+    # (evento release), ou a um dispatch manual cuja tag seja do plugin.
+    if: startsWith(github.event.release.tag_name || inputs.tag, 'plugin-v')
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve tag
+        id: tag
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Sempre a partir da tag resolvida: no dispatch o ref padrao seria o
+          # branch default e construiria o codigo errado.
+          ref: ${{ steps.tag.outputs.tag }}
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -49,4 +70,4 @@ jobs:
         working-directory: plugin/build/libs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.event.release.tag_name }}" "$PLUGIN_JAR" "$PLUGIN_JAR.sha256" --clobber
+        run: gh release upload "${{ steps.tag.outputs.tag }}" "$PLUGIN_JAR" "$PLUGIN_JAR.sha256" --clobber
