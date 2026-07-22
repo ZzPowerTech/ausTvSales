@@ -3,11 +3,22 @@ name: backend-release
 # Ao publicar um release backend-vX.Y.Z (via release-please), builda a imagem Docker
 # do backend, publica no GHCR e (quando a VPS estiver configurada) faz deploy via SSH.
 #
-# Requer release criado por PAT (RELEASE_PLEASE_TOKEN) para o evento `release` disparar.
-
+# Disparo:
+#  - release: published — fluxo normal (release-please cria a tag).
+#    Requer release criado por PAT (RELEASE_PLEASE_TOKEN) para o evento disparar.
+#  - workflow_dispatch — re-disparo manual por tag. Um run de release que azara um
+#    hiccup de runner (job preso em `queued`) fica marcado como nao-reexecutavel
+#    pelo GitHub; este gatilho reconstroi e reimplanta a mesma tag sem depender do
+#    "re-run" nativo nem de deletar/recriar o release.
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag do release a (re)construir e implantar (ex.: backend-v0.10.1)'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -15,16 +26,29 @@ permissions:
 
 jobs:
   build-and-deploy:
-    if: startsWith(github.event.release.tag_name, 'backend-v')
+    # Reage ao release do backend, ou a um dispatch manual cuja tag seja do backend.
+    # `release` traz a tag em github.event.release.tag_name; no dispatch ela vem do
+    # input, entao o `||` cobre os dois casos sem ramificar por event_name.
+    if: startsWith(github.event.release.tag_name || inputs.tag, 'backend-v')
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve tag
+        id: tag
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Sempre a partir da tag resolvida: no dispatch o ref padrao seria o
+          # branch default e construiria o codigo errado.
+          ref: ${{ steps.tag.outputs.tag }}
 
       - name: Resolve image vars
         id: img
         env:
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
           version="${TAG#backend-v}"
           owner="${GITHUB_REPOSITORY_OWNER,,}"
