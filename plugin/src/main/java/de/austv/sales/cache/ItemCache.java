@@ -30,6 +30,16 @@ public final class ItemCache {
   }
 
   /**
+   * The last successfully synced active set, for callers that need to enumerate rather than test a
+   * single id (tab completion). Always immutable - both {@code Set.of()} and {@code Set.copyOf} in
+   * {@link #replaceAll(Set)} produce unmodifiable sets - so no defensive copy is needed here, and
+   * the read is a single lock-free volatile access on the command path.
+   */
+  public Set<String> activeItemIds() {
+    return activeItemIds;
+  }
+
+  /**
    * Atomically replaces the active set after a successful sync. Defensively copies {@code active}
    * into an immutable {@link Set} so the caller's mutable collection (if any) can't leak into the
    * cache and be mutated after the fact.

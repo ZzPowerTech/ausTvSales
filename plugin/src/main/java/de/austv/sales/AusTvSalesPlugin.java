@@ -6,6 +6,7 @@ import de.austv.sales.api.SaleApiConfig;
 import de.austv.sales.cache.ItemCache;
 import de.austv.sales.cache.ItemSyncTask;
 import de.austv.sales.command.SaleCommandExecutor;
+import de.austv.sales.command.SaleCommandTabCompleter;
 import de.austv.sales.queue.SaleQueue;
 import de.austv.sales.queue.SaleQueueWorker;
 import de.austv.sales.update.UpdateChecker;
@@ -68,6 +69,7 @@ public final class AusTvSalesPlugin extends JavaPlugin {
     var command = getCommand("austv-sales");
     if (command != null) {
       command.setExecutor(new SaleCommandExecutor(this, apiClient, saleQueue, itemCache));
+      command.setTabCompleter(new SaleCommandTabCompleter(this, itemCache));
     } else {
       getLogger().severe("Command 'austv-sales' not found in plugin.yml.");
     }
