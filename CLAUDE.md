@@ -76,8 +76,18 @@ Lista completa em [`.specs/project/PROJECT.md`](.specs/project/PROJECT.md) seç�
 
 ## Estado atual
 
-Sprints 1–4 entregues (fundação + ingestão + resiliência do plugin + administração de catálogo
-no dashboard). **Sprint 5 em planejamento aprovado** (visualização: navegação de análise, ranking
-top 5, gráfico temporal) — plano em [`.specs/sprints/sprint-05.md`](.specs/sprints/sprint-05.md),
-design em [`.specs/features/sprint-05-dashboard-analytics/spec.md`](.specs/features/sprint-05-dashboard-analytics/spec.md).
-Próximo passo: implementar a S5.0 (gerador de vendas sintéticas), primeiro PR do sprint.
+Sprints 1–5 entregues (fundação + ingestão + resiliência do plugin + administração de catálogo +
+visualização: navegação de análise, ranking top 5 e gráfico de série temporal).
+
+**Próximo: Sprint 6** — migração histórica, cutover dos rewards do Genesis e validação final de
+segurança. Fecha o MVP (CA7, CA8, CA9). Plano em
+[`.specs/sprints/sprint-06.md`](.specs/sprints/sprint-06.md); issues #27–#30 abertas.
+
+### Épico paralelo: AusTV Admin (analytics de retenção)
+
+Projeto separado, especificado neste repo em `.specs/features/austv-admin/`. **Bloqueado:** o spec
+v2 e o plano de 19 histórias nunca foram commitados. O que sobreviveu está em
+[`.specs/features/austv-admin/HANDOFF.md`](.specs/features/austv-admin/HANDOFF.md) — números
+verificados, resumo dos ADRs, perguntas em aberto e riscos aceitos. Ler os avisos do topo antes de
+planejar qualquer coisa; há também um conflito de numeração de sprint com o Sprint 6 do
+`ausTvSales` a resolver.
