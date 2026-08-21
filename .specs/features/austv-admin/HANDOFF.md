@@ -113,15 +113,23 @@ sair sob pressão.
 As sprints do AusTV Admin reaproveitam os componentes de gráfico da Sprint 5 do `ausTvSales`
 (entregue) — o que **encolhe** a S12.
 
-### Conflito de numeração a resolver
+### Conflito de numeração — RESOLVIDO em 2026-08-21
 
-O handoff original numera as sprints do AusTV Admin de **6 a 12**. O `ausTvSales` **já tem** um
-Sprint 6 próprio (`.specs/sprints/sprint-06.md` — migração histórica, cutover no Genesis, go-live),
-com as issues **#27, #28, #29 e #30 abertas** no GitHub desde 2026-07-13. As duas numerações
-colidem, e junto com elas colidiriam as labels `sprint:6`.
+O plano numera as sprints do AusTV Admin de **6 a 12**. O `ausTvSales` **já tem** um Sprint 6
+próprio (`.specs/sprints/sprint-06.md` — migração histórica, cutover no Genesis, go-live), com as
+issues **#27, #28, #29 e #30 abertas** desde 2026-07-13.
 
-Resolver **antes** de abrir qualquer issue deste épico. Opções: renumerar o AusTV Admin a partir de
-outra faixa, prefixar as labels por projeto (`admin:sprint-6`), ou separar em milestones distintos.
+**Decisão do Murilo (2026-08-21): não renumerar.** A numeração dos documentos fica como está, e a
+separação acontece nos metadados do GitHub:
+
+| eixo | AusTV Admin | ausTvSales |
+|---|---|---|
+| milestone | `AusTV Admin S6` … `AusTV Admin S12` | `ausTvSales S6` |
+| label de sprint | `admin:sprint-6` … `admin:sprint-12` | `sales:sprint-6` |
+
+Motivo: o spec e o plano se referenciam por `S6.1`, `S6.2b`, `S9.1` em dezenas de pontos — inclusive
+a §10b do spec, que cita a `S6.2b` nominalmente. Renumerar quebraria todas essas referências
+cruzadas para resolver um problema que é só de organização no GitHub.
 
 ### Issues no GitHub
 

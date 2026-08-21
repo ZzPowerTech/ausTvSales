@@ -93,9 +93,12 @@ Projeto separado, especificado neste repo em `.specs/features/austv-admin/`. Doc
 - [`HANDOFF.md`](.specs/features/austv-admin/HANDOFF.md) — números verificados da investigação de
   retenção, perguntas em aberto e os erros de método a não repetir
 
-**Dois itens a resolver antes de abrir issues deste épico:** o conflito de numeração de sprint com
-o Sprint 6 do `ausTvSales` (issues #27–#30 já usam essa faixa) e a divergência de story points do
-backlog (soma 105, documento afirma 86 e 88). Ambos descritos no topo do `HANDOFF.md`.
+**Convenção de numeração (decidida em 2026-08-21):** as sprints do AusTV Admin e do `ausTvSales`
+colidem na faixa 6. Os documentos **não** são renumerados; a separação é por milestone
+(`AusTV Admin S6` vs `ausTvSales S6`) e por label prefixada (`admin:sprint-6` vs `sales:sprint-6`).
+
+**Em aberto:** a divergência de story points do backlog — soma 105, o documento afirma 86 num ponto
+e 88 noutro. Descrita no topo do `HANDOFF.md`.
 
 Precedência: este sistema **mede**; não conserta. As correções do funil de onboarding vêm na
 frente.
