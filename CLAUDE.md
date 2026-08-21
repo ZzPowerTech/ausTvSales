@@ -85,9 +85,17 @@ segurança. Fecha o MVP (CA7, CA8, CA9). Plano em
 
 ### Épico paralelo: AusTV Admin (analytics de retenção)
 
-Projeto separado, especificado neste repo em `.specs/features/austv-admin/`. **Bloqueado:** o spec
-v2 e o plano de 19 histórias nunca foram commitados. O que sobreviveu está em
-[`.specs/features/austv-admin/HANDOFF.md`](.specs/features/austv-admin/HANDOFF.md) — números
-verificados, resumo dos ADRs, perguntas em aberto e riscos aceitos. Ler os avisos do topo antes de
-planejar qualquer coisa; há também um conflito de numeração de sprint com o Sprint 6 do
-`ausTvSales` a resolver.
+Projeto separado, especificado neste repo em `.specs/features/austv-admin/`. Documentos canônicos:
+
+- [`spec.md`](.specs/features/austv-admin/spec.md) — spec v2 (ADRs 001–008, funil de 4 degraus,
+  camada de economia, superfície de ataque, risco de rede aceito pelo dono)
+- [`austv-admin-sprints.md`](.specs/sprints/austv-admin-sprints.md) — 19 histórias, Sprint 6 → 12
+- [`HANDOFF.md`](.specs/features/austv-admin/HANDOFF.md) — números verificados da investigação de
+  retenção, perguntas em aberto e os erros de método a não repetir
+
+**Dois itens a resolver antes de abrir issues deste épico:** o conflito de numeração de sprint com
+o Sprint 6 do `ausTvSales` (issues #27–#30 já usam essa faixa) e a divergência de story points do
+backlog (soma 105, documento afirma 86 e 88). Ambos descritos no topo do `HANDOFF.md`.
+
+Precedência: este sistema **mede**; não conserta. As correções do funil de onboarding vêm na
+frente.

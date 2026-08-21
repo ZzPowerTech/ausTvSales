@@ -6,23 +6,28 @@
 
 ---
 
-## ⚠️ Estado de verificação deste documento
+## Estado de verificação deste documento
 
-Este HANDOFF referencia dois documentos canônicos que **não existem no repositório**. Verificado
-em 2026-08-21 contra todo o histórico do git (`git log --all --diff-filter=A`), todas as branches
-remotas (`git ls-remote --heads`) e a árvore de trabalho:
+Na primeira leitura (2026-08-21) este HANDOFF afirmava que dois documentos canônicos já estavam no
+repositório. Verificado contra todo o histórico do git (`git log --all --diff-filter=A`), todas as
+branches remotas (`git ls-remote --heads`) e a árvore de trabalho: **não estavam**. Foram
+localizados no Google Drive do Murilo (pasta `Austv`) e versionados no mesmo dia.
 
-| documento referenciado | estado |
+| documento | estado |
 |---|---|
-| `.specs/features/austv-admin/spec.md` — spec v2 com ADRs, requisitos por camada, entidades, superfície de ataque, critérios de aceite | **ausente** — nunca commitado |
-| `.specs/sprints/austv-admin-sprints.md` — 19 histórias, Sprint 6 → 12, 88 SP, DoD e grafo de dependências | **ausente** — nunca commitado |
-| `austv-diagnostico.ps1`, `austv-diagnostico2.ps1`, `austv-diagnostico3.ps1`, `plan-forense.sh`, `plan-analise.sql` | **ausentes** — entregues por chat, nunca versionados |
+| [`spec.md`](spec.md) — spec v2 com ADRs, requisitos por camada, entidades, superfície de ataque, critérios de aceite | **restaurado** do Drive em 2026-08-21 |
+| [`../../sprints/austv-admin-sprints.md`](../../sprints/austv-admin-sprints.md) — 19 histórias, Sprint 6 → 12, DoD e grafo de dependências | **restaurado** do Drive em 2026-08-21 |
+| `austv-diagnostico.ps1`, `austv-diagnostico2.ps1`, `austv-diagnostico3.ps1`, `plan-forense.sh`, `plan-analise.sql` | **ainda ausentes** — entregues por chat, nunca versionados. Bloqueiam a S6.0 |
 
-**Consequência prática:** o épico do AusTV Admin não é executável a partir do repositório no estado
-atual. O que sobrevive é o conteúdo transcrito abaixo — números verificados, resumo dos ADRs,
-perguntas em aberto e riscos aceitos. O *raciocínio* por trás das decisões (o "porquê" que o spec
-carregava) **não** sobrevive. Restaurar os dois documentos é o pré-requisito de qualquer sprint
-deste épico.
+### Divergência de story points no plano restaurado
+
+O backlog consolidado do plano de sprints **soma 105 SP** (S6 22 · S7 13 · S8 13 · S9 13 · S10 13 ·
+S11 13 · S12 18, em 19 histórias). O próprio documento afirma **86 SP** na tabela "Mudanças da v1"
+e **88 SP** logo abaixo do backlog. Os três números não fecham.
+
+Isso não é detalhe de contagem: a 13 SP/semana, 105 SP são 8 semanas, não 7; e na velocidade real
+de 6–8 SP que o próprio plano manda medir na S6, são **13–17 semanas**. O documento foi versionado
+como o Murilo o aprovou, sem correção unilateral — a reconciliação é decisão dele.
 
 Tudo abaixo desta seção é transcrição fiel do handoff original, sem acréscimo de conteúdo novo.
 
@@ -120,10 +125,10 @@ outra faixa, prefixar as labels por projeto (`admin:sprint-6`), ou separar em mi
 
 ### Issues no GitHub
 
-**Não foram criadas** — a ferramenta falhou no fim da sessão original. O plano de sprints tinha
-tudo que era preciso (19 histórias com título, critérios de aceite, estimativa, branch sugerida e
-dependências), mas esse plano é um dos documentos ausentes. Mapeamento sugerido, quando o plano for
-restaurado: sprint → milestone, história → issue, labels `sprint:N`, `epic:*`, `type:*`, `blocker`.
+**Ainda não foram criadas** — a ferramenta falhou no fim da sessão original. Com o plano restaurado
+em 2026-08-21, o material existe: 19 histórias com título, critérios de aceite, estimativa, branch
+sugerida e dependências. Mapeamento sugerido: sprint → milestone, história → issue, labels
+`sprint:N`, `epic:*`, `type:*`, `blocker`. **Resolver antes o conflito de numeração abaixo.**
 
 > **Armadilha conhecida (do vault):** `gh` no PowerShell corrompe acento quando recebe string por
 > pipe. Gravar o corpo em arquivo UTF-8 sem BOM e usar `gh issue create --body-file`.
