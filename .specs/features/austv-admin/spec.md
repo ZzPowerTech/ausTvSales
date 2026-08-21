@@ -1,0 +1,452 @@
+# AusTV Admin — Spec (v2)
+
+**Projeto:** AusTV Admin — instrumentação e leitura única do AusTV Network
+**Autor:** Murilo Weiss · **Revisão:** 2026-08-21 · **Status:** aguardando aprovação
+**Metodologia:** SDD → Scrum → worktree → Conventional Commits → code-reviewer +
+`cybersecurity-validator` → testes
+
+**v2 substitui a v1 de 2026-08-20.** A v1 foi escrita antes de a instrumentação ser investigada.
+O que mudou está na §2.
+
+## 1. Objetivo
+
+Duas coisas, nesta ordem de importância:
+
+1. **Tornar impossível a cegueira silenciosa.** Todo problema grave encontrado no AusTV ficou
+   invisível por meses porque nada avisava que o instrumento estava quebrado.
+2. Dar uma leitura única de quem joga, por quanto tempo, em qual plataforma, quanto gasta e o que
+   pede.
+
+**Critério de sucesso:** um problema de instrumentação ou de funil é detectado em **dias**, não em
+meses. E "o que aconteceu no mês X?" se responde em minutos.
+
+## 2. O que a investigação de 2026-08-19/21 mudou
+
+| Descoberta | Efeito no spec |
+|---|---|
+| Plan já instalado no proxy (AusTv) e no backend (Survival), em **bancos separados** | PR de infra vira **unificação**, não instalação |
+| Proxy grava usuários, **backends gravam sessões** | Aquisição vem do proxy, retenção do backend — camadas diferentes, não redundância |
+| **54% de quem conecta na rede nunca chega ao survival** | Novo degrau de funil, nunca medido. Vira métrica de primeira classe |
+| Plataforma sai do UUID em SQL puro, com 100% de acerto | **A DataExtension de plataforma foi cancelada.** Uma sprint inteira eliminada |
+| Plan de produção rodava em **SQLite**; o MySQL consultado estava pela metade | Saúde da instrumentação vira requisito, não enfeite |
+| Plan do proxy **parou de coletar de maio a agosto/2026** sem ninguém notar | idem |
+| Tutorial parou de capturar novatos em **dez/2025**; taxa de entrada caiu de ~100% para 12% ao longo de 8 meses | Vira métrica monitorada com alerta |
+| Colapso real de aquisição é **fev/2026**, não dez/2025 | Causa ainda desconhecida — investigação em aberto |
+| Mix de plataforma atual ≠ o histórico (59,2% Bedrock é *all-time*) | Todo número de plataforma precisa de janela explícita |
+| `java_offline` converte proxy→survival a 39,3% contra 71,5% do Bedrock | Suspeita de tráfego de bot inflando aquisição. Precisa de filtro |
+| Economia já instrumentada: `playerpoints_points` (saldo), `playerpoints_transaction_log` (transações), e o `ausTvSales` já classifica onde o cash foi gasto | **ausPlanBridge reduzido a quase nada** (§5.2). Nasce a camada de economia (§6.4) |
+
+## 3. Fora de escopo
+
+- Reescrever coleta de sessão/playtime/AFK — o Plan faz.
+- Fork do Plan ou fusão de repositórios (ADR-001).
+- Painel de retenção em tempo real — com dezenas de chegadas/mês seria ruído. Retenção é relatório
+  periódico.
+- Coleta de **conteúdo** de chat. Só contagem.
+- Correções do tutorial e do funil — trilha paralela, precedência sobre este spec.
+
+## 4. Decisões de arquitetura
+
+### ADR-001 — Plan upstream como serviço de dados, consumido pela API JSON
+
+Plan roda sem modificação; o AusTV Admin consome a **API JSON** (`/v1/*`) a partir da VPS. O
+frontend é 100% Angular próprio; o React do Plan é ignorado (acessível só pelo IP da VPS, nunca
+público).
+
+Alternativas rejeitadas — fork e fusão de repositórios — com bloqueios verificados nos arquivos
+reais:
+
+| bloqueio | evidência |
+|---|---|
+| Licença | `ausTvSales/LICENSE` é **MIT**; Plan é **LGPL-3.0**. LGPL não entra em repo MIT mantendo MIT |
+| Banco | `ausTvSales` = PostgreSQL/Drizzle. Plan = MySQL |
+| Frontend | `ausTvSales` = Angular 19 + Signals. Plan = React/Bootstrap/HighCharts |
+| Manutenção | ~7.090 commits, 189 releases, 12 módulos Gradle |
+
+Endpoints: `/v1/serverOverview` · `/v1/onlineOverview` · `/v1/playerbaseOverview` ·
+`/v1/performanceOverview` · `/v1/playersTable` · `/v1/sessions` · `/v1/player?player=<uuid>` ·
+`/player/<uuid>/raw` ·
+`/v1/graph?type=uniqueAndNew|activity|punchCard|worldPie|geolocation|calendar|aggregatedPing`.
+Lista atual em `/docs` do webserver.
+
+### ADR-002 — NestJS fala com `/v1/*`, nunca com as tabelas do Plan
+
+Schema interno muda entre versões; a API JSON é a superfície estável. Exceção única e documentada:
+as consultas de coorte histórica (§6.2), que precisam de SQL direto — em usuário **read-only**, e
+isoladas num único módulo.
+
+### ADR-003 — `platform` é dimensão de primeira classe, derivada do UUID
+
+```sql
+uuid LIKE '00000000-0000-0000-0009-%'  -- bedrock (Floodgate)
+SUBSTRING(uuid,15,1) = '3'             -- java_offline
+SUBSTRING(uuid,15,1) = '4'             -- java_premium
+```
+
+Validado sobre 49.302 arquivos com 100% de acerto. **Não requer plugin.** Toda métrica de jogador
+carrega `platform`, sempre com janela temporal explícita.
+
+### ADR-004 — `ausTvSales` continua MIT e intocado pela LGPL
+
+Nenhum arquivo do Plan é copiado para o monorepo. Item de checklist na revisão de PR.
+
+### ADR-005 — Um único banco MySQL para toda a rede
+
+Requisito do Plan para setup de rede. Sem isso não existe visão de rede, identidade unificada de
+jogador nem **tempo por servidor**. Proxy e backends **na mesma build** do Plan — builds diferentes
+compartilhando banco corrompem schema.
+
+### ADR-007 — Economia vem de banco, não de plugin
+
+Cash, transações e classificação de gasto já existem em banco e são legíveis pelo NestJS:
+
+| dado | fonte | acoplamento |
+|---|---|---|
+| saldo em cash | `playerpoints_points` | baixo — schema trivial e estável |
+| transações (take do servidor, pagamento entre jogadores) | `playerpoints_transaction_log` | baixo |
+| classificação de onde o gasto foi | **ausTvSales** (PostgreSQL próprio) | nenhum — é nosso |
+| cargo LuckPerms | banco do LuckPerms | baixo — schema documentado |
+| variáveis do MyCommand | `s1_mycommand_playerdata` | **alto e frágil** — adiado |
+
+Todo acesso em usuário **read-only** dedicado. Leitura direta de schema de plugin é acoplamento
+aceito **apenas** onde o schema é trivial e estável; MyCommand fica de fora por isso.
+
+**Restrição descoberta em 2026-08-21:** `playerpoints_transaction_log` **não tem índice nenhum** —
+nem chave primária, nem em `receiver`, `timestamp` ou `source`. Qualquer agregação vira *full table
+scan* no MySQL que o servidor de jogo usa.
+
+Portanto a economia **não é lida ao vivo**: um **job noturno de ETL** copia as transações para o
+PostgreSQL do `ausTvSales`, indexado, e toda análise roda lá. Isso resolve três problemas de uma
+vez — zero carga analítica na instância do jogo, índices sob nosso controle, e uma única superfície
+a corrigir se o PlayerPoints mudar de schema.
+
+Schema de origem (2026-08-21): `transaction_type varchar(20)` · `description varchar(100)` ·
+`source varchar(36) NULL` · `receiver varchar(36)` · `amount int(11)` · `timestamp timestamp`.
+**`source` nulo = movimento do sistema**; `source` preenchido = origem identificada.
+
+**Conteúdo real (2026-08-21):** 6.664 linhas, de **2026-01-30** a hoje — ~7 meses, começando junto
+com o colapso de aquisição de fevereiro. **A camada de economia é prospectiva**, sem período
+saudável para comparação.
+
+| transaction_type | n | amount | sem source | significado |
+|---|---|---|---|---|
+| OFFSET | 4.033 | −13.000 a **9.999.999** | 2.149 | Take = gasto · Give = concessão |
+| SET | 1.299 | 0–50 | 1.296 | Starting balance = **criação de conta** |
+| PAY_RECEIVER | 666 | 1 a 60.000 | 0 | pagamento recebido |
+| PAY_SENDER | 666 | −60.000 a −1 | 0 | pagamento enviado |
+
+Três consequências viram requisito:
+
+**R1 — `SET`/`Starting balance` é uma série de chegadas independente**, contínua, que **cobre o
+apagão do Plan no proxy (mai–jul/2026)**. Usar como fonte de reconciliação do funil da §6.2, não só
+como dado de economia.
+
+**R2 — Outlier de 9.999.999 é concessão administrativa, não receita.** Nenhuma soma, média ou
+métrica de receita pode incluir grant de staff. Regra de negócio, não refinamento.
+
+**R3 — RESOLVIDO em 2026-08-21: não existe join.** O escopo é **analytics apenas**; reconciliação
+entre `transaction_log` e `ausTvSales` está fora. As duas fontes não se cruzam:
+
+| pergunta | fonte única | PlayerPoints envolvido? |
+|---|---|---|
+| E1 — receita por plataforma e coorte | ausTvSales (PostgreSQL próprio) | não |
+| E2 — tempo até o primeiro gasto, gasto por posição no funil | ausTvSales | não |
+| E3 — contato social e feed de pagamentos | `playerpoints_transaction_log`, **só linhas `PAY_*`** | sim |
+
+Consequências: **nenhuma alteração no plugin do `ausTvSales`** (o ADR-007 mantém zero Java na v1);
+o ETL importa apenas `PAY_SENDER`/`PAY_RECEIVER` (1.332 de 6.664 linhas); `OFFSET`, `SET` e
+`description` ficam fora do escopo de economia — exceto `SET`/`Starting balance`, que segue como
+série de chegadas (R1).
+
+**R4 — 666 pagamentos em 6,7 meses (~3/dia)** com ~579 ativos. A economia social está quase parada
+— consistente com guerras e clãs desligados. E3 nasce com amostra pequena; medir sim, esperar
+conclusão rápida não.
+
+### ADR-008 — PostgreSQL é o armazém analítico; as fontes são ETL
+
+Os dados vivem em bancos **fisicamente separados e de motores diferentes**. JOIN entre eles é
+impossível em SQL — toda correlação acontece depois que os dados aterrissam no mesmo lugar.
+
+| dado | onde vive | motor | como chega ao Admin |
+|---|---|---|---|
+| vendas / gasto classificado | VPS do sales.austv.net | **PostgreSQL** (nosso) | já está lá |
+| métricas de jogador, sessão, funil | VPS do jogo | MySQL do Plan | **HTTP `/v1/*`** (ADR-002), nunca SQL |
+| pagamentos entre jogadores | VPS do jogo | MySQL do PlayerPoints | **ETL noturno** (ADR-007) |
+| coorte histórica | VPS do jogo | MySQL do Plan | exceção documentada: SQL read-only, módulo isolado |
+
+**Regra:** o PostgreSQL do `ausTvSales` é o único lugar onde dados de fontes diferentes se cruzam.
+Nada de correlação em memória entre resultados de dois bancos ao vivo.
+
+Consequências práticas:
+
+- **E1 (receita por plataforma) é Postgres puro.** A plataforma sai do `player_uuid` que o
+  `ausTvSales` já guarda (ADR-003). Zero dependência externa.
+- **E2 (gasto por posição no funil) exige uma dimensão `player` no Postgres** — uuid, platform,
+  first_seen, posição no funil — alimentada por ETL a partir do Plan. É o que torna o cruzamento
+  possível.
+- **E3/E4 (social)** dependem do ETL de `PAY_*`.
+
+**Rede e segredos:** o ETL cruza da VPS do sales.austv.net para a do jogo (jogar.austv.net /
+198.89.99.229). A porta do MySQL do jogo **não pode estar aberta à internet** — túnel SSH ou
+allowlist do IP da VPS da aplicação. Credenciais em variável de ambiente; usuário **read-only**
+dedicado por fonte, nunca o usuário do plugin.
+
+**Degradação:** fonte inalcançável → o dado correspondente é servido com marca de *stale* e **a
+data da última sincronização visível**. Nunca zero, nunca silêncio.
+
+### ADR-006 — O sistema precisa detectar a própria cegueira
+
+Todo desastre encontrado foi silencioso: Plan em SQLite por meses, proxy morto de maio a agosto,
+tutorial sem capturar por 8 meses. **Painel que não detecta a própria falha de coleta é pior que
+nenhum painel**, porque produz confiança falsa.
+
+Consequência: os checks de saúde da §6.1 são **PR 1**, antes de qualquer gráfico, e disparam alerta
+ativo no Discord — não ficam esperando alguém abrir a página.
+
+## 5. Componentes
+
+```
+┌── Paper: Survival ─────────┐   ┌── Velocity: AusTv ────┐
+│  Plan (upstream)           │   │  Plan (upstream)      │
+│  ausPlanBridge  ← novo     │   │  webserver 127.0.0.1  │
+└─────────────┬──────────────┘   └──────────┬────────────┘
+              └──────────┬──────────────────┘
+                         ▼
+              MySQL ÚNICO do Plan (ADR-005)
+                         │
+                   API JSON /v1/*
+                         ▼
+      ┌── NestJS: austv-admin-api ← novo ────┐
+      │  health · metrics · funnel ·         │
+      │  sales · suggestions · discord       │
+      └──────────────┬───────────────────────┘
+                     ▼
+      ┌── AusTV Admin (monorepo ausTvSales) ─┐
+      │  Angular 19 + Signals                │
+      └──────────────────────────────────────┘
+                     ▲
+      ┌── Bot Discord AusTV ← novo ──────────┐
+      │  sugestões · métricas de guild ·     │
+      │  ENTREGA DOS ALERTAS DE SAÚDE        │
+      └──────────────────────────────────────┘
+```
+
+### 5.1 Plan (upstream, sem modificação)
+
+Nativo: online activity, picos, sessões, session median, playtime total/ativo/AFK, tempo por
+servidor, punchcard, retenção, segmentação Active/Regular/Irregular/Inactive, TPS, downtime.
+
+### 5.2 ausPlanBridge — **adiado para v2, provavelmente desnecessário**
+
+O ADR-003 tirou a plataforma dele. A economia já está em banco (ADR-007). O que sobraria são as
+variáveis do MyCommand — o item de menor valor de decisão da lista original, e o mais frágil
+(renomear uma chave de playerdata quebra torneio e menu em silêncio).
+
+**Decisão: nenhum plugin Java na v1.** Se as variáveis do MyCommand se mostrarem necessárias
+depois, o DataExtension volta — com Plan como dependência opcional, hook isolado contra
+`NoClassDefFoundError`, e zero I/O de rede na main thread.
+
+Ganho: nada é implantado no servidor de jogo. Superfície de risco na produção do Minecraft = zero.
+
+### 5.3 Bot Discord AusTV (novo)
+
+- Sugestões: estados `enviada` → `aprovada` → `em_andamento` → `concluida` | `recusada`, listagem
+  paginada, role de staff verificada server-side
+- Métricas de guild: entradas, saídas, total por dia
+- **Canal de entrega dos alertas de saúde da §6.1**
+
+### 5.4 austv-admin-api (NestJS)
+
+Módulos `health`, `metrics`, `funnel`, `sales`, `suggestions`, `discord`. Guards JWT, DTO com
+class-validator, Swagger, Helmet, throttling.
+
+### 5.5 AusTV Admin (Angular 19 + Signals)
+
+Reutiliza os componentes de gráfico da Sprint 5 do `ausTvSales`.
+
+## 6. Requisitos por camada
+
+### 6.1 Camada 1 — Saúde da instrumentação (PRIORIDADE MÁXIMA)
+
+Cada check roda periodicamente e **alerta ativamente no Discord** quando falha.
+
+| check | condição de alerta | desastre que teria evitado |
+|---|---|---|
+| Coleta viva por servidor | nenhuma sessão nova em 6h num servidor que deveria estar online | proxy morto de maio a agosto/2026 |
+| Registro vivo no proxy | nenhum `plan_users.registered` novo em 24h | idem |
+| Instância órfã | servidor em `plan_servers` sem dado recente | Plan em SQLite invisível |
+| Versões divergentes | builds diferentes entre instâncias | risco de corromper schema |
+| **Taxa de entrada no tutorial** | `novatos_no_tutorial / novatos_no_survival` cai abaixo de 70% por 3 dias | tutorial sem capturar por 8 meses |
+| Conversão rede → survival | desvio > 15 pontos da média de 30 dias | degrau do lobby |
+| Crescimento anormal de conta offline | share de `java_offline` na rede sobe fora da faixa | tráfego de bot inflando aquisição |
+
+### 6.2 Camada 2 — Funil em camadas
+
+O funil real tem quatro degraus, e só o terceiro tinha alguma medição:
+
+```
+conecta na rede (proxy)          → 100%
+chega ao survival                →  54%    ← descoberto em 2026-08-21
+entra no tutorial                →  varia  ← quebrou em dez/2025, silencioso
+conclui o tutorial               →   0,3% histórico
+retém D1/D7/D30                  →  por plataforma
+```
+
+Requisitos: cada degrau segmentável por `platform`; série mensal por coorte; **`n` sempre exibido
+ao lado de todo percentual**; "sem dados" explícito, nunca zero.
+
+### 6.4 Camada 3 — Economia (nova)
+
+Três métricas que ninguém tem hoje e que mudam decisão, não só ilustram slide.
+
+**E1 — Receita por plataforma e por coorte.** Bedrock é 45,4% dos jogadores do survival. Quanto por
+cento da receita ele produz? Se for 10%, consertar o onboarding de celular vale muito menos do que
+a contagem de cabeças sugere. Se for 45%, vale exatamente o que parece. **Nenhuma decisão sobre
+priorizar Bedrock deveria ser tomada antes desse número.**
+
+**E2 — Tempo até o primeiro gasto, e posição no funil como preditor.** Cruzando
+`playerpoints_transaction_log` (take do servidor) com o funil da §6.2: quem conclui o tutorial
+gasta mais? Quem trava no passo 03 gasta alguma coisa? Responde se o tutorial tem retorno
+financeiro ou só custo.
+
+**E3 — Contato social nos primeiros minutos.** Pagamento entre jogadores é registro de **contato
+social real** — um dos preditores mais fortes de retenção em jogo multiplayer. Métrica: fração de
+novatos que envia ou recebe pagamento nos primeiros N minutos, e o D7 desse grupo contra o resto.
+
+**E4 — Feed de pagamentos com marcação de anomalia (ferramenta de moderação, não métrica).**
+Últimos N pagamentos entre jogadores, **admin-only**. Um feed cronológico puro é inútil: com ~3
+pagamentos/dia, os 10 últimos cobrem 3 dias e repetem as mesmas pessoas. O valor está na marcação:
+
+- valor acima do percentil habitual da janela
+- mesmo par emissor→receptor se repetindo
+- conta recém-criada recebendo quantia grande
+- uma conta financiando muitas outras
+
+Cobre venda por dinheiro real, financiamento de alt, golpe e abuso de permissão de give. Marcar é
+sinalização, **nunca acusação automática** — a decisão é humana.
+
+**Restrição:** este feed é exclusivamente administrativo. Nome de jogador e valor de transação
+**não** aparecem no site público sob nenhuma circunstância (§8, LGPD).
+
+Nota: o `10tutorial` exige `/pagar <nick> 100`. O log registra tanto a conclusão desse passo quanto
+interação social espontânea — separar os dois é requisito, não detalhe.
+
+Regras da camada: `n` obrigatório junto de todo percentual; valores monetários sempre com a janela
+temporal explícita; nenhum dado pessoal além de UUID e valor.
+
+### 6.3 Camada 4 — Operação
+
+Pico de jogadores, jogadores por período, **média de tempo online ativo (AFK fora)**, jogadores por
+cargo LuckPerms, vendas (`ausTvSales`), últimas sugestões, entradas/saídas do Discord.
+
+## 7. Entidades (contrato próprio do NestJS)
+
+```
+player        uuid · platform · username · first_seen · last_seen · luckperms_group
+session       player_uuid · server · started_at · ended_at · active_sec · afk_sec
+player_econ   player_uuid · balance · spent_total · first_spend_at · p2p_in · p2p_out
+transaction   player_uuid · type (take|p2p_in|p2p_out|grant) · amount · category · created_at
+funnel_daily  date · platform · rede · survival · tutorial_entrou · tutorial_concluiu
+health_check  check_name · status · checked_at · detail · alerted_at
+suggestion    id · discord_msg_id · author · text · votes_up · votes_down
+              status · created_at · updated_at · assignee
+guild_metric  date · joins · leaves · members_total
+```
+
+## 8. Superfície de ataque
+
+| ponto de entrada | risco | mitigação |
+|---|---|---|
+| Webserver do Plan | exposto à internet | **não pode ser `127.0.0.1`** — o NestJS na VPS precisa alcançar `/v1/*` pela rede. Alvo: **firewall liberando a porta só para o IP da VPS** + **whitelist de IP do próprio Plan** também restrita a ele + autenticação ligada. Duas camadas, não uma |
+| **MySQL do jogo alcançável pela internet** | credenciais em texto plano em 4 configs de plugin já concedem acesso total | **auditar `3306` de um host externo real antes da S6** — teste rodado na própria máquina do jogo é loopback e não vale. Se aberta ao mundo: fechar e liberar só o IP do sales.austv.net, ou túnel SSH |
+| ETL entre VPSs | credencial trafegando e em repouso | usuário read-only por fonte, segredo em variável de ambiente, canal cifrado |
+| MySQL do Plan ← NestJS (coorte) | credencial ampla, lag no servidor | usuário **read-only** dedicado; agregação fora do pico |
+| `/v1/*` sob carga | query pesada afeta o jogo | cache com TTL por endpoint |
+| Bot Discord | comando de staff por qualquer um | role verificada server-side, nunca só no client |
+| Sugestões no site público | XSS via texto de jogador | sanitizar na escrita **e** escapar na renderização |
+| API | IDOR em rota de jogador | JWT + verificação de escopo por recurso |
+| Dados pessoais | LGPD | contagem de mensagens, não conteúdo; sem IP no dashboard |
+
+Credenciais MySQL em texto plano em mcMMO, EvenMoreFish, BattlePass, MyCommand — **não versionar
+sem sanitizar**.
+
+## 9. Critérios de aceite
+
+- Proxy e backends na **mesma build** do Plan, num **único** MySQL, webserver só no proxy em
+  `127.0.0.1`
+- Os 7 checks de saúde da §6.1 rodando e alertando no Discord — verificado **derrubando uma
+  instância de propósito**
+- Alerta de taxa de entrada no tutorial testado com valor forçado
+- Funil de 4 degraus disponível por mês e por plataforma, com `n` visível
+- Sessão, AFK e tempo por servidor conferidos contra **observação manual**
+- NestJS não referencia tabela interna do Plan fora do módulo de coorte
+- Nenhum I/O de rede na main thread (verificado com timings)
+- Sugestões nos 4 estados, transição só por staff verificado server-side
+- Corpus do Carlito exportado e versionado antes de qualquer migração
+- `code-reviewer` aprovado · `cybersecurity-validator` sem crítico · testes passando
+
+## 10. Riscos
+
+| risco | impacto | mitigação |
+|---|---|---|
+| Builds diferentes do Plan no mesmo banco | corrupção de schema | igualar versão **antes** de unificar; mysqldump antes |
+| Unificação depois do unban | campanha medida em dois lugares | fazer antes; se não der, adiar o merge, nunca a unificação |
+| Tráfego de bot inflando aquisição | decisão de marketing em cima de número falso | check de share offline (§6.1) + amostra de nomes |
+| `playerpoints_transaction_log` desabilitado ou podado | E1/E2/E3 ficam sem histórico | conferir contagem e janela **antes** de planejar a camada de economia |
+| Tabela sem índice varrida com jogadores online | queda de TPS no servidor de jogo | ETL noturno fora do pico (ADR-007); nunca agregação ao vivo. Índice em `(receiver, timestamp)` só em janela de manutenção, se o dono aprovar |
+| Schema de plugin mudando em update | camada de economia quebra | só PlayerPoints e LuckPerms (schemas triviais); MyCommand fora |
+| Dashboard vira o projeto | funil segue quebrado | camada 3 é a última; camada 1 é PR 1 |
+| Amostra pequena | ruído lido como tendência | `n` obrigatório; retenção é relatório |
+| Carlito não exporta | perda de 3.028 sugestões datadas | PR 0 antes de qualquer migração de bot |
+
+## 10b. Risco aceito pelo dono — exposição de rede (2026-08-21)
+
+**Estado verificado:** `mariadbd` em `0.0.0.0:3306` · `ufw` **inativo** · conta MySQL
+`u1_Eayoo9559P@%` (aceita conexão de qualquer host) · credenciais em texto plano em mcMMO,
+EvenMoreFish, BattlePass, MyCommand · porta 3306 respondeu de **três pontos independentes**: VPS
+sales.austv.net, PC residencial (`TcpTestSucceeded: True`, IP 198.89.99.70) e confirmação cruzada.
+Porta 25504 idem.
+
+**Decisão do dono (Murilo, 2026-08-21):** tratar como responsabilidade da MagnoHost e seguir com o
+dashboard.
+
+**Registro técnico:** a evidência acima é incompatível com filtragem ativa pelo provedor — tráfego
+de rede residencial completou handshake TCP na 3306. A whitelist de IP configurada no Plan é filtro
+de **aplicação** e cobre apenas a 25504; não afeta a 3306.
+
+**Impacto no projeto:** o ETL e a API assumem que a rede entre VPS e game é alcançável — o que é
+verdade hoje. Se a MagnoHost restringir por IP no futuro, a S6.2b precisa ser reaberta para incluir
+o IP da VPS no allowlist, ou o ETL para de funcionar sem aviso.
+
+Reabrir esta seção se: houver incidente no banco, a MagnoHost confirmar por escrito o que filtra,
+ou o allowlist mudar.
+
+## 11. Investigações em aberto (não são código)
+
+1. **O que aconteceu em fevereiro/2026?** É onde a aquisição caiu de 1.177 para 645. Nenhuma
+   hipótese testada ainda.
+2. **Os `java_offline` do proxy são bots?** 39,3% de conversão contra 71,5% do Bedrock. Amostra de
+   nomes resolve.
+3. **O conserto do tutorial funcionou?** Verificar em 5–7 dias se a taxa de entrada voltou para
+   perto de 100%.
+   - **3b1. A whitelist de IP do Plan é contornável por `X-Forwarded-For`?** Testar da VPS com e
+     sem o header; código HTTP diferente = whitelist sólida, igual = contornável. Filtro de
+     aplicação nunca substitui filtro de rede.
+   - **3b. As portas `3306` e `25504` de jogar.austv.net respondem de um host externo?** Testar a
+     partir do sales.austv.net (externo ao jogo **e** origem do ETL). Teste feito na própria
+     máquina do jogo é loopback e não responde a pergunta. Exposição aqui é ativa hoje, anterior a
+     este projeto.
+4. **O `playerpoints_transaction_log` tem histórico?** `COUNT(*)` + `MIN/MAX(timestamp)`. Define se
+   a economia é histórica ou prospectiva. Rodar fora do pico — sem índice, varre a tabela inteira.
+5. **Quais são os `transaction_type` e o `amount` fica negativo no take?** Define como separar
+   gasto de recebimento.
+6. O campo `description` classifica o gasto? **Respondido:** não — só Take/Give/Pay/Starting
+   balance. Irrelevante agora, porque o gasto vem do `ausTvSales` (R3 resolvido).
+
+## 12. Relação com o resto
+
+A Sprint 5 do `ausTvSales` (ranking, série temporal) está em voo e **não é atropelada**: seus
+componentes de gráfico são a base da camada 3. Terminar a S5 primeiro reduz o trabalho aqui.
+
+As correções do funil de onboarding rodam em paralelo e **têm precedência**. Este sistema mede; ele
+não conserta.

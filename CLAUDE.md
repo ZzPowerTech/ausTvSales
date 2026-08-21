@@ -76,8 +76,30 @@ Lista completa em [`.specs/project/PROJECT.md`](.specs/project/PROJECT.md) seç�
 
 ## Estado atual
 
-Sprints 1–4 entregues (fundação + ingestão + resiliência do plugin + administração de catálogo
-no dashboard). **Sprint 5 em planejamento aprovado** (visualização: navegação de análise, ranking
-top 5, gráfico temporal) — plano em [`.specs/sprints/sprint-05.md`](.specs/sprints/sprint-05.md),
-design em [`.specs/features/sprint-05-dashboard-analytics/spec.md`](.specs/features/sprint-05-dashboard-analytics/spec.md).
-Próximo passo: implementar a S5.0 (gerador de vendas sintéticas), primeiro PR do sprint.
+Sprints 1–5 entregues (fundação + ingestão + resiliência do plugin + administração de catálogo +
+visualização: navegação de análise, ranking top 5 e gráfico de série temporal).
+
+**Próximo: Sprint 6** — migração histórica, cutover dos rewards do Genesis e validação final de
+segurança. Fecha o MVP (CA7, CA8, CA9). Plano em
+[`.specs/sprints/sprint-06.md`](.specs/sprints/sprint-06.md); issues #27–#30 abertas.
+
+### Épico paralelo: AusTV Admin (analytics de retenção)
+
+Projeto separado, especificado neste repo em `.specs/features/austv-admin/`. Documentos canônicos:
+
+- [`spec.md`](.specs/features/austv-admin/spec.md) — spec v2 (ADRs 001–008, funil de 4 degraus,
+  camada de economia, superfície de ataque, risco de rede aceito pelo dono)
+- [`austv-admin-sprints.md`](.specs/sprints/austv-admin-sprints.md) — 19 histórias, Sprint 6 → 12
+- [`HANDOFF.md`](.specs/features/austv-admin/HANDOFF.md) — números verificados da investigação de
+  retenção, perguntas em aberto e os erros de método a não repetir
+
+**Convenção de numeração (decidida em 2026-08-21):** as sprints do AusTV Admin e do `ausTvSales`
+colidem na faixa 6. Os documentos **não** são renumerados; a separação é por milestone
+(`AusTV Admin S6` vs `ausTvSales S6`) e por label prefixada (`admin:sprint-6` vs `sales:sprint-6`).
+
+**Em aberto:** o desbalanço de capacidade — a S6 está em 22 SP e a S12 em 18, contra 13 SP/sprint
+planejados. As três opções estão no fim do plano de sprints; decidir antes de abrir o worktree da
+S6.
+
+Precedência: este sistema **mede**; não conserta. As correções do funil de onboarding vêm na
+frente.
