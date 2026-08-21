@@ -97,8 +97,9 @@ Projeto separado, especificado neste repo em `.specs/features/austv-admin/`. Doc
 colidem na faixa 6. Os documentos **não** são renumerados; a separação é por milestone
 (`AusTV Admin S6` vs `ausTvSales S6`) e por label prefixada (`admin:sprint-6` vs `sales:sprint-6`).
 
-**Em aberto:** a divergência de story points do backlog — soma 105, o documento afirma 86 num ponto
-e 88 noutro. Descrita no topo do `HANDOFF.md`.
+**Em aberto:** o desbalanço de capacidade — a S6 está em 22 SP e a S12 em 18, contra 13 SP/sprint
+planejados. As três opções estão no fim do plano de sprints; decidir antes de abrir o worktree da
+S6.
 
 Precedência: este sistema **mede**; não conserta. As correções do funil de onboarding vêm na
 frente.

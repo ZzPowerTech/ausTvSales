@@ -2,18 +2,18 @@
 
 > `.specs/sprints/austv-admin-sprints.md` · Revisão 2026-08-21
 > Base: [`.specs/features/austv-admin/spec.md`](../features/austv-admin/spec.md) (v2)
-> Sprints de 1 semana. Numeração a partir de 6 (S1–S4 entregues, S5 em voo).
+> Sprints de 1 semana. Numeração a partir de 6 (S1–S5 entregues).
 
 ## Mudanças da v1
 
 | v1 | v2 | motivo |
 |---|---|---|
-| S7 inteira: DataExtension de plataforma (13 SP) | **eliminada** | ADR-003 — plataforma sai do UUID em SQL, 100% de acerto |
-| ausPlanBridge (plugin Java) | **adiado para v2** | ADR-007 — economia já está em banco; **zero Java na v1** |
+| S7 inteira: `DataExtension` de plataforma (13 SP) | **eliminada** | ADR-003 — plataforma sai do UUID em SQL, 100% de acerto |
+| `ausPlanBridge` (plugin Java) | **adiado para v2** | ADR-007 — economia já está em banco; **zero Java na v1** |
 | S6 = instalar e validar contrato | S6 = **unificar bancos + saúde + baseline** | Plan já instalado, em dois bancos, e já ficou 3 meses morto sem ninguém ver |
 | Saúde da instrumentação: inexistente | **PR 1, antes de qualquer gráfico** | ADR-006 |
 | Funil: só tutorial | **4 degraus** (rede → survival → tutorial → retenção) | descoberta do degrau de 54% |
-| 104 SP / 8 sprints | **86 SP / 7 sprints** | |
+| 104 SP / 8 sprints | **105 SP / 7 sprints** | o total caiu com a S7 eliminada, mas subiu com S6.0, S6.2b e a camada de saúde |
 
 Capacidade planejada 13 SP/semana. **Medir a S6 e recalibrar** — se a velocidade real for 6–8 SP,
 isto é um plano de 11–14 semanas, não de 7.
@@ -21,15 +21,17 @@ isto é um plano de 11–14 semanas, não de 7.
 Precedência: correções do funil de onboarding vêm na frente. Cada sprint marca uma história
 **[CORTE]**.
 
+---
+
 ## Definition of Done — global
 
-- PR único, uma responsabilidade lógica, **deployável sozinho**
-- Branch em worktree `.claude/.worktrees/<branch>`; zero commits em `main`/`dev`/`prod`
-- Conventional Commits
-- `code-reviewer` aprovado · `cybersecurity-validator` sem crítico (OWASP) · testes passando em CI
-- Nenhum segredo versionado
-- Código em inglês; docs em português
-- Rollback documentado no PR body
+- [ ] PR único, uma responsabilidade lógica, **deployável sozinho**
+- [ ] Branch em worktree `.claude/.worktrees/<branch>`; zero commits em `main`/`dev`/`prod`
+- [ ] Conventional Commits
+- [ ] `code-reviewer` aprovado · `cybersecurity-validator` sem crítico (OWASP) · testes passando em CI
+- [ ] Nenhum segredo versionado
+- [ ] Código em inglês; docs em português
+- [ ] Rollback documentado no PR body
 
 ---
 
@@ -56,8 +58,8 @@ Rodar os três `austv-diagnostico*.ps1` uma última vez e versionar scripts + sa
 
 ### S6.2b — Auditar exposição de rede da máquina do game · 2 SP · `chore/db-network-exposure`
 
-Arquitetura: **duas máquinas** — VPS (sales.austv.net, hospeda o `ausTvSales`) e game
-(jogar.austv.net / 198.89.99.229, produção do Minecraft). O ETL cruza entre elas.
+Arquitetura: **duas máquinas** — VPS (`sales.austv.net`, hospeda o `ausTvSales`) e game
+(`jogar.austv.net` / `198.89.99.229`, produção do Minecraft). O ETL cruza entre elas.
 
 Método **autoritativo** (não sondagem de porta — teste rodado na própria máquina do game é loopback
 e não vale):
@@ -68,8 +70,9 @@ e não vale):
    firewall ou túnel SSH)
 4. Webserver do Plan **não** pode ir para `127.0.0.1` — o NestJS na VPS precisa dele pela rede.
    Duas camadas: firewall + whitelist de IP do próprio Plan, ambas restritas ao IP da VPS
-   - 4b. Testar se a whitelist do Plan é contornável por `X-Forwarded-For` (`curl` com e sem o
-     header); resultado documentado
+
+   4b. Testar se a whitelist do Plan é contornável por `X-Forwarded-For` (curl com e sem o header);
+   resultado documentado
 5. Usuário **read-only** dedicado para o ETL, separado dos usuários dos plugins
 6. Nenhuma credencial nova em arquivo versionado
 
@@ -96,12 +99,12 @@ A entrega mais importante do plano. Sem ela, tudo pode parar em silêncio de nov
 
 ### DoD da S6
 
-- `plan_servers` mostra proxy e backends num único banco, mesma build
-- Dump restaurável dos dois bancos guardado fora da VPS
-- Alerta comprovado por teste destrutivo intencional
-- Baseline pré-campanha commitado
-- Corpus do Carlito no repo — **gate do épico de sugestões**
-- Spec órfão `specs/spec.md` (coleta de sessão no proxy) marcado superseded
+- [ ] `plan_servers` mostra proxy e backends num único banco, mesma build
+- [ ] Dump restaurável dos dois bancos guardado fora da VPS
+- [ ] Alerta comprovado por teste destrutivo intencional
+- [ ] Baseline pré-campanha commitado
+- [ ] Corpus do Carlito no repo — **gate do épico de sugestões**
+- [ ] Spec órfão `specs/spec.md` (coleta de sessão no proxy) marcado superseded
 
 ### Riscos
 
@@ -134,9 +137,9 @@ A entrega mais importante do plano. Sem ela, tudo pode parar em silêncio de nov
 
 ### DoD da S7
 
-- Busca por nome de tabela do Plan no diff retorna vazio (fora do módulo de coorte)
-- Teste de falha: Plan derrubado → 503/stale sem exceção não tratada
-- 401 sem token e 429 sob flood verificados por teste de integração
+- [ ] Busca por nome de tabela do Plan no diff retorna vazio (fora do módulo de coorte)
+- [ ] Teste de falha: Plan derrubado → 503/stale sem exceção não tratada
+- [ ] 401 sem token e 429 sob flood verificados por teste de integração
 
 **[CORTE]** S7.1 pode sair se a S6.3 já entregar visibilidade suficiente no Discord.
 
@@ -148,7 +151,7 @@ A entrega mais importante do plano. Sem ela, tudo pode parar em silêncio de nov
 
 ### S8.1 — Módulo `funnel` · 8 SP · `feat/api-funnel`
 
-1. Série diária e mensal de rede → survival → `tutorial_entrou` → `tutorial_concluiu`
+1. Série diária e mensal de `rede → survival → tutorial_entrou → tutorial_concluiu`
 2. Cada degrau segmentável por `platform` (ADR-003, direto do UUID)
 3. **`n` retornado junto de todo percentual** — o contrato não permite percentual sem base
 4. Período sem dados → "sem dados" explícito, distinto de zero
@@ -163,20 +166,20 @@ A entrega mais importante do plano. Sem ela, tudo pode parar em silêncio de nov
 
 ### DoD da S8
 
-- Funil reproduz os números conhecidos: ~54% rede→survival, ~100% de entrada no tutorial antes de
-  dez/2025
-- Nenhum endpoint retorna percentual sem `n`
-- Usuário read-only comprovadamente sem permissão de escrita
+- [ ] Funil reproduz os números conhecidos: ~54% rede→survival, ~100% de entrada no tutorial antes
+      de dez/2025
+- [ ] Nenhum endpoint retorna percentual sem `n`
+- [ ] Usuário read-only comprovadamente sem permissão de escrita
 
 **[CORTE]** S8.2.
 
 ---
 
-# Sprint 9 — ausPlanBridge e relatório periódico
+# Sprint 9 — `ausPlanBridge` e relatório periódico
 
 ### S9.1 — Módulo `economy` (sem plugin) · 8 SP · `feat/api-economy`
 
-Substitui o ausPlanBridge, adiado pelo ADR-007. **Nenhum Java, nada implantado no servidor de
+Substitui o `ausPlanBridge`, adiado pelo ADR-007. **Nenhum Java, nada implantado no servidor de
 jogo.**
 
 1. **E1 e E2 saem do `ausTvSales` sozinho** — receita por plataforma e coorte, tempo até o primeiro
@@ -208,8 +211,8 @@ jogo.**
 
 ### DoD da S9
 
-- Timings anexado ao PR provando ausência de regressão de tick
-- Um relatório real gerado e conferido à mão
+- [ ] Timings anexado ao PR provando ausência de regressão de tick
+- [ ] Um relatório real gerado e conferido à mão
 
 **[CORTE]** S9.1.
 
@@ -229,8 +232,8 @@ jogo.**
 
 ### S10.2 — Estados no bot, verificados server-side · 5 SP · `feat/bot-suggestion-states`
 
-1. `enviada` → `aprovada` → `em_andamento` → `concluida` | `recusada`; transição inválida recusada
-   sem alterar registro
+1. `enviada → aprovada → em_andamento → concluida | recusada`; transição inválida recusada sem
+   alterar registro
 2. Role de staff verificada **server-side**
 3. Tentativa negada é logada com autor e comando
 4. Trilha de auditoria de quem mudou o quê
@@ -289,10 +292,10 @@ jogo.**
 
 ### DoD da S12
 
-- Teste de XSS na página pública com payload real
-- Network trace: nenhuma chamada do frontend direto ao Plan
-- `cybersecurity-validator` sobre a superfície pública completa
-- Runbook de operação em português
+- [ ] Teste de XSS na página pública com payload real
+- [ ] Network trace: nenhuma chamada do frontend direto ao Plan
+- [ ] `cybersecurity-validator` sobre a superfície pública completa
+- [ ] Runbook de operação em português
 
 ---
 
@@ -320,25 +323,41 @@ jogo.**
 | 17 | S12 | Home | 5 |
 | 18 | S12 | Públicas + gate | 5 |
 
-**88 SP · 7 sprints.**
+**105 SP · 7 sprints.** (conferido em 2026-08-21 somando a tabela e os títulos das histórias)
+
+### ⚠️ Desbalanço conhecido — decisão pendente do dono
+
+Com a capacidade planejada de 13 SP/sprint, duas sprints estouram:
+
+| sprint | SP | situação |
+|---|---|---|
+| **S6** | **22** | 69% acima. Inchou ao longo do planejamento — S6.0 e S6.2b entraram depois, sem rebalancear |
+| S7–S11 | 13 cada | dentro |
+| **S12** | **18** | 38% acima. Três histórias grandes |
+
+**A S6 é sprint de prazo, não de capacidade.** O limite dela é a data do unban all, não a
+velocidade. Opções:
+
+1. **Aceitar 22 SP como sprint estendida** — S6.2 e S6.3 não são cortáveis (instrumentação antes da
+   campanha), S6.0 é irreversível se atrasar
+2. **Mover S6.1 (corpus do Carlito, 5 SP) para a S7** — ela já está marcada `[CORTE]` e não tem
+   prazo de campanha. Deixa a S6 em 17 SP
+3. **Dividir a S12 em duas** (S12 + S13), voltando para 8 sprints
+
+**A escolher antes de abrir o worktree da S6.** Enquanto não decidido, o plano tem 7 sprints
+nominais e ~8 semanas de trabalho real.
 
 ## Dependências
 
 ```
 S6.0 (baseline) ─── independente, tem prazo externo
-
 S6.1 (corpus) ─────────────────────► S10.1 ─► S10.2 ─► S10.3
-
 S6.2 (banco unico) ─► S6.3 (saude) ─► S7.1 ─────────► S12.1
                             └──────► S7.2 ─► S8.1 ──► S12.1
                                             └► S8.2 ─► S9.2
-
 S9.1 (economy) ───────────────────────────────────► S12.2
-
 S11.1 ────────────────────────────────────────────► S12.3
-
 S11.2 ────────────────────────────────────────────► S12.2
-
 Sprint 5 (graficos) ──────────────────────────────► S12.1
 ```
 
@@ -351,9 +370,9 @@ Nenhuma seta aponta para trás.
 2. **Os `java_offline` do proxy são bots?** 39,3% de conversão contra 71,5% do Bedrock.
 3. **O conserto do tutorial pegou?** Verificar em 5–7 dias se a taxa de entrada voltou a ~100%.
 4. **Onde roda o bot do Discord?** Afeta rede e gestão de segredos na S10.
-5. `playerpoints_transaction_log` tem histórico? **Respondido em 2026-08-21:** 6.664 linhas desde
-   2026-01-30; economia é prospectiva; `description` **não** classifica o gasto — `ausTvSales`
-   segue obrigatório.
-6. Como casar `transaction_log` com `ausTvSales`? **Resolvido em 2026-08-21:** não se casa.
+5. ~~`playerpoints_transaction_log` tem histórico?~~ **Respondido em 2026-08-21:** 6.664 linhas
+   desde 2026-01-30; economia é prospectiva; `description` **não** classifica o gasto —
+   `ausTvSales` segue obrigatório.
+6. ~~Como casar `transaction_log` com `ausTvSales`?~~ **Resolvido em 2026-08-21:** não se casa.
    Analytics apenas; gasto vem do `ausTvSales`, social vem do PlayerPoints. **S9.1 desbloqueada,
    sem alteração de plugin.**

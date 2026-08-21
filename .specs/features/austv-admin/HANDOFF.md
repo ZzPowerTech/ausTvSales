@@ -1,50 +1,39 @@
-# AusTV Admin — HANDOFF da investigação de retenção
+# AusTV Admin — HANDOFF
 
-> Registro da sessão de investigação de retenção do AusTV (2026-08-21).
-> Versionado em 2026-08-21 porque até então existia **apenas em janela de contexto** — e os
-> números aqui são hoje o único registro histórico de retenção do servidor anterior ao Plan.
+> Para retomar em sessão nova (Claude Code, dentro de `ausTvSales`).
+> Última atualização: 2026-08-21 · Origem: sessão de investigação de retenção do AusTV.
 
----
+## Documentos canônicos (já estão no repo)
 
-## Estado de verificação deste documento
-
-Na primeira leitura (2026-08-21) este HANDOFF afirmava que dois documentos canônicos já estavam no
-repositório. Verificado contra todo o histórico do git (`git log --all --diff-filter=A`), todas as
-branches remotas (`git ls-remote --heads`) e a árvore de trabalho: **não estavam**. Foram
-localizados no Google Drive do Murilo (pasta `Austv`) e versionados no mesmo dia.
-
-| documento | estado |
+| arquivo | o que é |
 |---|---|
-| [`spec.md`](spec.md) — spec v2 com ADRs, requisitos por camada, entidades, superfície de ataque, critérios de aceite | **restaurado** do Drive em 2026-08-21 |
-| [`../../sprints/austv-admin-sprints.md`](../../sprints/austv-admin-sprints.md) — 19 histórias, Sprint 6 → 12, DoD e grafo de dependências | **restaurado** do Drive em 2026-08-21 |
-| `austv-diagnostico.ps1`, `austv-diagnostico2.ps1`, `austv-diagnostico3.ps1`, `plan-forense.sh`, `plan-analise.sql` | **ainda ausentes** — entregues por chat, nunca versionados. Bloqueiam a S6.0 |
+| [`.specs/features/austv-admin/spec.md`](spec.md) | Spec v2 aprovado tecnicamente — ADRs, requisitos por camada, entidades, superfície de ataque, critérios de aceite |
+| [`.specs/sprints/austv-admin-sprints.md`](../../sprints/austv-admin-sprints.md) | 19 histórias, Sprint 6 → 12, **105 SP**, com DoD e grafo de dependências |
+| `CLAUDE.md` / `structure.md` | contexto do repo — ambos atualizados em 2026-08-21 |
 
-### Divergência de story points no plano restaurado
+**Leia o spec antes de qualquer coisa.** Ele contém o "porquê" de decisões que parecem arbitrárias
+fora de contexto.
 
-O backlog consolidado do plano de sprints **soma 105 SP** (S6 22 · S7 13 · S8 13 · S9 13 · S10 13 ·
-S11 13 · S12 18, em 19 histórias). O próprio documento afirma **86 SP** na tabela "Mudanças da v1"
-e **88 SP** logo abaixo do backlog. Os três números não fecham.
-
-Isso não é detalhe de contagem: a 13 SP/semana, 105 SP são 8 semanas, não 7; e na velocidade real
-de 6–8 SP que o próprio plano manda medir na S6, são **13–17 semanas**. O documento foi versionado
-como o Murilo o aprovou, sem correção unilateral — a reconciliação é decisão dele.
-
-Tudo abaixo desta seção é transcrição fiel do handoff original, sem acréscimo de conteúdo novo.
+> **Procedência (2026-08-21):** o spec e o plano de sprints não estavam versionados — foram
+> recuperados do Google Drive (pasta `Austv`) e commitados neste dia. Os cinco scripts de
+> diagnóstico listados no fim deste documento **continuam ausentes** e bloqueiam a S6.0.
 
 ---
 
-## Erros já cometidos — não repetir
+## ⚠️ Erros já cometidos — não repetir
 
 Três afirmações foram feitas com confiança e estavam **erradas**. Todas pela mesma causa raiz.
 
-1. **"O colapso de aquisição começou em dezembro/2025."** Falso. A série usada vinha do
-   `Quests/playerdata` e media **quem entrou no tutorial**, não quem chegou. Em dezembro o tutorial
-   parou de capturar novatos (de ~100% para 12% de taxa de entrada); a aquisição só caiu em
-   **fevereiro/2026**.
-2. **"48 chegadas/mês, impossível medir antes de 6 meses."** Falso. Os 48 eram entradas no
-   tutorial. Chegadas reais: **~190–250/mês**. Medir antes/depois de uma correção leva 2–4 semanas.
-3. **"Queda de 96%."** Contaminado pela mesma série. A queda real (nov/2025 → ago/2026) é de
-   **−72%**.
+**1. "O colapso de aquisição começou em dezembro/2025."** Falso. A série usada vinha do
+`Quests/playerdata` e media **quem entrou no tutorial**, não quem chegou. Em dezembro o tutorial
+parou de capturar novatos (de ~100% para 12% de taxa de entrada); a aquisição só caiu em
+**fevereiro/2026**.
+
+**2. "48 chegadas/mês, impossível medir antes de 6 meses."** Falso. Os 48 eram entradas no
+tutorial. Chegadas reais: **~190–250/mês**. Medir antes/depois de uma correção leva 2–4 semanas.
+
+**3. "Queda de 96%."** Contaminado pela mesma série. A queda real (nov/2025 → ago/2026) é de
+**−72%**.
 
 > **Lição de método, aplicável a tudo:** série derivada de plugin mede o comportamento **daquele
 > plugin**, não a realidade. Confirmar com uma segunda fonte independente antes de tratar qualquer
@@ -70,19 +59,19 @@ Três afirmações foram feitas com confiança e estavam **erradas**. Todas pela
 Fatos derivados:
 
 - **54% de quem conecta na rede nunca chega ao survival** — degrau anterior ao tutorial, nunca
-  medido antes.
+  medido antes
 - Conversão rede→survival por plataforma: **bedrock 71,5% · java_premium 61,8% · java_offline
-  39,3%** (offline pior pode ser tráfego de bot — não confirmado).
+  39,3%** (offline pior pode ser tráfego de bot — não confirmado)
 - Retenção (base enviesada, 11.525): D1 30,1% · D7 21,7% · D30 15,4%. **Piso real sobre todas as
-  chegadas: D1 ≈ 7%**.
+  chegadas: D1 ≈ 7%**
 - Tutorial: 33 passos lineares, **148 conclusões em 49.302 jogadores históricos (0,3%)**. Gap
   Bedrock aparece só em passos com argumento livre ou interação espacial; comando de uma palavra
-  tem gap **zero**.
-- Mix de plataforma **all-time** (59,2% bedrock) ≠ mix atual. Sempre citar a janela.
+  tem gap **zero**
+- Mix de plataforma **all-time** (59,2% bedrock) ≠ mix atual. Sempre citar a janela
 
 ---
 
-## ADRs (resumo — o detalhe estava no spec ausente)
+## ADRs (resumo — detalhe no spec)
 
 | # | decisão | motivo em uma linha |
 |---|---|---|
@@ -103,6 +92,10 @@ alteração de plugin.
 
 ## Estado e ordem
 
+**A Sprint 5 do `ausTvSales` está entregue** (ranking, série temporal — PRs #97–#103). As sprints do
+AusTV Admin começam na **6** e reaproveitam os componentes de gráfico da S5, que portanto já estão
+prontos — isso **encolhe** a S12.
+
 **Precedência de negócio:** as correções do funil de onboarding rodam em paralelo e vêm na frente.
 Este sistema **mede**; não conserta.
 
@@ -110,17 +103,18 @@ Ordem inegociável: `S6.1` (corpus) antes de todo o épico de sugestões · `S6.
 de `S6.3` · UI (`S12`) por último. Cada sprint tem uma história marcada `[CORTE]`, a primeira a
 sair sob pressão.
 
-As sprints do AusTV Admin reaproveitam os componentes de gráfico da Sprint 5 do `ausTvSales`
-(entregue) — o que **encolhe** a S12.
+**Desbalanço conhecido, decisão pendente:** com 13 SP/sprint planejados, a **S6 está em 22 SP** (tem
+prazo externo — o unban — então é sprint de data, não de capacidade) e a **S12 em 18 SP**. As
+opções estão no próprio plano de sprints. Decidir antes de abrir o worktree da S6.
 
-### Conflito de numeração — RESOLVIDO em 2026-08-21
+### Numeração das sprints — RESOLVIDO em 2026-08-21
 
 O plano numera as sprints do AusTV Admin de **6 a 12**. O `ausTvSales` **já tem** um Sprint 6
 próprio (`.specs/sprints/sprint-06.md` — migração histórica, cutover no Genesis, go-live), com as
 issues **#27, #28, #29 e #30 abertas** desde 2026-07-13.
 
-**Decisão do Murilo (2026-08-21): não renumerar.** A numeração dos documentos fica como está, e a
-separação acontece nos metadados do GitHub:
+**Decisão do Murilo: não renumerar.** A numeração dos documentos fica como está, e a separação
+acontece nos metadados do GitHub:
 
 | eixo | AusTV Admin | ausTvSales |
 |---|---|---|
@@ -133,10 +127,10 @@ cruzadas para resolver um problema que é só de organização no GitHub.
 
 ### Issues no GitHub
 
-**Ainda não foram criadas** — a ferramenta falhou no fim da sessão original. Com o plano restaurado
-em 2026-08-21, o material existe: 19 histórias com título, critérios de aceite, estimativa, branch
-sugerida e dependências. Mapeamento sugerido: sprint → milestone, história → issue, labels
-`sprint:N`, `epic:*`, `type:*`, `blocker`. **Resolver antes o conflito de numeração abaixo.**
+**Ainda não foram criadas** — a ferramenta falhou no fim da sessão de investigação. O plano de
+sprints tem tudo que é preciso: 19 histórias com título, critérios de aceite, estimativa, branch
+sugerida e dependências. Mapeamento: sprint → milestone, história → issue, labels
+`admin:sprint-N`, `epic:*`, `type:*`, `blocker`.
 
 > **Armadilha conhecida (do vault):** `gh` no PowerShell corrompe acento quando recebe string por
 > pipe. Gravar o corpo em arquivo UTF-8 sem BOM e usar `gh issue create --body-file`.
@@ -168,9 +162,9 @@ reaberta.
 
 ---
 
-## Ferramentas produzidas na sessão de investigação
+## Ferramentas produzidas nesta sessão
 
-Entregues por chat, **ainda não versionadas** (ver seção de verificação no topo):
+Entregues por chat, **ainda não versionadas** — vale commitar junto do baseline da S6.0:
 
 | arquivo | o que faz |
 |---|---|
@@ -193,6 +187,6 @@ não volta.
 - **Vazio ≠ zero** em provider de economia.
 - **Grant administrativo fora de métrica de receita** — existe linha de 9.999.999 na origem.
 - **Nenhum I/O de rede na main thread** do servidor de jogo, se algum dia voltar a existir plugin.
-- **Verificar o controle antes de confiar num teste.** Na sessão original: um `nmap` foi descartado
+- **Verificar o controle antes de confiar num teste.** Nesta sessão: um `nmap` foi descartado
   porque o controle falhou; um `fechada` foi descartado porque era o comando não existindo no CMD;
   um "Plan sem histórico" era o banco errado sendo consultado.
