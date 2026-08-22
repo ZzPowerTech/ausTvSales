@@ -382,7 +382,9 @@ sem sanitizar**.
 - NestJS não referencia tabela interna do Plan fora do módulo de coorte
 - Nenhum I/O de rede na main thread (verificado com timings)
 - Sugestões nos 4 estados, transição só por staff verificado server-side
-- Corpus do Carlito exportado e versionado antes de qualquer migração
+- ~~Corpus do Carlito exportado e versionado antes de qualquer migração~~ — **removido em
+  2026-08-22**: o Carlito é o Carl-bot, bot de terceiros, o acervo não é recuperável do banco dele,
+  e o dono decidiu que perder os registros antigos é aceitável (S6.1 cancelada)
 - `code-reviewer` aprovado · `cybersecurity-validator` sem crítico · testes passando
 
 ## 10. Riscos
@@ -397,7 +399,7 @@ sem sanitizar**.
 | Schema de plugin mudando em update | camada de economia quebra | só PlayerPoints e LuckPerms (schemas triviais); MyCommand fora |
 | Dashboard vira o projeto | funil segue quebrado | camada 3 é a última; camada 1 é PR 1 |
 | Amostra pequena | ruído lido como tendência | `n` obrigatório; retenção é relatório |
-| Carlito não exporta | perda de 3.028 sugestões datadas | PR 0 antes de qualquer migração de bot |
+| ~~Carlito não exporta~~ | **risco materializado e aceito (2026-08-22)** | O Carlito é o Carl-bot; o acervo não sai do banco dele. O dono aceitou a perda dos registros antigos e a S6.1 foi cancelada. Sugestões novas nascem sem histórico |
 
 ## 10b. Risco aceito pelo dono — exposição de rede (2026-08-21)
 
