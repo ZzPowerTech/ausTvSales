@@ -48,87 +48,46 @@ Rodar os três `austv-diagnostico*.ps1` uma última vez e versionar scripts + sa
 2. README em português explicando o que cada número mede e suas limitações
 3. **Irreversível se atrasar** — depois da campanha os arquivos mudam
 
-### S6.1 — Corpus do Carlito · **PR 0, BLOQUEANTE** · 5 SP · `chore/carlito-corpus-export`
+### ~~S6.1 — Corpus do Carlito~~ · **CANCELADA em 2026-08-22** · ~~5 SP~~ → 0
 
-1. JSONL + CSV com `id`, `autor`, `texto`, `votos_up`, `votos_down`, `data_criacao`,
-   `discord_msg_id`
-2. Total reportado contra a estimativa de ~3.028; divergência documentada
-3. Sem exportação nativa → raspagem via bot, mesmo schema
-4. Sanitização de PII + checksum no PR
-
-> #### ⚠️ Verificação de 2026-08-22 — esta história não pode começar como está escrita
+> **Decisão do dono (Murilo, 2026-08-22): o acervo histórico de sugestões é descartável.**
 >
-> O `austv-minecraft/Ticket-Bot` foi lido na íntegra. **Não existe sistema de sugestões nele.**
-> Varredura por `sugest|suggest|vote|voto|upvote|poll|enquete|carlito` em todo o código retorna um
-> único match, e é ruído (`.vscode/settings.json:55`, `typescript.suggest.autoImports`). O domínio
-> do bot é ticket — abrir canal, controlar, fechar, transcrever, avaliar com estrelas. O MongoDB
-> tem quatro coleções (`src/database/index.ts:18-23`): `guilds`, `members`, `tickets`, `messages`.
-> Nenhuma guarda sugestão, voto ou reação.
+> Cadeia de descobertas que levou aqui, toda no mesmo dia:
 >
-> Cai, portanto: que o "Carlito" seja este repositório; que as ~3.028 sugestões estejam aqui; que
-> os sete campos existam e só precisem de export. `votos_up`/`votos_down` não têm sequer análogo
-> conceitual no código.
+> 1. O `austv-minecraft/Ticket-Bot` foi lido na íntegra e **não tem sistema de sugestões** — o
+>    domínio dele é ticket, e as quatro coleções do Mongo (`guilds`, `members`, `tickets`,
+>    `messages`) não guardam sugestão, voto nem reação. Varredura por
+>    `sugest|suggest|vote|voto|upvote|poll|enquete|carlito` deu um match, e era ruído
+>    (`.vscode/settings.json`, `typescript.suggest.autoImports`).
+> 2. O "Carlito" é o **Carl-bot**, um bot público de terceiros. Nunca foi software da equipe, e o
+>    corpus vive no banco do fornecedor.
+> 3. **Não há como recuperar as sugestões do banco do Carl-bot.**
+> 4. O dono decidiu que perder os registros antigos é aceitável.
 >
-> **A história aponta para o repositório errado.** Não é caso de replanejar — é caso de achar o
-> alvo primeiro. Ordem de busca sugerida pelo código: `Bot-Ticket` → `BackEnd-TicketBot` → aceitar
-> que as sugestões vivem como mensagens cruas num canal do Discord, sem persistência própria.
-> Tarefa de horas, não de sprint, e destrava tudo.
+> A história existia unicamente para preservar esse acervo. Sem acervo a preservar, ela não tem
+> objeto. **Cancelada — não movida, não adiada.**
 >
-> **A urgência é maior do que o plano supunha.** `src/functions/tickets/cleanup.ts:9-12` executa
-> `deleteMany` permanente em tickets fechados com mais de 30 dias, no boot e a cada 24h, sem
-> soft-delete e sem backup. A equipe já entrega destruição de dados por design. Se algo análogo
-> cobrir as sugestões, o acervo dito insubstituível está sendo consumido agora — por isso a
-> **primeira ação da S6.1 é verificar se há rotina de purga sobre o corpus**, antes do export.
-> Antes de escolher formato, garantir que ainda há o que exportar.
+> #### O que isso destrava
 >
-> **Precedente do risco de `data_criacao`.** `src/database/schemas/message.ts:13` usa
-> `default: Date.now` — um insert sem data explícita recebe a data da importação em silêncio. É
-> exatamente o que o plano proíbe. Vira critério de aceite com asserção automatizada.
+> - **A S6 cai de 22 SP para 17**, resolvendo sozinha o desbalanço que estava em aberto. A opção 2
+>   da seção de desbalanço ("mover a S6.1 para a S7") ficou sem sentido: não há o que mover.
+> - **O épico de sugestões perde seu gate.** A S10 dependia da S6.1 estar concluída; agora pode
+>   começar quando a capacidade permitir.
+> - **A S10.1 encolhe.** Era "Migration + importação do corpus"; sem corpus, sobra só a migration
+>   do schema. Os 5 SP dela precisam ser reestimados — decisão do dono, não fiz sozinho.
 >
-> **Sanitização tem dois alvos, não um.** Além do Discord ID cru, existe o elo Discord ID ↔
-> nickname Minecraft (`nicknameModal`), correlação de identidade entre plataformas. E há acervo
-> paralelo fora do banco: transcripts HTML com imagens embutidas despejados num canal do Discord
-> (`control-close-delete.ts:83-89`). Política que só olhe o Mongo deixa o segundo de fora.
+> #### O que isso custa, registrado sem relitigar
 >
-> Confirmado e reaproveitável: checagem de cargo **server-side** no fluxo de tickets
-> (`control-close-delete.ts:29-37`) e segredos por variável de ambiente com validação Zod no boot,
-> zero credenciais commitadas.
+> As sugestões futuras nascem sem histórico: não haverá base para dizer o que a comunidade já pediu
+> nem o que já foi recusado, e um pedido repetido não terá como ser reconhecido como repetido. A
+> decisão foi tomada com esse trade-off à vista.
 >
-> #### Resolução — o corpus não está em código nosso
+> #### Pendência que sobra
 >
-> **Confirmado pelo Murilo em 2026-08-22: o "Carlito" é um bot de terceiros**, adicionado ao
-> servidor. Não é software da equipe. Isso encerra a busca por repositório: o corpus vive no banco
-> do fornecedor, fora do controle e fora do alcance de qualquer análise de código nossa.
-> `BackEnd-TicketBot` e `FrontEnd-Ticket` estão fora de uso desde nov/2025 e não são candidatos.
->
-> **A S6.1 muda de natureza.** Deixa de ser "exportar de um banco que controlamos" e passa a ser
-> "recuperar dado hospedado por terceiro". Isso reordena a história inteira:
->
-> | campo | recuperável raspando o canal do Discord? |
-> |---|---|
-> | `texto`, `autor`, `data_criacao`, `discord_msg_id` | **sim**, enquanto as mensagens existirem |
-> | `id` | sim, se o bot numera a sugestão no corpo/embed; senão, gerar na importação |
-> | `votos_up` / `votos_down` | **depende do mecanismo** — ver abaixo |
->
-> **O mecanismo de voto decide se metade do corpus é recuperável.** Se as sugestões recebem
-> **reações** (emoji), os votos estão nas próprias mensagens e a API do Discord os devolve. Se o
-> bot usa **botões**, a contagem vive no banco do fornecedor e **só sai por exportação nativa
-> dele** — sem isso, `votos_up`/`votos_down` são irrecuperáveis e a S6.1 entrega um corpus sem a
-> dimensão de prioridade, que é justamente o que dava valor ao acervo. Olhar uma sugestão no canal
-> responde isso em segundos.
->
-> **Risco operacional novo, e sério.** O dado é refém de um fornecedor: remover o bot do servidor,
-> perder o plano, ou o fornecedor podar dado antigo faz o acervo sumir sem log e sem aviso.
-> **Não remover o Carlito do servidor até o export estar concluído e verificado** — isso vira item
-> de checklist da história, não recomendação.
->
-> **Ordem de trabalho revisada da S6.1:**
-> 1. Identificar o bot pelo nome e verificar se ele tem **exportação nativa** (dashboard, comando,
->    API). Se tiver, é o caminho — pega tudo, inclusive votos de botão.
-> 2. Verificar o **mecanismo de voto** (reação ou botão) numa sugestão real do canal.
-> 3. Sem export nativo: raspar o canal via API do Discord. Requer o **ID do canal de sugestões**,
->    que não está em config de repo nenhum.
-> 4. Congelar o resultado antes da campanha de unban.
+> A S6 ficou **sem história marcada `[CORTE]`** — a S6.1 era ela. As três restantes (S6.0, S6.2,
+> S6.3) foram declaradas não-cortáveis. A 17 SP contra 13 planejados, a sprint segue acima da
+> capacidade e agora sem válvula de escape. Decidir se alguma delas passa a ser cortável, ou se a
+> sprint roda estendida assumidamente.
 
 ### S6.2b — Auditar exposição de rede da máquina do game · 2 SP · `chore/db-network-exposure`
 
@@ -177,7 +136,6 @@ A entrega mais importante do plano. Sem ela, tudo pode parar em silêncio de nov
 - [ ] Dump restaurável dos dois bancos guardado fora da VPS
 - [ ] Alerta comprovado por teste destrutivo intencional
 - [ ] Baseline pré-campanha commitado
-- [ ] Corpus do Carlito no repo — **gate do épico de sugestões**
 - [ ] Spec órfão `specs/spec.md` (coleta de sessão no proxy) marcado superseded
 
 ### Riscos
@@ -186,9 +144,9 @@ A entrega mais importante do plano. Sem ela, tudo pode parar em silêncio de nov
 |---|---|
 | Builds diferentes corrompendo schema | igualar versão antes de unificar; dump antes |
 | Reinício do Paper/Velocity | janela fora de pico, anunciada |
-| Unban chegando antes da sprint fechar | S6.2 e S6.3 não são cortáveis; corte S6.1 se precisar |
+| Unban chegando antes da sprint fechar | S6.2 e S6.3 não são cortáveis, e a S6.1 foi cancelada — não há mais o que cortar. Se apertar, a sprint roda estendida |
 
-**[CORTE]** S6.1 (o corpus não some se o bot não for trocado). S6.0, S6.2 e S6.3 não são cortáveis.
+**[CORTE]** ~~S6.1~~ — cancelada. A S6 ficou **sem história cortável**: S6.0, S6.2 e S6.3 são todas não-cortáveis. Ver a pendência registrada na S6.1.
 
 ---
 
@@ -294,7 +252,7 @@ jogo.**
 
 # Sprint 10 — Sugestões: modelo, corpus e bot
 
-**Gate de entrada:** S6.1 concluída.
+**Gate de entrada:** ~~S6.1 concluída~~ — **removido em 2026-08-22** com o cancelamento da S6.1. A S10 não depende mais de nada da S6 e pode começar quando a capacidade permitir.
 
 > **Verificação de 2026-08-22:** planejar S10.2 e S10.3 como **construção do zero, não extensão**.
 > No `Ticket-Bot` não há máquina de estados (`status` é string livre com dois valores, `"Open"` e
@@ -304,12 +262,17 @@ jogo.**
 > do `control-close-delete.ts:29-37` — reaproveitar **por dentro do responder**, nunca por
 > efemeridade, que é como o `/configuracoes` faz hoje e não checa nada.
 
-### S10.1 — Migration + importação do corpus · 5 SP · `feat/db-suggestions-schema`
+### S10.1 — Migration + ~~importação do corpus~~ · 5 SP **(a reestimar)** · `feat/db-suggestions-schema`
+
+> **2026-08-22:** com a S6.1 cancelada não existe corpus a importar. Sobram apenas os itens 1 e 5
+> — a migration do schema e a sanitização. Os critérios 2, 3 e 4 eram todos sobre importação e
+> ficam sem objeto. Os 5 SP estão superestimados; reestimar é decisão do dono.
 
 1. Migration Drizzle cria `suggestion` conforme §7
-2. `created_at` **original**, nunca a data da importação
-3. Idempotente por `discord_msg_id`
-4. Reporta importados / ignorados / rejeitados com motivo
+2. ~~`created_at` **original**, nunca a data da importação~~ — sem importação. A regra continua
+   valendo para sugestão nova: gravar a data do evento, nunca a do insert
+3. ~~Idempotente por `discord_msg_id`~~ — sem objeto
+4. ~~Reporta importados / ignorados / rejeitados com motivo~~ — sem objeto
 5. Sanitização na escrita; rollback testado
 
 ### S10.2 — Estados no bot, verificados server-side · 5 SP · `feat/bot-suggestion-states`
@@ -386,7 +349,7 @@ jogo.**
 | # | Sprint | História | SP |
 |---|---|---|---|
 | 1 | S6 | Baseline pré-campanha | 2 |
-| 2 | S6 | Corpus do Carlito | 5 |
+| ~~2~~ | S6 | ~~Corpus do Carlito~~ — **cancelada 2026-08-22** | ~~5~~ → 0 |
 | 3 | S6 | Unificar bancos do Plan | 5 |
 | 3b | S6 | Auditar exposição do MySQL (3306) | 2 |
 | 4 | S6 | **Checks de saúde + alerta** | 8 |
@@ -405,7 +368,7 @@ jogo.**
 | 17 | S12 | Home | 5 |
 | 18 | S12 | Públicas + gate | 5 |
 
-**105 SP · 7 sprints.** (conferido em 2026-08-21 somando a tabela e os títulos das histórias)
+**100 SP · 7 sprints.** (105 na conferência de 2026-08-21, menos os 5 SP da S6.1 cancelada em 2026-08-22)
 
 ### ⚠️ Desbalanço conhecido — decisão pendente do dono
 
@@ -413,18 +376,19 @@ Com a capacidade planejada de 13 SP/sprint, duas sprints estouram:
 
 | sprint | SP | situação |
 |---|---|---|
-| **S6** | **22** | 69% acima. Inchou ao longo do planejamento — S6.0 e S6.2b entraram depois, sem rebalancear |
+| **S6** | ~~22~~ → **17** | era 69% acima; com a S6.1 cancelada, caiu para 31% acima |
 | S7–S11 | 13 cada | dentro |
 | **S12** | **18** | 38% acima. Três histórias grandes |
 
 **A S6 é sprint de prazo, não de capacidade.** O limite dela é a data do unban all, não a
 velocidade. Opções:
 
-1. **Aceitar 22 SP como sprint estendida** — S6.2 e S6.3 não são cortáveis (instrumentação antes da
-   campanha), S6.0 é irreversível se atrasar
-2. **Mover S6.1 (corpus do Carlito, 5 SP) para a S7** — ela já está marcada `[CORTE]` e não tem
-   prazo de campanha. Deixa a S6 em 17 SP
-3. **Dividir a S12 em duas** (S12 + S13), voltando para 8 sprints
+1. **Aceitar 17 SP como sprint estendida** — S6.2 e S6.3 não são cortáveis (instrumentação antes da
+   campanha), S6.0 é irreversível se atrasar, e não sobrou história cortável
+2. ~~**Mover S6.1 para a S7**~~ — **sem objeto desde 2026-08-22**: a S6.1 foi cancelada, e o
+   efeito que essa opção buscava (S6 em 17 SP) já aconteceu
+3. **Dividir a S12 em duas** (S12 + S13), voltando para 8 sprints — segue de pé, é o único
+   estouro restante
 
 **A escolher antes de abrir o worktree da S6.** Enquanto não decidido, o plano tem 7 sprints
 nominais e ~8 semanas de trabalho real.
@@ -433,7 +397,7 @@ nominais e ~8 semanas de trabalho real.
 
 ```
 S6.0 (baseline) ─── independente, tem prazo externo
-S6.1 (corpus) ─────────────────────► S10.1 ─► S10.2 ─► S10.3
+S10.1 ─► S10.2 ─► S10.3            (a S6.1 era o gate; cancelada, S10 nao depende da S6)
 S6.2 (banco unico) ─► S6.3 (saude) ─► S7.1 ─────────► S12.1
                             └──────► S7.2 ─► S8.1 ──► S12.1
                                             └► S8.2 ─► S9.2

@@ -18,11 +18,12 @@ fora de contexto.
 > recuperados do Google Drive (pasta `Austv`) e commitados neste dia. Os cinco scripts de
 > diagnóstico listados no fim deste documento **continuam ausentes** e bloqueiam a S6.0.
 >
-> **Corpus de sugestões (2026-08-22): localizado — e não é nosso.** O `Ticket-Bot` foi lido e não
-> tem sistema de sugestões. O Murilo confirmou no mesmo dia que o **"Carlito" é um bot de
-> terceiros** adicionado ao servidor, não software da equipe. O corpus vive no banco do fornecedor.
-> `BackEnd-TicketBot` e `FrontEnd-Ticket` estão fora de uso desde nov/2025 e foram descartados como
-> candidatos. Consequências e nova ordem de trabalho no bloco de verificação da S6.1.
+> **Corpus de sugestões (2026-08-22): encerrado.** O `Ticket-Bot` foi lido e não tem sistema de
+> sugestões. O "Carlito" é o **Carl-bot**, bot público de terceiros — nunca foi software da equipe.
+> As sugestões não são recuperáveis do banco dele, e **o dono decidiu que perder os registros
+> antigos é aceitável**. A `S6.1` foi **cancelada**; a S6 caiu de 22 para 17 SP e o épico de
+> sugestões perdeu seu gate. `BackEnd-TicketBot` e `FrontEnd-Ticket` estão fora de uso desde
+> nov/2025 e foram descartados. Detalhe no bloco da S6.1, no plano de sprints.
 
 ---
 
@@ -47,7 +48,8 @@ sistema de sugestões** — o domínio dele é ticket, e as quatro coleções do
 sugestão, voto nem reação. Depois, ao perguntar: **o Carlito é um bot de terceiros**, não é
 software da equipe. Ou seja, a história foi escrita, estimada em 5 SP e marcada como PR 0
 bloqueante sobre um sistema que a equipe **não escreveu e não controla**. A estimativa de 3.028 não
-tem origem rastreável. Detalhe e nova ordem de trabalho no bloco de verificação da S6.1.
+tem origem rastreável — e nunca terá, porque o acervo não sai do banco do fornecedor. A história
+foi **cancelada** em 2026-08-22, com a perda dos registros antigos aceita pelo dono.
 
 > **Lição de método, aplicável a tudo:** série derivada de plugin mede o comportamento **daquele
 > plugin**, não a realidade. Confirmar com uma segunda fonte independente antes de tratar qualquer
@@ -118,13 +120,14 @@ prontos — isso **encolhe** a S12.
 **Precedência de negócio:** as correções do funil de onboarding rodam em paralelo e vêm na frente.
 Este sistema **mede**; não conserta.
 
-Ordem inegociável: `S6.1` (corpus) antes de todo o épico de sugestões · `S6.2` (banco único) antes
-de `S6.3` · UI (`S12`) por último. Cada sprint tem uma história marcada `[CORTE]`, a primeira a
-sair sob pressão.
+Ordem inegociável: ~~`S6.1` (corpus) antes de todo o épico de sugestões~~ — **caiu em 2026-08-22**
+com o cancelamento da S6.1; a S10 não depende mais da S6 · `S6.2` (banco único) antes de `S6.3` ·
+UI (`S12`) por último. Cada sprint tem uma história marcada `[CORTE]`, a primeira a sair sob
+pressão — **exceto a S6, que ficou sem nenhuma** quando a S6.1 saiu.
 
-**Desbalanço conhecido, decisão pendente:** com 13 SP/sprint planejados, a **S6 está em 22 SP** (tem
-prazo externo — o unban — então é sprint de data, não de capacidade) e a **S12 em 18 SP**. As
-opções estão no próprio plano de sprints. Decidir antes de abrir o worktree da S6.
+**Desbalanço, parcialmente resolvido:** com 13 SP/sprint planejados, a **S6 caiu de 22 para 17 SP**
+com o cancelamento da S6.1 (tem prazo externo — o unban — então é sprint de data, não de
+capacidade). A **S12 segue em 18 SP** e é o único estouro restante. Total do plano: **100 SP**.
 
 ### Numeração das sprints — RESOLVIDO em 2026-08-21
 
