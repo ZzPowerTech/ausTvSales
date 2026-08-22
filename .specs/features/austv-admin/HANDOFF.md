@@ -17,6 +17,12 @@ fora de contexto.
 > **Procedência (2026-08-21):** o spec e o plano de sprints não estavam versionados — foram
 > recuperados do Google Drive (pasta `Austv`) e commitados neste dia. Os cinco scripts de
 > diagnóstico listados no fim deste documento **continuam ausentes** e bloqueiam a S6.0.
+>
+> **Corpus de sugestões (2026-08-22): paradeiro desconhecido.** O `Ticket-Bot` foi lido e não tem
+> sistema de sugestões. Candidatos por ordem: `austv-minecraft/Bot-Ticket` (parado desde
+> 2025-05-12, provável antecessor), `austv-minecraft/BackEnd-TicketBot` (parado desde 2025-11-06),
+> ou mensagens cruas num canal do Discord. Localizar o corpus é pré-requisito da S6.1 — ver o
+> bloco de verificação da história.
 
 ---
 
@@ -35,9 +41,21 @@ tutorial. Chegadas reais: **~190–250/mês**. Medir antes/depois de uma correç
 **3. "Queda de 96%."** Contaminado pela mesma série. A queda real (nov/2025 → ago/2026) é de
 **−72%**.
 
+**4. "O corpus de ~3.028 sugestões está no bot Carlito, é só exportar."** Falso, e descoberto em
+2026-08-22 ao ler o `austv-minecraft/Ticket-Bot` pela primeira vez. **Não existe sistema de
+sugestões nele** — o domínio do bot é ticket, e as quatro coleções do Mongo não guardam sugestão,
+voto nem reação. Nenhum dos sete campos que a S6.1 pede existe; `votos_up`/`votos_down` não têm
+sequer análogo conceitual. A estimativa de 3.028 não tem origem rastreável em código. Detalhe e
+consequências no bloco de verificação da S6.1, no plano de sprints.
+
 > **Lição de método, aplicável a tudo:** série derivada de plugin mede o comportamento **daquele
 > plugin**, não a realidade. Confirmar com uma segunda fonte independente antes de tratar qualquer
 > série como métrica de negócio.
+>
+> O erro 4 é a mesma raiz noutra roupa: uma história inteira foi escrita, estimada e marcada como
+> **PR 0 bloqueante** sobre um repositório que ninguém tinha aberto. Antes de estimar trabalho
+> sobre um sistema, **ler o sistema** — o custo de abrir o repo é de minutos, e teria evitado um
+> gate de épico apontando para o lugar errado.
 
 ---
 

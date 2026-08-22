@@ -56,6 +56,44 @@ Rodar os três `austv-diagnostico*.ps1` uma última vez e versionar scripts + sa
 3. Sem exportação nativa → raspagem via bot, mesmo schema
 4. Sanitização de PII + checksum no PR
 
+> #### ⚠️ Verificação de 2026-08-22 — esta história não pode começar como está escrita
+>
+> O `austv-minecraft/Ticket-Bot` foi lido na íntegra. **Não existe sistema de sugestões nele.**
+> Varredura por `sugest|suggest|vote|voto|upvote|poll|enquete|carlito` em todo o código retorna um
+> único match, e é ruído (`.vscode/settings.json:55`, `typescript.suggest.autoImports`). O domínio
+> do bot é ticket — abrir canal, controlar, fechar, transcrever, avaliar com estrelas. O MongoDB
+> tem quatro coleções (`src/database/index.ts:18-23`): `guilds`, `members`, `tickets`, `messages`.
+> Nenhuma guarda sugestão, voto ou reação.
+>
+> Cai, portanto: que o "Carlito" seja este repositório; que as ~3.028 sugestões estejam aqui; que
+> os sete campos existam e só precisem de export. `votos_up`/`votos_down` não têm sequer análogo
+> conceitual no código.
+>
+> **A história aponta para o repositório errado.** Não é caso de replanejar — é caso de achar o
+> alvo primeiro. Ordem de busca sugerida pelo código: `Bot-Ticket` → `BackEnd-TicketBot` → aceitar
+> que as sugestões vivem como mensagens cruas num canal do Discord, sem persistência própria.
+> Tarefa de horas, não de sprint, e destrava tudo.
+>
+> **A urgência é maior do que o plano supunha.** `src/functions/tickets/cleanup.ts:9-12` executa
+> `deleteMany` permanente em tickets fechados com mais de 30 dias, no boot e a cada 24h, sem
+> soft-delete e sem backup. A equipe já entrega destruição de dados por design. Se algo análogo
+> cobrir as sugestões, o acervo dito insubstituível está sendo consumido agora — por isso a
+> **primeira ação da S6.1 é verificar se há rotina de purga sobre o corpus**, antes do export.
+> Antes de escolher formato, garantir que ainda há o que exportar.
+>
+> **Precedente do risco de `data_criacao`.** `src/database/schemas/message.ts:13` usa
+> `default: Date.now` — um insert sem data explícita recebe a data da importação em silêncio. É
+> exatamente o que o plano proíbe. Vira critério de aceite com asserção automatizada.
+>
+> **Sanitização tem dois alvos, não um.** Além do Discord ID cru, existe o elo Discord ID ↔
+> nickname Minecraft (`nicknameModal`), correlação de identidade entre plataformas. E há acervo
+> paralelo fora do banco: transcripts HTML com imagens embutidas despejados num canal do Discord
+> (`control-close-delete.ts:83-89`). Política que só olhe o Mongo deixa o segundo de fora.
+>
+> Confirmado e reaproveitável: checagem de cargo **server-side** no fluxo de tickets
+> (`control-close-delete.ts:29-37`) e segredos por variável de ambiente com validação Zod no boot,
+> zero credenciais commitadas.
+
 ### S6.2b — Auditar exposição de rede da máquina do game · 2 SP · `chore/db-network-exposure`
 
 Arquitetura: **duas máquinas** — VPS (`sales.austv.net`, hospeda o `ausTvSales`) e game
@@ -221,6 +259,14 @@ jogo.**
 # Sprint 10 — Sugestões: modelo, corpus e bot
 
 **Gate de entrada:** S6.1 concluída.
+
+> **Verificação de 2026-08-22:** planejar S10.2 e S10.3 como **construção do zero, não extensão**.
+> No `Ticket-Bot` não há máquina de estados (`status` é string livre com dois valores, `"Open"` e
+> `"Closed"`, sem enum e sem validação de transição — `tickets.ts:12`), não há trilha de auditoria
+> persistida (só embed enviado a canal do Discord, editável e sem ID de ator — `logs.ts:13-32`) e
+> não há paginação em lugar nenhum. O único ativo reaproveitável é o padrão de checagem de cargo
+> do `control-close-delete.ts:29-37` — reaproveitar **por dentro do responder**, nunca por
+> efemeridade, que é como o `/configuracoes` faz hoje e não checa nada.
 
 ### S10.1 — Migration + importação do corpus · 5 SP · `feat/db-suggestions-schema`
 
