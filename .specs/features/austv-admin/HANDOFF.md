@@ -18,11 +18,11 @@ fora de contexto.
 > recuperados do Google Drive (pasta `Austv`) e commitados neste dia. Os cinco scripts de
 > diagnóstico listados no fim deste documento **continuam ausentes** e bloqueiam a S6.0.
 >
-> **Corpus de sugestões (2026-08-22): paradeiro desconhecido.** O `Ticket-Bot` foi lido e não tem
-> sistema de sugestões. Candidatos por ordem: `austv-minecraft/Bot-Ticket` (parado desde
-> 2025-05-12, provável antecessor), `austv-minecraft/BackEnd-TicketBot` (parado desde 2025-11-06),
-> ou mensagens cruas num canal do Discord. Localizar o corpus é pré-requisito da S6.1 — ver o
-> bloco de verificação da história.
+> **Corpus de sugestões (2026-08-22): localizado — e não é nosso.** O `Ticket-Bot` foi lido e não
+> tem sistema de sugestões. O Murilo confirmou no mesmo dia que o **"Carlito" é um bot de
+> terceiros** adicionado ao servidor, não software da equipe. O corpus vive no banco do fornecedor.
+> `BackEnd-TicketBot` e `FrontEnd-Ticket` estão fora de uso desde nov/2025 e foram descartados como
+> candidatos. Consequências e nova ordem de trabalho no bloco de verificação da S6.1.
 
 ---
 
@@ -41,12 +41,13 @@ tutorial. Chegadas reais: **~190–250/mês**. Medir antes/depois de uma correç
 **3. "Queda de 96%."** Contaminado pela mesma série. A queda real (nov/2025 → ago/2026) é de
 **−72%**.
 
-**4. "O corpus de ~3.028 sugestões está no bot Carlito, é só exportar."** Falso, e descoberto em
-2026-08-22 ao ler o `austv-minecraft/Ticket-Bot` pela primeira vez. **Não existe sistema de
-sugestões nele** — o domínio do bot é ticket, e as quatro coleções do Mongo não guardam sugestão,
-voto nem reação. Nenhum dos sete campos que a S6.1 pede existe; `votos_up`/`votos_down` não têm
-sequer análogo conceitual. A estimativa de 3.028 não tem origem rastreável em código. Detalhe e
-consequências no bloco de verificação da S6.1, no plano de sprints.
+**4. "O corpus de ~3.028 sugestões está no bot Carlito, é só exportar."** Falso em duas camadas,
+descoberto em 2026-08-22. Primeiro: o `austv-minecraft/Ticket-Bot`, tido como o Carlito, **não tem
+sistema de sugestões** — o domínio dele é ticket, e as quatro coleções do Mongo não guardam
+sugestão, voto nem reação. Depois, ao perguntar: **o Carlito é um bot de terceiros**, não é
+software da equipe. Ou seja, a história foi escrita, estimada em 5 SP e marcada como PR 0
+bloqueante sobre um sistema que a equipe **não escreveu e não controla**. A estimativa de 3.028 não
+tem origem rastreável. Detalhe e nova ordem de trabalho no bloco de verificação da S6.1.
 
 > **Lição de método, aplicável a tudo:** série derivada de plugin mede o comportamento **daquele
 > plugin**, não a realidade. Confirmar com uma segunda fonte independente antes de tratar qualquer

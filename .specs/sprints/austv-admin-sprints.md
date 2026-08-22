@@ -93,6 +93,42 @@ Rodar os três `austv-diagnostico*.ps1` uma última vez e versionar scripts + sa
 > Confirmado e reaproveitável: checagem de cargo **server-side** no fluxo de tickets
 > (`control-close-delete.ts:29-37`) e segredos por variável de ambiente com validação Zod no boot,
 > zero credenciais commitadas.
+>
+> #### Resolução — o corpus não está em código nosso
+>
+> **Confirmado pelo Murilo em 2026-08-22: o "Carlito" é um bot de terceiros**, adicionado ao
+> servidor. Não é software da equipe. Isso encerra a busca por repositório: o corpus vive no banco
+> do fornecedor, fora do controle e fora do alcance de qualquer análise de código nossa.
+> `BackEnd-TicketBot` e `FrontEnd-Ticket` estão fora de uso desde nov/2025 e não são candidatos.
+>
+> **A S6.1 muda de natureza.** Deixa de ser "exportar de um banco que controlamos" e passa a ser
+> "recuperar dado hospedado por terceiro". Isso reordena a história inteira:
+>
+> | campo | recuperável raspando o canal do Discord? |
+> |---|---|
+> | `texto`, `autor`, `data_criacao`, `discord_msg_id` | **sim**, enquanto as mensagens existirem |
+> | `id` | sim, se o bot numera a sugestão no corpo/embed; senão, gerar na importação |
+> | `votos_up` / `votos_down` | **depende do mecanismo** — ver abaixo |
+>
+> **O mecanismo de voto decide se metade do corpus é recuperável.** Se as sugestões recebem
+> **reações** (emoji), os votos estão nas próprias mensagens e a API do Discord os devolve. Se o
+> bot usa **botões**, a contagem vive no banco do fornecedor e **só sai por exportação nativa
+> dele** — sem isso, `votos_up`/`votos_down` são irrecuperáveis e a S6.1 entrega um corpus sem a
+> dimensão de prioridade, que é justamente o que dava valor ao acervo. Olhar uma sugestão no canal
+> responde isso em segundos.
+>
+> **Risco operacional novo, e sério.** O dado é refém de um fornecedor: remover o bot do servidor,
+> perder o plano, ou o fornecedor podar dado antigo faz o acervo sumir sem log e sem aviso.
+> **Não remover o Carlito do servidor até o export estar concluído e verificado** — isso vira item
+> de checklist da história, não recomendação.
+>
+> **Ordem de trabalho revisada da S6.1:**
+> 1. Identificar o bot pelo nome e verificar se ele tem **exportação nativa** (dashboard, comando,
+>    API). Se tiver, é o caminho — pega tudo, inclusive votos de botão.
+> 2. Verificar o **mecanismo de voto** (reação ou botão) numa sugestão real do canal.
+> 3. Sem export nativo: raspar o canal via API do Discord. Requer o **ID do canal de sugestões**,
+>    que não está em config de repo nenhum.
+> 4. Congelar o resultado antes da campanha de unban.
 
 ### S6.2b — Auditar exposição de rede da máquina do game · 2 SP · `chore/db-network-exposure`
 
