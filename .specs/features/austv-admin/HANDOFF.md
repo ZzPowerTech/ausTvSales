@@ -213,6 +213,89 @@ para impedir.
 > Nada foi implementado sobre essa decisão. Os seis checks com fonte definida seguem; o sétimo está
 > parado à espera desta escolha.
 
+## Estado da S6.3 em 2026-08-23 — o que está pronto e o que trava
+
+**Entregue e mergeado** (PRs #127, #128, #131, #135, #137, #139, #140, #141):
+
+| peça | o que faz |
+|---|---|
+| `health_checks` + `HealthCheckStore` | persistência append-only dos vereditos, com histórico |
+| `alert-policy` | decide o que anuncia, agrupa repetição, separa recuperação de perda de sinal |
+| `DiscordAlerter` | entrega no canal; menção inerte, markdown escapado, webhook nunca logado |
+| `PlanApiClient` | transporte `/v1/*` com taxonomia de erro em 4 classes |
+| `plan-server-overview` | adapter do `serverOverview`, com **payload real** de produção como fixture |
+| `HealthCheckRunner` | executa, persiste, decide, anuncia; guarda de ciclo sobreposto |
+| `CollectionAliveCheck` | **1 dos 7 checks** — coleta viva por backend |
+| `HealthCheckScheduler` | agendamento por intervalo, opt-in, com carência no boot |
+
+`main` verde: 33 suites, 296 testes, build e lint limpos.
+
+### O que impede declarar a S6.3 concluída
+
+**1. Seis dos sete checks da §6.1 não existem.** Três deles **não têm fonte de dado**:
+
+| check | situação | o que falta |
+|---|---|---|
+| `plan.collection_alive` | ✅ pronto | — |
+| `funnel.network_to_survival` | construível já | `serverOverview` de dois servidores |
+| `plan.proxy_registration_alive` | bloqueado | shape de `/v1/graph?type=uniqueAndNew` |
+| `platform.offline_account_share` | bloqueado | shape de `/v1/playersTable` |
+| `plan.orphan_instance` | **sem fonte** | Plan não expõe lista de servidores — `/v1/servers` e `/v1/networkOverview` dão **404**. A lista existe em `plan_servers`, mas o ADR-002 proíbe lê-la daqui |
+| `plan.version_divergence` | **sem fonte** | `plan_version` só existe em `plan_servers` — mesmo bloqueio do ADR-002 |
+| `funnel.tutorial_entry_rate` | **sem fonte** | Plan não coleta nada de tutorial (bloco anterior deste documento) |
+
+**Decisão pendente do dono:** abrir uma segunda exceção documentada ao ADR-002 (SQL read-only sobre
+`plan_servers`, como já existe para coorte) destravaria `orphan_instance` e `version_divergence` de
+uma vez. A alternativa é aceitar 4 de 7 checks e registrar os 3 como fora de alcance da v1.
+
+**2. O critério 4 da S6.3 não foi cumprido** — *"verificado derrubando uma instância de propósito"*.
+Exige ligar o agendamento num ambiente real com webhook configurado. Nada disso está em produção.
+
+**3. O critério 5** — *"alerta de taxa de entrada no tutorial testado com valor forçado"* — é
+inexequível enquanto o check não tiver fonte.
+
+### Fatos de infraestrutura apurados em 2026-08-23 (não relitigar)
+
+- **A VPS alcança o Plan.** `curl` da VPS para `198.89.99.70:25504/v1/serverOverview` devolve `400`,
+  igual ao localhost. **ADR-001 está de pé.**
+- **Não há autenticação nos `/v1/*`.** Parâmetro faltando dá `400`; nome de servidor inválido dá
+  `403`; nunca `401`. O `Authorization: Bearer` do client é palpite defensivo, não requisito.
+- **`Use_X-Forwarded-For_Header: false`** — a whitelist do Plan usa o IP real do socket e **não é
+  contornável por header**. Responde a pergunta 3b1 do spec.
+- **Dois servidores, sem duplicata:** `Survival` (id 3, backend) e `AusTv` (id 4, proxy), ambos em
+  **`5.8 build 3605`**. Builds idênticas — o `5.6 b2959 vs b2965` do plano de sprints está
+  desatualizado. A unificação de 20/08 ficou limpa.
+- **O webserver do Plan é do proxy:** `plan_servers.web_address` do AusTv é
+  `http://198.89.99.70:25504`. O Survival tem `web_address` NULL, o que explica a 25505 não
+  responder de fora. É a arquitetura certa, não um defeito.
+
+### ⚠️ Armadilha de método registrada em 2026-08-23
+
+Olhando `serverOverview?server=AusTv` retornando zero em tudo, foi levantada a hipótese de
+**incidente ativo** — proxy sem coletar. **Estava errado.**
+
+Proxy grava **usuário**, backend grava **sessão** (§2 do spec). Toda métrica derivada de sessão é
+estruturalmente zero num proxy. O que desfez a hipótese foi uma query de controle
+(`?server=NomeInventado` → `403`, provando que `AusTv` é válido) somada a `plan_users`, que mostrou
+registro de minutos atrás.
+
+Duas tabelas erradas foram consultadas antes da certa: `plan_sessions` e `plan_user_info`, ambas
+incapazes de responder a pergunta. **A §6.1 já nomeava a tabela certa o tempo todo:
+`plan_users.registered`.**
+
+É a mesma raiz dos erros 1–4 no topo deste documento: série derivada de plugin mede o
+comportamento daquele plugin, não a realidade. `PlanServersConfig.backends()` existe para que esse
+erro específico não seja repetido em código.
+
+### Restrição nova para o baseline da campanha
+
+`plan_users` tem **5566** linhas; `plan_user_info` do Survival tem **5540**. O histórico de rede do
+proxy **não veio na unificação** — está no banco antigo. Na prática, **métrica de rede tem 3 dias de
+profundidade** (desde 2026-08-20). Para comparar antes/depois do unban isso é raso, e é melhor
+saber agora do que na hora de comparar.
+
+---
+
 ## Perguntas em aberto (não são código, e valem mais que sprint)
 
 1. **O que aconteceu em fevereiro/2026?** Aquisição de rede caiu de 1.177 para 645. **Nenhuma
@@ -232,7 +315,14 @@ para impedir.
 
 **§10b do spec — exposição de rede.** `mariadbd` em `0.0.0.0:3306`, `ufw` inativo, conta MySQL
 `@%`, credenciais em texto plano em 4 configs de plugin, porta confirmada aberta de 3 pontos
-independentes. **O dono decidiu tratar como responsabilidade da MagnoHost.** Registrado, não
+independentes.
+
+> **Correção de 2026-08-23 — o IP estava errado neste documento.** A máquina do game é
+> **`198.89.99.70`** (`ip -4 addr`: `198.89.99.70/24` em `enp4s0`, e nada mais público). O
+> `198.89.99.229` que aparecia aqui, no spec e no `Alternative_IP` do próprio Plan **não é
+> endereço dessa máquina**. Custou uma investigação inteira de "a VPS não alcança o Plan" que era
+> só endereço errado. A leitura correta da evidência de 21/08 é que `198.89.99.70` era o **alvo**
+> dos testes, não a origem. **O dono decidiu tratar como responsabilidade da MagnoHost.** Registrado, não
 relitigar. Se a MagnoHost restringir por IP no futuro, o ETL para sem aviso e a `S6.2b` precisa ser
 reaberta.
 
