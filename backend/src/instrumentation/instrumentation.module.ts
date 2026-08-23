@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
+import { CollectionAliveCheck } from './collection-alive.check';
 import { DiscordAlerter } from './discord-alerter';
 import { HEALTH_CHECKS } from './health-check.contract';
 import { HealthCheckRunner } from './health-check.runner';
 import { HealthCheckStore } from './health-check.store';
 import { PlanApiClient } from './plan-api.client';
+import { PlanServersConfig } from './plan-servers.config';
 
 /**
  * Instrumentation health (AusTV Admin story S6.3, spec §6.1, ADR-006).
@@ -29,17 +31,29 @@ import { PlanApiClient } from './plan-api.client';
     DiscordAlerter,
     PlanApiClient,
     HealthCheckRunner,
+    PlanServersConfig,
+    CollectionAliveCheck,
     {
-      // The registry the runner iterates. Empty for now, on purpose: the checks
-      // land in the next slice, and the runner must not know which exist.
+      // The registry the runner iterates. The runner must not know which checks
+      // exist, so adding one is a line here and nothing there.
       //
-      // An empty registry is inert and says so — `runAll` logs that no check
-      // produced an observation instead of reporting a clean bill of health for
-      // a system it never looked at.
+      // Six of the seven checks in spec 6.1 are still absent, and three of those
+      // have no data source at all — `funnel.tutorial_entry_rate` (Plan collects
+      // nothing about the tutorial) plus `plan.orphan_instance` and
+      // `plan.version_divergence` (Plan exposes no server-list endpoint; both
+      // `/v1/servers` and `/v1/networkOverview` return 404). Those are decisions
+      // for the owner, recorded in HANDOFF.md, not gaps to paper over here.
       provide: HEALTH_CHECKS,
-      useValue: [],
+      useFactory: (collectionAlive: CollectionAliveCheck) => [collectionAlive],
+      inject: [CollectionAliveCheck],
     },
   ],
-  exports: [HealthCheckStore, DiscordAlerter, PlanApiClient, HealthCheckRunner],
+  exports: [
+    HealthCheckStore,
+    DiscordAlerter,
+    PlanApiClient,
+    HealthCheckRunner,
+    PlanServersConfig,
+  ],
 })
 export class InstrumentationModule {}
