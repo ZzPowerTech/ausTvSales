@@ -21,6 +21,17 @@ export interface AlertDecision {
   announce: HealthCheckRecord[];
   /** Checks that just returned to `ok` after having been announced as failing. */
   recovered: HealthCheckRecord[];
+  /**
+   * Checks that stopped producing data after having been announced as failing.
+   *
+   * Split out of {@link recovered} deliberately. `no_data` is not a recovery: it
+   * means the check went from "measured and broken" to "cannot be measured at
+   * all", which is strictly worse. Folding the two together made the alerter
+   * paint a green "normalizado" banner over a loss of signal — the precise
+   * failure ADR-006 exists to prevent, and a direct violation of the project
+   * rule that a collection gap is never rendered as a healthy value.
+   */
+  lostSignal: HealthCheckRecord[];
   /** Notifiable observations deliberately held back, with the reason. */
   suppressed: SuppressedObservation[];
 }
@@ -61,6 +72,7 @@ export interface AlertPolicyInput {
 export function decideAlerts(input: AlertPolicyInput): AlertDecision {
   const announce: HealthCheckRecord[] = [];
   const recovered: HealthCheckRecord[] = [];
+  const lostSignal: HealthCheckRecord[] = [];
   const suppressed: SuppressedObservation[] = [];
 
   for (const record of input.observations) {
@@ -70,7 +82,15 @@ export function decideAlerts(input: AlertPolicyInput): AlertDecision {
       if (wasAnnouncedFailure(previous, input.lastAlertAt, record.checkName)) {
         // Closing the loop matters: without it, the only way to learn that an
         // outage ended is to go look, which is the habit this epic removes.
-        recovered.push(record);
+        //
+        // But only `ok` closes it. A check that fell to `no_data` did not get
+        // better — we simply stopped being able to see it, and announcing
+        // "normalizado" there is a false all-clear.
+        if (record.status === 'no_data') {
+          lostSignal.push(record);
+        } else {
+          recovered.push(record);
+        }
       } else {
         suppressed.push({ record, reason: 'not_notifiable' });
       }
@@ -99,7 +119,7 @@ export function decideAlerts(input: AlertPolicyInput): AlertDecision {
     }
   }
 
-  return { announce, recovered, suppressed };
+  return { announce, recovered, lostSignal, suppressed };
 }
 
 function isNotifiable(status: HealthCheckStatus): boolean {

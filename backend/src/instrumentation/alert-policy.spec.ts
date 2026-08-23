@@ -224,7 +224,7 @@ describe('decideAlerts', () => {
       expect(decision.recovered).toEqual([]);
     });
 
-    it('trata no_data apos falha anunciada como recuperacao de alerta, nao como falha', () => {
+    it('trata no_data apos falha anunciada como sinal perdido, nao como recuperacao', () => {
       const record = observation(HealthCheckName.TutorialEntryRate, 'no_data');
 
       const decision = decide({
@@ -236,7 +236,32 @@ describe('decideAlerts', () => {
       });
 
       expect(decision.announce).toEqual([]);
-      expect(decision.recovered).toEqual([record]);
+      // Nao e recuperacao: o check nao voltou ao normal, ele parou de poder ser
+      // medido. Colocar isso no mesmo balde de `recovered` fazia o alerter
+      // publicar um embed verde "normalizado" sobre uma perda de coleta — o
+      // falso all-clear que o ADR-006 existe para impedir.
+      expect(decision.recovered).toEqual([]);
+      expect(decision.lostSignal).toEqual([record]);
+    });
+
+    it('separa recuperacao real de sinal perdido no mesmo ciclo', () => {
+      const back = observation(HealthCheckName.NetworkToSurvival, 'ok');
+      const gone = observation(HealthCheckName.OrphanInstance, 'no_data');
+
+      const decision = decide({
+        observations: [back, gone],
+        previousStatus: new Map([
+          [back.checkName, 'breached'],
+          [gone.checkName, 'breached'],
+        ]),
+        lastAlertAt: new Map([
+          [back.checkName, new Date(NOW.getTime() - 2 * HOURS)],
+          [gone.checkName, new Date(NOW.getTime() - 2 * HOURS)],
+        ]),
+      });
+
+      expect(decision.recovered).toEqual([back]);
+      expect(decision.lostSignal).toEqual([gone]);
     });
   });
 
