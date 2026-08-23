@@ -298,6 +298,26 @@ export class EnvironmentVariables {
   @Max(720)
   PROXY_REGISTRATION_MAX_SILENCE_HOURS?: number;
 
+  // Piso da conversao rede -> servidor, de 0 a 1. Historicamente ~0,46 (54% de
+  // quem conecta na rede nunca chega ao survival). PRECISA de calibracao: 0.3 e
+  // margem conservadora abaixo do historico, nao uma medida.
+  //
+  // A janela e fixa em 7 dias e NAO e configuravel: o Plan so oferece
+  // `last_7_days` neste endpoint, e uma janela ajustavel deixaria alguem
+  // comparar numerador de 30 dias com denominador de 7.
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  FUNNEL_MIN_NETWORK_TO_SERVER?: number;
+
+  // Abaixo desta quantidade de chegadas de rede na janela, nenhuma conversao e
+  // publicada — razao sobre amostra pequena e ruido lido como tendencia.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  FUNNEL_MIN_SAMPLE?: number;
+
   // Express `trust proxy` setting, applied in main.ts so `req.ip` reflects the
   // real client from the Nginx-supplied X-Forwarded-For (and a header forged by a
   // direct client is ignored). A number = trust that many hops; otherwise a
