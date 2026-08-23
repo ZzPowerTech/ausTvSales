@@ -6,6 +6,7 @@ import { HEALTH_CHECKS } from './health-check.contract';
 import { HealthCheckRunner } from './health-check.runner';
 import { HealthCheckScheduler } from './health-check.scheduler';
 import { HealthCheckStore } from './health-check.store';
+import { NetworkToSurvivalCheck } from './network-to-survival.check';
 import { OrphanInstanceCheck } from './orphan-instance.check';
 import { PlanApiClient } from './plan-api.client';
 import { PlanDatabase } from './plan-database';
@@ -47,15 +48,17 @@ import { VersionDivergenceCheck } from './version-divergence.check';
     OrphanInstanceCheck,
     PlatformOfflineShareCheck,
     ProxyRegistrationAliveCheck,
+    NetworkToSurvivalCheck,
     {
       // The registry the runner iterates. The runner must not know which checks
       // exist, so adding one is a line here and nothing there.
       //
-      // Still absent from spec 6.1: `funnel.network_to_survival`, which pairs the
-      // network arrival count with the per-server one; and
-      // `funnel.tutorial_entry_rate`, which has **no data source at all** — Plan
-      // collects nothing about the tutorial. That last one is a decision for the
-      // owner, recorded in HANDOFF.md with four options.
+      // Six of the seven checks in spec 6.1. The seventh,
+      // `funnel.tutorial_entry_rate`, has **no data source at all** — Plan
+      // collects nothing about the tutorial, and the numbers in HANDOFF.md came
+      // from reading `Quests/playerdata/*.yml` on the game machine, which no
+      // API, no MySQL and no PostgreSQL can reach. It is a decision for the
+      // owner between the four options recorded there, not a gap to paper over.
       provide: HEALTH_CHECKS,
       useFactory: (
         collectionAlive: CollectionAliveCheck,
@@ -63,12 +66,14 @@ import { VersionDivergenceCheck } from './version-divergence.check';
         orphanInstance: OrphanInstanceCheck,
         offlineShare: PlatformOfflineShareCheck,
         proxyRegistration: ProxyRegistrationAliveCheck,
+        networkToSurvival: NetworkToSurvivalCheck,
       ) => [
         collectionAlive,
         versionDivergence,
         orphanInstance,
         offlineShare,
         proxyRegistration,
+        networkToSurvival,
       ],
       inject: [
         CollectionAliveCheck,
@@ -76,6 +81,7 @@ import { VersionDivergenceCheck } from './version-divergence.check';
         OrphanInstanceCheck,
         PlatformOfflineShareCheck,
         ProxyRegistrationAliveCheck,
+        NetworkToSurvivalCheck,
       ],
     },
   ],
