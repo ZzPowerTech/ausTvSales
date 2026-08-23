@@ -1,5 +1,6 @@
 import { plainToInstance } from 'class-transformer';
 import {
+  IsBoolean,
   IsEnum,
   IsInt,
   IsOptional,
@@ -208,6 +209,25 @@ export class EnvironmentVariables {
   @IsOptional()
   @MinLength(1, { message: 'PLAN_PROXY_SERVER must not be empty when set' })
   PLAN_PROXY_SERVER?: string;
+
+  // --- Agendamento dos checks (AusTV Admin S6.3, ADR-006) ---
+
+  // Master switch for the instrumentation-health cycle. Off by default so no
+  // environment starts polling a game VPS by surprise, and announced loudly at
+  // boot when off — a health layer that silently does not run manufactures
+  // exactly the confidence ADR-006 exists to destroy.
+  @IsOptional()
+  @IsBoolean()
+  HEALTH_CHECK_ENABLED?: boolean;
+
+  // Minutes between cycles. The lower bound is not arbitrary: each cycle issues
+  // one request per configured server against the Plan on the game machine, and
+  // spec section 8 lists "query pesada afeta o jogo" as a real risk.
+  @IsOptional()
+  @IsInt()
+  @Min(5)
+  @Max(1_440)
+  HEALTH_CHECK_INTERVAL_MINUTES?: number;
 
   // Express `trust proxy` setting, applied in main.ts so `req.ip` reflects the
   // real client from the Nginx-supplied X-Forwarded-For (and a header forged by a
