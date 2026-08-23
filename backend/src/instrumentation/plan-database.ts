@@ -30,8 +30,29 @@ interface RawServerRow extends RowDataPacket {
 }
 
 /**
- * Read-only access to `plan_servers` — **documented exception 2 to ADR-002**,
- * approved by the owner on 2026-08-23.
+ * Network-wide arrivals, from `plan_users`.
+ *
+ * `plan_users` is the network identity table: one row per player who ever
+ * touched the network, created by whichever instance saw them first — in
+ * practice the proxy. It is the only place the top of the funnel exists, because
+ * the proxy records **users** while the backends record **sessions** (spec §2),
+ * so every session-derived endpoint is structurally empty for the proxy.
+ */
+export interface NetworkArrivals {
+  /** Rows counted. Scoped to the window when one was given. */
+  total: number;
+  /** Most recent `registered`, epoch ms. Null when the table is empty. */
+  lastRegisteredAt: number | null;
+}
+
+interface RawArrivalsRow extends RowDataPacket {
+  total: number | string;
+  last_registered: number | string | null;
+}
+
+/**
+ * Read-only access to `plan_servers` and `plan_users` — **documented exception 2
+ * to ADR-002**, approved by the owner on 2026-08-23 and extended the same day.
  *
  * ## Why this class is allowed to exist
  *
@@ -45,7 +66,8 @@ interface RawServerRow extends RowDataPacket {
  *
  * ## The limits, which are part of the approval
  *
- * 1. **One table only: `plan_servers`.** Any other table needs a new numbered
+ * 1. **Two tables, and only these: `plan_servers` and `plan_users`.** Any other —
+ *    `plan_user_info` and `plan_sessions` included — needs a new numbered
  *    exception in the spec, not a quiet query added here.
  * 2. **A dedicated read-only MySQL user**, separate from the plugins' user and
  *    from exception 1's. `SELECT` on this table and nothing else.
@@ -81,8 +103,9 @@ export class PlanDatabase implements OnModuleInit, OnModuleDestroy {
   onModuleInit(): void {
     if (!this.configured) {
       this.logger.warn(
-        'PLAN_DB_HOST nao configurado — os checks de inventario de instancia ' +
-          '(orphan_instance, version_divergence) vao reportar `error`, nunca `ok`.',
+        'PLAN_DB_HOST nao configurado — os checks que dependem do banco do Plan ' +
+          '(orphan_instance, version_divergence, proxy_registration_alive) vao ' +
+          'reportar `error`, nunca `ok`.',
       );
       return;
     }
@@ -152,4 +175,58 @@ export class PlanDatabase implements OnModuleInit, OnModuleDestroy {
       planVersion: row.plan_version ?? null,
     }));
   }
+
+  /**
+   * Arrivals on the network, optionally windowed by registration time.
+   *
+   * @param since epoch ms; when given, only rows registered at or after it are
+   *   counted. `lastRegisteredAt` is always the **overall** maximum, unwindowed,
+   *   because "when did we last see anyone at all" is the question the liveness
+   *   check asks and a windowed maximum would answer a different one.
+   *
+   * @throws when the database is unreachable. Never smoothed into a zero — a
+   *   count of zero and a failed query mean opposite things to every caller.
+   */
+  async networkArrivals(since?: number): Promise<NetworkArrivals> {
+    if (!this.pool) {
+      throw new Error(
+        'PLAN_DB_HOST nao configurado — sem conexao com o banco do Plan',
+      );
+    }
+
+    // Parameterised even though `since` is internal: a query builder that
+    // interpolates today is a query builder that interpolates user input the
+    // day someone reuses it.
+    const [rows] = await this.pool.query<RawArrivalsRow[]>(
+      since === undefined
+        ? 'SELECT COUNT(*) AS total, MAX(registered) AS last_registered FROM plan_users'
+        : 'SELECT (SELECT COUNT(*) FROM plan_users WHERE registered >= ?) AS total, ' +
+            '(SELECT MAX(registered) FROM plan_users) AS last_registered',
+      since === undefined ? [] : [since],
+    );
+
+    const row = rows[0];
+    return {
+      total: toNumber(row?.total) ?? 0,
+      lastRegisteredAt: toNumber(row?.last_registered),
+    };
+  }
+}
+
+/**
+ * Coerce a MySQL numeric back to a number.
+ *
+ * `COUNT(*)` and `BIGINT` come back as a string from some driver/version
+ * combinations and as a number from others. Trusting either spelling produces a
+ * bug that only appears after a dependency bump.
+ */
+function toNumber(raw: number | string | null | undefined): number | null {
+  if (typeof raw === 'number') {
+    return Number.isFinite(raw) ? raw : null;
+  }
+  if (typeof raw !== 'string') {
+    return null;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
 }
