@@ -7,7 +7,9 @@ import { HealthCheckRunner } from './health-check.runner';
 import { HealthCheckScheduler } from './health-check.scheduler';
 import { HealthCheckStore } from './health-check.store';
 import { PlanApiClient } from './plan-api.client';
+import { PlanDatabase } from './plan-database';
 import { PlanServersConfig } from './plan-servers.config';
+import { VersionDivergenceCheck } from './version-divergence.check';
 
 /**
  * Instrumentation health (AusTV Admin story S6.3, spec §6.1, ADR-006).
@@ -36,20 +38,25 @@ import { PlanServersConfig } from './plan-servers.config';
     PlanApiClient,
     HealthCheckRunner,
     PlanServersConfig,
+    PlanDatabase,
     CollectionAliveCheck,
+    VersionDivergenceCheck,
     {
       // The registry the runner iterates. The runner must not know which checks
       // exist, so adding one is a line here and nothing there.
       //
-      // Six of the seven checks in spec 6.1 are still absent, and three of those
-      // have no data source at all — `funnel.tutorial_entry_rate` (Plan collects
-      // nothing about the tutorial) plus `plan.orphan_instance` and
-      // `plan.version_divergence` (Plan exposes no server-list endpoint; both
-      // `/v1/servers` and `/v1/networkOverview` return 404). Those are decisions
-      // for the owner, recorded in HANDOFF.md, not gaps to paper over here.
+      // Still absent from spec 6.1: `plan.orphan_instance` (buildable now that
+      // ADR-002 exception 2 is approved), `plan.proxy_registration_alive` and
+      // `platform.offline_account_share` (need the shape of `/v1/graph` and
+      // `/v1/playersTable`), and `funnel.tutorial_entry_rate`, which has no data
+      // source at all — Plan collects nothing about the tutorial. That last one
+      // is a decision for the owner, recorded in HANDOFF.md.
       provide: HEALTH_CHECKS,
-      useFactory: (collectionAlive: CollectionAliveCheck) => [collectionAlive],
-      inject: [CollectionAliveCheck],
+      useFactory: (
+        collectionAlive: CollectionAliveCheck,
+        versionDivergence: VersionDivergenceCheck,
+      ) => [collectionAlive, versionDivergence],
+      inject: [CollectionAliveCheck, VersionDivergenceCheck],
     },
   ],
   exports: [
