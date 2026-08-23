@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.10.1...backend-v0.11.0) (2026-08-23)
+
+
+### Features
+
+* **backend:** tabela health_checks e store de vereditos (S6.3) ([0243ae5](https://github.com/ZzPowerTech/ausTvSales/commit/0243ae54935aa1d66f8467a2765a8a766f154a83))
+* **backend:** tabela health_checks e store de vereditos (S6.3) ([a9248ab](https://github.com/ZzPowerTech/ausTvSales/commit/a9248ab40f785251974ae86147f290fb0c46d50f)), closes [#109](https://github.com/ZzPowerTech/ausTvSales/issues/109)
+
 ## [0.10.1](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.10.0...backend-v0.10.1) (2026-07-21)
 
 
