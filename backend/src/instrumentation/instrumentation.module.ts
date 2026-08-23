@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { DiscordAlerter } from './discord-alerter';
+import { HEALTH_CHECKS } from './health-check.contract';
+import { HealthCheckRunner } from './health-check.runner';
 import { HealthCheckStore } from './health-check.store';
 import { PlanApiClient } from './plan-api.client';
 
@@ -22,7 +24,22 @@ import { PlanApiClient } from './plan-api.client';
  * paper over here.
  */
 @Module({
-  providers: [HealthCheckStore, DiscordAlerter, PlanApiClient],
-  exports: [HealthCheckStore, DiscordAlerter, PlanApiClient],
+  providers: [
+    HealthCheckStore,
+    DiscordAlerter,
+    PlanApiClient,
+    HealthCheckRunner,
+    {
+      // The registry the runner iterates. Empty for now, on purpose: the checks
+      // land in the next slice, and the runner must not know which exist.
+      //
+      // An empty registry is inert and says so — `runAll` logs that no check
+      // produced an observation instead of reporting a clean bill of health for
+      // a system it never looked at.
+      provide: HEALTH_CHECKS,
+      useValue: [],
+    },
+  ],
+  exports: [HealthCheckStore, DiscordAlerter, PlanApiClient, HealthCheckRunner],
 })
 export class InstrumentationModule {}
