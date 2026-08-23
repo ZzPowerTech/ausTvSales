@@ -113,6 +113,35 @@ export class EnvironmentVariables {
   })
   INGEST_ALLOWED_IPS?: string;
 
+  // --- Instrumentation health alerts (AusTV Admin S6.3, ADR-006) ---
+
+  // Discord webhook that receives the instrumentation-health alerts. The URL is
+  // itself the credential — anyone holding it can post to the channel — so it is
+  // injected as a deploy secret and never logged, not even redacted.
+  //
+  // Optional in every environment **for now**, and validated only for shape when
+  // present. Making it required in production here would be a deploy-ordering
+  // trap: this slice ships the alerter, but nothing schedules a check yet, so the
+  // container would refuse to boot for no gain. The slice that starts the
+  // scheduler is the one that must promote this to required-in-production —
+  // running checks that silently cannot alert is exactly the ADR-006 failure.
+  // Until then, DiscordAlerter warns loudly at boot when it is unset.
+  @IsOptional()
+  @IsUrl(
+    { require_tld: true, require_protocol: true, protocols: ['https'] },
+    { message: 'DISCORD_ALERT_WEBHOOK_URL must be an absolute https URL' },
+  )
+  DISCORD_ALERT_WEBHOOK_URL?: string;
+
+  // How long a check must stay in the same failing state before it is announced
+  // again. Guards against a months-long outage producing one message per cycle,
+  // which trains the team to mute the channel — ADR-006's silence with noise.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(720)
+  HEALTH_ALERT_REALERT_HOURS?: number;
+
   // Express `trust proxy` setting, applied in main.ts so `req.ip` reflects the
   // real client from the Nginx-supplied X-Forwarded-For (and a header forged by a
   // direct client is ignored). A number = trust that many hops; otherwise a
