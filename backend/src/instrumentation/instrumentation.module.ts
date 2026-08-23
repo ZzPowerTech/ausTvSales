@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { DiscordAlerter } from './discord-alerter';
 import { HealthCheckStore } from './health-check.store';
 
 /**
@@ -13,7 +14,7 @@ import { HealthCheckStore } from './health-check.store';
  * alerter, the Plan data source and the seven checks land on top of it.
  */
 @Module({
-  providers: [HealthCheckStore],
-  exports: [HealthCheckStore],
+  providers: [HealthCheckStore, DiscordAlerter],
+  exports: [HealthCheckStore, DiscordAlerter],
 })
 export class InstrumentationModule {}
