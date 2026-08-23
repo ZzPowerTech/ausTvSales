@@ -67,6 +67,11 @@ austv-sales/
 │               ├── dashboard/      # Shell + sidenav
 │               ├── catalog/        # Cadastro de categorias e itens (Sprint 4)
 │               └── analytics/      # Página de categoria + top 5 + sales-series-chart (Sprint 5)
+├── ops/                            # Operação e diagnóstico (AusTV Admin) — não vai para build
+│   └── baseline/                   # "Antes" congelado da campanha de unban (S6.0)
+│       ├── README.md               #   como ler cada número e suas limitações
+│       ├── scripts/                #   austv-diagnostico{,2}.ps1 — leitura offline do clone
+│       └── 2026-08-19/             #   saída da execução, uma pasta por snapshot
 ├── CLAUDE.md                       # Contexto e convenções do projeto
 ├── README.md                       # Visão geral
 ├── structure.md                    # Este arquivo
