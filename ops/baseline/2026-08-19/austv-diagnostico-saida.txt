@@ -1,0 +1,215 @@
+AusTV diagnostico | 2026-08-19 20:57
+
+=========== BLOCO 1: ESSENTIALS USERDATA ===========
+arquivos_userdata: 49302   (42s)
+login_mais_recente: 2026-08-19 20:20
+hoje:               2026-08-19 20:58   (defasagem do snapshot: 0,0 dias)
+
+--- CHURN: ultimo login (base = todos) ---
+<=1d            71     0,1%
+<=7d           180     0,4%
+<=30d          328     0,7%
+<=90d          384     0,8%
+<=365d        5399    11,0%
+>365d        42853    86,9%
+sem_login       87     0,2%
+
+--- DURACAO DA ULTIMA SESSAO (logout - login) ---
+<1min         8925    18,1%
+1-5min       15767    32,0%
+5-30min      19161    38,9%
+30-120min     4988    10,1%
+2-10h          205     0,4%
+>10h            54     0,1%
+sem_dado       202     0,4%
+
+--- TIPO DE CONTA ---
+java_premium      6816    13,8%
+java_offline     13272    26,9%
+bedrock          29209    59,2%
+outro                5     0,0%
+
+--- GATES DO TUTORIAL VISIVEIS NO ESSENTIALS ---
+total_jogadores          49302
+recebeu_kit_prot          5802    11,8%   <- recompensa do 02tutorial
+tem_pelo_menos_1_home    10558    21,4%   <- gate do 05tutorial (/casacriar)
+sessao_curta_sem_home    20965    42,5%
+saldo_zero               11611  de 49302 com money lido
+ativos_ultimos_30d         579     1,2%
+
+--- ULTIMO LOGIN POR MES (quando cada leva desistiu) ---
+2023-05       5
+2023-06     535
+2023-07    2252
+2023-08    1312
+2023-09    2198
+2023-10    3593
+2023-11    1400
+2023-12    1093
+2024-01    1700
+2024-02    1760
+2024-03    1724
+2024-04    1145
+2024-05    2001
+2024-06    2623
+2024-07    2576
+2024-08    1377
+2024-09    1253
+2024-10    1451
+2024-11    1376
+2024-12    1026
+2025-01    1475
+2025-02    1863
+2025-03    1349
+2025-04    1254
+2025-05    1427
+2025-06    1282
+2025-07    1287
+2025-08     849
+2025-09     732
+2025-10     764
+2025-11     754
+2025-12     783
+2026-01     839
+2026-02     480
+2026-03     386
+2026-04     327
+2026-05       1
+2026-06     147
+2026-07     379
+2026-08     437
+
+=========== BLOCO 2: FUNIL DO TUTORIAL ===========
+quests_no_tutorial: 41
+playerdata_total:     19700   (15s)
+playerdata_vazio_0kb: 8162    41,4%   <- entrou e nunca tocou em quest nenhuma
+playerdata_sem_tutorial: 704     3,6%
+playerdata_com_tutorial: 10834    55,0%
+
+--- FUNIL POR QUEST (base = playerdata_total) ---
+quest               tocou concluiu %concl
+01tutorial          10834     8391   42,6%
+02tutorial           4723     3281   16,7%
+03tutorial           2208     1675    8,5%
+04-2tutorial          931      872    4,4%
+04tutorial            105       98    0,5%
+05tutorial           1198     1146    5,8%
+06tutorial           1095     1073    5,4%
+07tutorial           1064     1057    5,4%
+08tutorial           1020      648    3,3%
+09tutorial            611      522    2,6%
+10-2tutorial          464      452    2,3%
+10tutorial             60       60    0,3%
+11tutorial            502      498    2,5%
+12-2tutorial          466      462    2,3%
+12-3tutorial          452      346    1,8%
+12tutorial             60       60    0,3%
+13tutorial            479      475    2,4%
+14tutorial            461      423    2,1%
+15tutorial            415      410    2,1%
+16tutorial            410      374    1,9%
+17tutorial            367      350    1,8%
+18tutorial            350      292    1,5%
+19-2tutorial          265      242    1,2%
+19tutorial             37       37    0,2%
+20tutorial            277      274    1,4%
+21tutorial            270      233    1,2%
+22tutorial            234      227    1,2%
+23tutorial            230      227    1,2%
+24tutorial            230      226    1,1%
+25tutorial            229      224    1,1%
+26-2tutorial          204      198    1,0%
+26tutorial             33       33    0,2%
+27tutorial            222      192    1,0%
+28-2tutorial          183      160    0,8%
+28-3tutorial          158      153    0,8%
+28tutorial             24       23    0,1%
+29tutorial            185      172    0,9%
+30tutorial            172      151    0,8%
+31tutorial            151      147    0,7%
+32tutorial            150      147    0,7%
+33tutorial            151      148    0,8%
+
+--- ATE ONDE CHEGOU (maior passo concluido) ---
+passo 0      2443    12,4%
+passo 1      5110    25,9%
+passo 2      1605     8,1%
+passo 3       497     2,5%
+passo 4        32     0,2%
+passo 5        73     0,4%
+passo 6        16     0,1%
+passo 7       409     2,1%
+passo 8       126     0,6%
+passo 9        18     0,1%
+passo 10        6     0,0%
+passo 11       14     0,1%
+passo 12        7     0,0%
+passo 13       52     0,3%
+passo 14       13     0,1%
+passo 15       37     0,2%
+passo 16       24     0,1%
+passo 17       58     0,3%
+passo 18       16     0,1%
+passo 19        1     0,0%
+passo 20       41     0,2%
+passo 21        5     0,0%
+passo 23        1     0,0%
+passo 24        3     0,0%
+passo 25        5     0,0%
+passo 26       26     0,1%
+passo 27       11     0,1%
+passo 28       12     0,1%
+passo 29       21     0,1%
+passo 30        4     0,0%
+passo 33      148     0,8%
+
+--- AMOSTRA: maior playerdata (226514 bytes) ---
+quest-progress:
+  diario_escavacao:
+    started: false
+    started-date: 1723333480856
+    completed: true
+    completed-before: true
+    completion-date: 1723333480856
+    task-progress:
+      objetivo:
+        completed: false
+  diario_arco:
+    started: false
+    started-date: 1723383959256
+    completed: true
+    completed-before: true
+    completion-date: 1723383959256
+    task-progress:
+      objetivo:
+        completed: false
+  doces01:
+    started: false
+    started-date: 1762178355850
+    completed: true
+    completed-before: true
+    completion-date: 1762178355850
+    task-progress:
+      alimentar:
+        completed: false
+  doces02:
+    started: false
+    started-date: 1767389674403
+    completed: true
+    completed-before: true
+    completion-date: 1767389674403
+    task-progress:
+      alimentar:
+        completed: false
+  sopamisteriosa01:
+    started: false
+    started-date: 1763796336513
+    completed: true
+    completed-before: true
+    completion-date: 1763796336513
+    task-progress:
+      alimentar:
+
+=========== BLOCO 3: PLAYTIME (world/stats) ===========
+PULADO: \ nao configurado ou inexistente.
+O clone so tem a pasta plugins - nao ha world\stats aqui.
