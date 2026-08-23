@@ -233,12 +233,37 @@ DoS barato mesmo atrás de sessão.
 | `npm run db:generate` | Gera uma nova migration SQL em `drizzle/` a partir de `src/db/schema.ts` |
 | `npm run db:migrate` | Aplica as migrations pendentes (idempotente — controla via `drizzle.__drizzle_migrations`) |
 
-- Schema: [`src/db/schema.ts`](src/db/schema.ts) — 4 tabelas do spec §4 (`categories`, `items`, `players`, `sales`).
+- Schema: [`src/db/schema.ts`](src/db/schema.ts) — 4 tabelas do spec §4 (`categories`, `items`, `players`, `sales`) + `health_checks` (AusTV Admin §6.1).
 - Migrations geradas: `drizzle/*.sql` — **versionadas e revisáveis** (não editar à mão; regenerar via `db:generate`).
 - Injeção no Nest: `DatabaseModule` (`@Global`) provê os tokens `DRIZZLE` (instância type-safe) e `PG_POOL` (pool `pg`), e fecha o pool no shutdown.
 
 > **Fluxo forward-only:** o `drizzle-kit` gera apenas migrations de avanço. Para recomeçar em
 > dev, `docker compose down -v` recria o volume do Postgres do zero. Rollback granular não é usado.
+
+### `health_checks` — saúde da instrumentação (AusTV Admin S6.3)
+
+Tabela do épico AusTV Admin (§6.1 do spec, ADR-006). Guarda o veredito de cada execução dos
+checks que vigiam se a **medição** da rede do jogo continua acontecendo.
+
+| coluna | papel |
+|---|---|
+| `check_name` | identificador do check; pode vir com escopo (`plan.collection_alive:survival`) quando o veredito é por servidor |
+| `status` | `ok` · `breached` · `no_data` · `error` — garantido por check constraint |
+| `checked_at` | carimbado pelo **banco** (`now()`), nunca pela aplicação |
+| `detail` | `jsonb` com `summary`, `observed`, `threshold`, `n` e `context` |
+| `alerted_at` | quando **aquela** leitura virou alerta no Discord; `null` = não virou |
+
+Duas decisões que valem a leitura antes de mexer:
+
+- **A tabela é append-only.** Uma linha por execução; o estado atual de um check é a linha mais
+  recente. Sobrescrever responderia "como está agora" e perderia "desde quando está assim" — que é
+  a pergunta que ninguém conseguiu responder quando o proxy ficou três meses morto.
+- **`no_data` e `error` são estados de primeira classe.** Buraco de coleta nunca vira `ok` (produz
+  confiança falsa) nem vira leitura zero (inventa uma medição que não houve). São os dois modos de
+  falha que o ADR-006 existe para eliminar.
+
+`alerted_at` é por observação, não por check: é o que permite agrupar um apagão de três meses num
+alerta só, sem perder o registro de que o check continuou rodando.
 
 ## Gerador de vendas sintéticas (S5.0)
 

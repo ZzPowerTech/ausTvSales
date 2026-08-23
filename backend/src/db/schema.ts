@@ -4,6 +4,7 @@ import {
   check,
   index,
   integer,
+  jsonb,
   numeric,
   pgTable,
   text,
@@ -11,6 +12,10 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
+import type {
+  HealthCheckDetail,
+  HealthCheckStatus,
+} from '../instrumentation/health-check.types';
 
 /**
  * Database schema for austv-sales (spec section 4).
@@ -89,6 +94,60 @@ export const sales = pgTable(
     // replayed queue entry must never persist a non-positive amount/quantity.
     check('sales_qtd_positive', sql`${table.qtd} > 0`),
     check('sales_total_price_positive', sql`${table.totalPrice} > 0`),
+  ],
+);
+
+/**
+ * Instrumentation health checks (AusTV Admin spec §6.1, ADR-006 — story S6.3).
+ *
+ * The table is **append-only**: one row per check execution. That choice is the
+ * whole point of ADR-006 — every disaster found at AusTV was silent for months,
+ * so "what did this check say last week?" has to be answerable. Keeping a
+ * current-state row and overwriting it would answer only "what does it say now",
+ * which is exactly the blindness the epic exists to remove. The current state of
+ * a check is simply its most recent row.
+ *
+ * `alerted_at` is per-observation, not per-check: it records whether *this*
+ * reading was announced on Discord. That is what lets the alerter group a
+ * three-month outage into one notification instead of one per cycle, without
+ * losing the fact that the check kept running the whole time.
+ *
+ * Table name is plural to match the rest of this schema; the spec §7 sketch
+ * writes entities in the singular (`health_check`).
+ */
+export const healthChecks = pgTable(
+  'health_checks',
+  {
+    id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+    /** Stable identifier of the check (see `HealthCheckName`). */
+    checkName: text('check_name').notNull().$type<string>(),
+    status: text('status').notNull().$type<HealthCheckStatus>(),
+    checkedAt: timestamp('checked_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /**
+     * Structured verdict. Deliberately jsonb rather than free text so a ratio can
+     * always carry the `n` behind it — the spec rule is that no percentage is
+     * ever published without its base.
+     */
+    detail: jsonb('detail').$type<HealthCheckDetail>(),
+    /** When this observation produced a Discord alert; null means it did not. */
+    alertedAt: timestamp('alerted_at', { withTimezone: true }),
+  },
+  (table) => [
+    // Serves both access patterns: "latest row for this check" and "history of
+    // this check", which are the only two ways this table is ever read.
+    index('health_checks_name_checked_at_idx').on(
+      table.checkName,
+      table.checkedAt.desc(),
+    ),
+    // `no_data` and `error` exist as first-class states on purpose. A gap in
+    // collection must never be recorded as `ok` (false confidence) nor as a zero
+    // reading (a fabricated measurement) — the two failure modes ADR-006 targets.
+    check(
+      'health_checks_status_valid',
+      sql`${table.status} IN ('ok', 'breached', 'no_data', 'error')`,
+    ),
   ],
 );
 
