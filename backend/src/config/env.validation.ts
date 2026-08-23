@@ -288,6 +288,16 @@ export class EnvironmentVariables {
   @Min(1)
   PLATFORM_OFFLINE_MIN_SAMPLE?: number;
 
+  // Horas de silencio em `plan_users.registered` antes de alertar que a rede
+  // parou de registrar. O gatilho e TEMPO desde a ultima chegada, nunca
+  // quantidade: limiar de contagem dispararia numa noite parada de verdade e
+  // treinaria o time a silenciar o canal.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(720)
+  PROXY_REGISTRATION_MAX_SILENCE_HOURS?: number;
+
   // Express `trust proxy` setting, applied in main.ts so `req.ip` reflects the
   // real client from the Nginx-supplied X-Forwarded-For (and a header forged by a
   // direct client is ignored). A number = trust that many hops; otherwise a

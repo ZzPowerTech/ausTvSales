@@ -77,7 +77,7 @@ documentadas e isoladas em módulo próprio**, sempre em usuário **read-only**:
 | # | escopo | tabelas | por quê a API não serve |
 |---|---|---|---|
 | 1 | Coorte histórica (§6.2, S8.2) | `plan_users`, `plan_user_info`, `plan_sessions` | agregação por coorte × plataforma não existe em nenhum endpoint |
-| 2 | **Inventário de instâncias (§6.1, S6.3)** — *aprovada em 2026-08-23* | **`plan_servers` apenas** | o Plan **não expõe lista de servidores**: `/v1/servers` e `/v1/networkOverview` retornam **404** na instância do AusTV (verificado 2026-08-23) |
+| 2 | **Inventário de instâncias e chegadas de rede (§6.1, S6.3)** — *aprovada em 2026-08-23, estendida no mesmo dia* | **`plan_servers` e `plan_users`** | o Plan **não expõe lista de servidores** (`/v1/servers` e `/v1/networkOverview` retornam **404**), e a contagem de chegadas **de rede** não sai de nenhum endpoint derivado de sessão — o proxy grava usuário, não sessão |
 
 #### Exceção 2 — inventário de instâncias (2026-08-23)
 
@@ -95,9 +95,29 @@ check existe para pegar**: a instância que ninguém sabia que existia.
 
 **Decisão do dono (Murilo, 2026-08-23):** abrir a exceção.
 
+**Extensão de 2026-08-23 — `plan_users`.** Dois outros checks da §6.1 precisam da
+contagem de chegadas **na rede**:
+
+- `plan.proxy_registration_alive` — a §6.1 já o redige como *"nenhum
+  **`plan_users.registered`** novo em 24h"*. **O spec nomeia a tabela**: quando isto
+  foi escrito, já se assumia acesso ao banco para este check, e o ADR-002 nunca
+  chegou a ser conciliado com essa linha.
+- `funnel.network_to_survival` — precisa do denominador do funil, que é o mesmo
+  número.
+
+Verificado em 2026-08-23 que a API **não** serve esse dado: o proxy grava usuário
+e os backends gravam sessão (§2), então toda métrica derivada de sessão é
+estruturalmente vazia no proxy. `graph?type=uniqueAndNew` devolve arrays vazios
+para o proxy, e `serverOverview` do proxy vem com `numbers: {}`.
+
+Só duas colunas são lidas: `registered` e a contagem de linhas. `plan_users` é
+tabela de identidade — das mais estáveis do schema do Plan.
+
 **Limites, que fazem parte da decisão:**
 
-1. **Uma tabela só: `plan_servers`.** Qualquer outra tabela exige nova exceção numerada aqui.
+1. **Duas tabelas, e apenas estas: `plan_servers` e `plan_users`.** Qualquer outra
+   — incluindo `plan_user_info` e `plan_sessions` — exige nova exceção numerada
+   aqui. A recusa em esticar isto sozinho é o que mantém a tabela útil.
 2. **Usuário MySQL read-only dedicado**, separado do usuário dos plugins e do usuário da exceção 1.
    `SELECT` apenas, e apenas nessa tabela.
 3. **Um único módulo isolado.** Nenhum outro ponto do NestJS abre conexão com o MySQL do Plan.
@@ -105,9 +125,10 @@ check existe para pegar**: a instância que ninguém sabia que existia.
 5. **Degradação honesta:** banco inalcançável → os dois checks reportam `error` com o motivo, nunca
    `ok` e nunca zero.
 
-**Custo aceito.** `plan_servers` é schema interno e pode mudar entre versões do Plan. É acoplamento
-real, e a mitigação é o tamanho do alvo: uma tabela, quatro colunas (`uuid`, `name`, `is_proxy`,
-`plan_version`), lida por um módulo só. Se o schema mudar, o parser falha alto e vira veredito
+**Custo aceito.** `plan_servers` e `plan_users` são schema interno e podem mudar entre versões do
+Plan. É acoplamento real, e a mitigação é o tamanho do alvo: duas tabelas, seis colunas no total
+(`uuid`, `name`, `is_proxy`, `plan_version` · `registered`, mais a contagem), lidas por um módulo
+só. Se o schema mudar, o parser falha alto e vira veredito
 `error` — não número errado em silêncio.
 
 ### ADR-003 — `platform` é dimensão de primeira classe, derivada do UUID
