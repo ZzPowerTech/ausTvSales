@@ -189,6 +189,26 @@ export class EnvironmentVariables {
   @Max(5)
   PLAN_RETRIES?: number;
 
+  // Names of the Plan instances the checks evaluate, comma-separated, exactly as
+  // Plan spells them (`?server=` is case-sensitive). Example: `AusTv,Survival`.
+  //
+  // Configuration rather than discovery because Plan exposes no server-list
+  // endpoint — `/v1/servers` and `/v1/networkOverview` both 404 — and ADR-002
+  // forbids reading `plan_servers` from here.
+  @IsOptional()
+  @Matches(/^\s*[^\s,]+\s*(,\s*[^\s,]+\s*)*$/, {
+    message: 'PLAN_SERVERS must be a comma-separated list of Plan server names',
+  })
+  PLAN_SERVERS?: string;
+
+  // Which name in PLAN_SERVERS is the network proxy. It is excluded from
+  // session-derived checks: the proxy records users and the backends record
+  // sessions (spec section 2), so a session metric is structurally zero on it and
+  // checking it would report a permanent outage that does not exist.
+  @IsOptional()
+  @MinLength(1, { message: 'PLAN_PROXY_SERVER must not be empty when set' })
+  PLAN_PROXY_SERVER?: string;
+
   // Express `trust proxy` setting, applied in main.ts so `req.ip` reflects the
   // real client from the Nginx-supplied X-Forwarded-For (and a header forged by a
   // direct client is ignored). A number = trust that many hops; otherwise a
