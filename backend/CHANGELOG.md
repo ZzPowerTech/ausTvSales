@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.13.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.12.0...backend-v0.13.0) (2026-08-23)
+
+
+### Features
+
+* **backend:** adapter do /v1/serverOverview do Plan (S6.3) ([2855b3d](https://github.com/ZzPowerTech/ausTvSales/commit/2855b3df5d0cb4abbc67dd5ee0e816e01331f69f))
+* **backend:** adapter do /v1/serverOverview do Plan (S6.3) ([442735e](https://github.com/ZzPowerTech/ausTvSales/commit/442735ebe7bdeaf3617f57d28160e41fd67a9f7d))
+* **backend:** agendamento do ciclo de checks de saude (S6.3) ([909dbb3](https://github.com/ZzPowerTech/ausTvSales/commit/909dbb3b53a6415fa8a2d32ddd1fe77566b24fce))
+* **backend:** agendamento do ciclo de checks de saude (S6.3) ([bbfd11a](https://github.com/ZzPowerTech/ausTvSales/commit/bbfd11a7c57f1def385417aac5d78efe69d70cc6))
+* **backend:** check de coleta viva por servidor (S6.3) ([0437a78](https://github.com/ZzPowerTech/ausTvSales/commit/0437a788ae510aae17759ed0fc2f7be7403ea63a))
+* **backend:** check de coleta viva por servidor (S6.3) ([1caa295](https://github.com/ZzPowerTech/ausTvSales/commit/1caa295e6a9c2406a5d5bcc5c8cd6963c53ea6e5))
+* **backend:** check de conversao rede -&gt; servidor (S6.3, secao 6.2) ([5c31740](https://github.com/ZzPowerTech/ausTvSales/commit/5c317405a4a28af13061635f6313aaf0323de882))
+* **backend:** check de conversao rede -&gt; servidor (S6.3, secao 6.2) ([22cbbb6](https://github.com/ZzPowerTech/ausTvSales/commit/22cbbb6c33240b43dc3545709172ee3698ccbc8b))
+* **backend:** check de instancia orfa por reconciliacao de catalogo (S6.3) ([48b11df](https://github.com/ZzPowerTech/ausTvSales/commit/48b11dfcc6c736b82db32367696acd1abb5eed52))
+* **backend:** check de instancia orfa por reconciliacao de catalogo (S6.3) ([5f0d06f](https://github.com/ZzPowerTech/ausTvSales/commit/5f0d06fe20733c523d518a12a8b5cf3bf1ec3435))
+* **backend:** check de registro vivo na rede (S6.3) ([b5eeacb](https://github.com/ZzPowerTech/ausTvSales/commit/b5eeacbbf2c7989590b15ad2d735462b02ae74f0))
+* **backend:** check de registro vivo na rede (S6.3) ([5fc3c9e](https://github.com/ZzPowerTech/ausTvSales/commit/5fc3c9e3fc8916df19276f345f2db3520d984c8b))
+* **backend:** check de share de conta offline por janela (S6.3) ([903d6bc](https://github.com/ZzPowerTech/ausTvSales/commit/903d6bc8f34f9d21e57463b92db6a5a32c207cf8))
+* **backend:** check de share de conta offline por janela (S6.3) ([3d8baad](https://github.com/ZzPowerTech/ausTvSales/commit/3d8baade44656e9b33a668c84619f1c957077376))
+* **backend:** excecao 2 do ADR-002 e check de builds divergentes (S6.3) ([962cca6](https://github.com/ZzPowerTech/ausTvSales/commit/962cca68bad9d7343f8bbe80df4ef6abd3b5e328))
+* **backend:** excecao 2 do ADR-002 e check de builds divergentes (S6.3) ([a76880e](https://github.com/ZzPowerTech/ausTvSales/commit/a76880e3abd923517305cc726e64fd1ea5a6999b))
+* **backend:** runner que executa, persiste e anuncia os checks (S6.3) ([c882dfd](https://github.com/ZzPowerTech/ausTvSales/commit/c882dfdf12d399255d1114fc965cafd3c62f8ff0))
+* **backend:** runner que executa, persiste e anuncia os checks (S6.3) ([8659242](https://github.com/ZzPowerTech/ausTvSales/commit/865924201ce5878044a4cf918b1e3b6881039df5))
+
 ## [0.12.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.11.0...backend-v0.12.0) (2026-08-23)
 
 
