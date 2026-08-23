@@ -24,7 +24,7 @@ meses. E "o que aconteceu no mês X?" se responde em minutos.
 
 | Descoberta | Efeito no spec |
 |---|---|
-| Plan já instalado no proxy (AusTv) e no backend (Survival), em **bancos separados** | PR de infra vira **unificação**, não instalação |
+| ~~Plan já instalado no proxy (AusTv) e no backend (Survival), em **bancos separados**~~ | **Superado em 2026-08-20:** o dono unificou os bancos fora do fluxo de sprint. Não há PR de infra — a S6.2 nasceu e morreu sobre uma premissa já vencida |
 | Proxy grava usuários, **backends gravam sessões** | Aquisição vem do proxy, retenção do backend — camadas diferentes, não redundância |
 | **54% de quem conecta na rede nunca chega ao survival** | Novo degrau de funil, nunca medido. Vira métrica de primeira classe |
 | Plataforma sai do UUID em SQL puro, com 100% de acerto | **A DataExtension de plataforma foi cancelada.** Uma sprint inteira eliminada |
@@ -95,6 +95,10 @@ Nenhum arquivo do Plan é copiado para o monorepo. Item de checklist na revisão
 Requisito do Plan para setup de rede. Sem isso não existe visão de rede, identidade unificada de
 jogador nem **tempo por servidor**. Proxy e backends **na mesma build** do Plan — builds diferentes
 compartilhando banco corrompem schema.
+
+**Estado em 2026-08-20 (confirmado pelo dono em 2026-08-23):** banco único **já em produção**, com
+proxy e backends na **mesma build**. O ADR deixa de ser trabalho a fazer e passa a ser invariante a
+vigiar — é o que o check `plan.version_divergence` da §6.1 existe para detectar se regredir.
 
 ### ADR-007 — Economia vem de banco, não de plugin
 
@@ -372,8 +376,12 @@ sem sanitizar**.
 
 ## 9. Critérios de aceite
 
-- Proxy e backends na **mesma build** do Plan, num **único** MySQL, webserver só no proxy em
-  `127.0.0.1`
+- [x] Proxy e backends na **mesma build** do Plan, num **único** MySQL — **satisfeito em
+  2026-08-20**, fora do fluxo de sprint. Passa a ser vigiado continuamente pelos checks
+  `plan.orphan_instance` e `plan.version_divergence`
+- ~~webserver só no proxy em `127.0.0.1`~~ — **contraditório com a §8 e não resolvido.** A §8 exige
+  o webserver alcançável pela rede, senão o NestJS da VPS não consome `/v1/*` (ADR-001/002). Este
+  critério não pode ser aceito como está; depende da decisão de exposição de rede da §10b
 - Os 7 checks de saúde da §6.1 rodando e alertando no Discord — verificado **derrubando uma
   instância de propósito**
 - Alerta de taxa de entrada no tutorial testado com valor forçado

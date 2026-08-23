@@ -120,14 +120,24 @@ prontos — isso **encolhe** a S12.
 **Precedência de negócio:** as correções do funil de onboarding rodam em paralelo e vêm na frente.
 Este sistema **mede**; não conserta.
 
-Ordem inegociável: ~~`S6.1` (corpus) antes de todo o épico de sugestões~~ — **caiu em 2026-08-22**
-com o cancelamento da S6.1; a S10 não depende mais da S6 · `S6.2` (banco único) antes de `S6.3` ·
-UI (`S12`) por último. Cada sprint tem uma história marcada `[CORTE]`, a primeira a sair sob
-pressão — **exceto a S6, que ficou sem nenhuma** quando a S6.1 saiu.
+Ordem inegociável, hoje reduzida a um item: ~~`S6.1` (corpus) antes de todo o épico de
+sugestões~~ — **caiu em 2026-08-22** com o cancelamento da S6.1; a S10 não depende mais da S6 ·
+~~`S6.2` (banco único) antes de `S6.3`~~ — **caiu em 2026-08-23**: os bancos foram unificados pelo
+dono em **2026-08-20**, então a S6.3 não tem gate · **UI (`S12`) por último** — o único
+pré-requisito que sobrou. Cada sprint tem uma história marcada `[CORTE]`, a primeira a sair sob
+pressão — **exceto a S6, que ficou sem nenhuma** quando a S6.1 saiu (e que, a 12 SP contra 13 de
+capacidade, não precisa mais de uma).
 
-**Desbalanço, parcialmente resolvido:** com 13 SP/sprint planejados, a **S6 caiu de 22 para 17 SP**
-com o cancelamento da S6.1 (tem prazo externo — o unban — então é sprint de data, não de
-capacidade). A **S12 segue em 18 SP** e é o único estouro restante. Total do plano: **100 SP**.
+**Desbalanço da S6 — RESOLVIDO em 2026-08-23:** com 13 SP/sprint planejados, a **S6 caiu de 22 para
+17 SP** com o cancelamento da S6.1, e de **17 para 12** quando a S6.2 foi reconhecida como concluída
+(o dono unificou os bancos em **2026-08-20**, antes de a história ser aberta). A S6 é sprint de data
+— tem prazo externo, o unban — mas agora também cabe na capacidade. A **S12 segue em 18 SP** e é o
+**único estouro restante**. Total do plano: **95 SP**.
+
+> **Cuidado ao medir a velocidade da S6:** dos 10 SP que saíram da sprint, **nenhum foi executado**.
+> Cinco eram trabalho inexistente (S6.1, corpus que não existe) e cinco eram trabalho já feito
+> (S6.2). Ler isso como velocidade de entrega superestima a capacidade real em quase 2×. O único SP
+> de código entregue na S6 até agora está na S6.3.
 
 ### Numeração das sprints — RESOLVIDO em 2026-08-21
 

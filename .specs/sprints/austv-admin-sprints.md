@@ -82,12 +82,15 @@ Rodar os três `austv-diagnostico*.ps1` uma última vez e versionar scripts + sa
 > nem o que já foi recusado, e um pedido repetido não terá como ser reconhecido como repetido. A
 > decisão foi tomada com esse trade-off à vista.
 >
-> #### Pendência que sobra
+> #### Pendência que sobra — **encerrada em 2026-08-23**
 >
 > A S6 ficou **sem história marcada `[CORTE]`** — a S6.1 era ela. As três restantes (S6.0, S6.2,
-> S6.3) foram declaradas não-cortáveis. A 17 SP contra 13 planejados, a sprint segue acima da
-> capacidade e agora sem válvula de escape. Decidir se alguma delas passa a ser cortável, ou se a
-> sprint roda estendida assumidamente.
+> S6.3) foram declaradas não-cortáveis. ~~A 17 SP contra 13 planejados, a sprint segue acima da
+> capacidade e agora sem válvula de escape.~~
+>
+> **Deixou de ser problema em 2026-08-23**, quando a S6.2 foi reconhecida como já concluída
+> (2026-08-20): a sprint caiu para **12 SP contra 13 de capacidade**. Segue sem história cortável,
+> mas não precisa de uma. Nada a decidir.
 
 ### S6.2b — Auditar exposição de rede da máquina do game · 2 SP · `chore/db-network-exposure`
 
@@ -109,15 +112,43 @@ e não vale):
 5. Usuário **read-only** dedicado para o ETL, separado dos usuários dos plugins
 6. Nenhuma credencial nova em arquivo versionado
 
-### S6.2 — Unificar os bancos do Plan · 5 SP · `chore/plan-single-database`
+### ~~S6.2 — Unificar os bancos do Plan~~ · **CONCLUÍDA em 2026-08-20** · ~~5 SP~~ → 0
 
-1. `mysqldump` dos dois bancos **antes de qualquer alteração**, com restore testado
-2. Proxy e backends na **mesma build** do Plan (hoje 5.6 b2959 vs b2965)
-3. Proxy repontado para o MySQL único; webserver só no proxy, em `127.0.0.1`, autenticado
-4. `ServerInfoFile.yml` **não** copiado entre servidores
-5. `/plan reload` em todas as instâncias; `plan_servers` mostra proxy e backends no mesmo banco
-6. Banco antigo do proxy preservado como arquivo somente leitura, documentado
-7. Varredura externa confirma que a porta do Plan não responde
+> **Executada pelo dono fora do fluxo de sprint** (confirmado por ele em 2026-08-23). Os bancos do
+> Plan **já estão unificados** desde 2026-08-20, e as builds do proxy e dos backends **já estão
+> iguais** — o `5.6 b2959 vs b2965` do critério 2 não existe mais.
+>
+> Não houve PR: unificar banco é operação de infraestrutura na VPS do jogo, não mudança de código.
+> O runbook escrito para guiar o procedimento (PR #126) foi **revertido no PR #132**, porque
+> descrevia um estado que já não existia.
+>
+> #### Erro de método registrado
+>
+> A história foi escrita e estimada em 5 SP sobre a premissa de "dois bancos separados", tirada da
+> investigação de 19–21/08 e **nunca confirmada com o dono**. É a mesma raiz da S6.1/Carlito, que o
+> `HANDOFF.md` já registra: **estimar trabalho sobre um sistema antes de ler o sistema**. Custo
+> desta vez: um runbook de 258 linhas escrito, revisado, mergeado e revertido.
+>
+> #### O que isso destrava
+>
+> - **A S6 cai de 17 SP para 12** — pela primeira vez, dentro dos 13 SP de capacidade planejada. O
+>   desbalanço da S6 deixa de existir; sobra apenas o da S12.
+> - **A S6.3 perde seu gate.** O grafo ligava `S6.2 → S6.3`; sem a S6.2, os checks de saúde correm
+>   imediatamente.
+>
+> #### O que continua valendo, movido para a S6.3
+>
+> Dois critérios eram sobre o **estado final**, não sobre a migração, e passam a ser verificados
+> continuamente pelos checks em vez de uma vez só aqui: `plan_servers` mostrando proxy e backends no
+> mesmo banco (check `plan.orphan_instance`) e builds iguais entre instâncias (check
+> `plan.version_divergence`).
+>
+> #### Pendência que sobra
+>
+> O critério 3 dizia "webserver só no proxy, em `127.0.0.1`", o que **contradiz a §8 do spec**, que
+> exige o webserver alcançável pela rede para o NestJS da VPS consumir `/v1/*`. A contradição é
+> anterior a esta conclusão e **segue aberta** — resolver exige decisão do dono sobre a exposição de
+> rede (§10b).
 
 ### S6.3 — Checks de saúde + alerta no Discord · 8 SP · `feat/instrumentation-health`
 
@@ -132,8 +163,10 @@ A entrega mais importante do plano. Sem ela, tudo pode parar em silêncio de nov
 
 ### DoD da S6
 
-- [ ] `plan_servers` mostra proxy e backends num único banco, mesma build
-- [ ] Dump restaurável dos dois bancos guardado fora da VPS
+- [x] `plan_servers` mostra proxy e backends num único banco, mesma build — **feito em 2026-08-20**,
+      fora do fluxo de sprint (ver S6.2)
+- [ ] ~~Dump restaurável dos dois bancos guardado fora da VPS~~ — sem objeto: a unificação já
+      aconteceu e não existem mais "dois bancos" a dumpar
 - [ ] Alerta comprovado por teste destrutivo intencional
 - [ ] Baseline pré-campanha commitado
 - [ ] Spec órfão `specs/spec.md` (coleta de sessão no proxy) marcado superseded
@@ -142,11 +175,11 @@ A entrega mais importante do plano. Sem ela, tudo pode parar em silêncio de nov
 
 | risco | mitigação |
 |---|---|
-| Builds diferentes corrompendo schema | igualar versão antes de unificar; dump antes |
+| ~~Builds diferentes corrompendo schema~~ | **não materializado** — em 2026-08-20 os bancos foram unificados com as builds já iguais. O check `plan.version_divergence` (S6.3) passa a vigiar isso de forma contínua |
 | Reinício do Paper/Velocity | janela fora de pico, anunciada |
-| Unban chegando antes da sprint fechar | S6.2 e S6.3 não são cortáveis, e a S6.1 foi cancelada — não há mais o que cortar. Se apertar, a sprint roda estendida |
+| Unban chegando antes da sprint fechar | com a S6.1 cancelada e a S6.2 concluída fora do fluxo, resta a S6.3 (8 SP) — não cortável, é a razão de ser da sprint. A S6 agora cabe nos 13 SP de capacidade |
 
-**[CORTE]** ~~S6.1~~ — cancelada. A S6 ficou **sem história cortável**: S6.0, S6.2 e S6.3 são todas não-cortáveis. Ver a pendência registrada na S6.1.
+**[CORTE]** ~~S6.1~~ — cancelada. A S6 segue **sem história cortável**: S6.0 e S6.3 são não-cortáveis. A pressão sobre a válvula de escape caiu de qualquer forma — com a S6.2 concluída em 2026-08-20, a sprint tem 12 SP contra 13 de capacidade e não precisa mais de corte.
 
 ---
 
@@ -350,7 +383,7 @@ jogo.**
 |---|---|---|---|
 | 1 | S6 | Baseline pré-campanha | 2 |
 | ~~2~~ | S6 | ~~Corpus do Carlito~~ — **cancelada 2026-08-22** | ~~5~~ → 0 |
-| 3 | S6 | Unificar bancos do Plan | 5 |
+| ~~3~~ | S6 | ~~Unificar bancos do Plan~~ — **concluída 2026-08-20**, fora do fluxo de sprint | ~~5~~ → 0 |
 | 3b | S6 | Auditar exposição do MySQL (3306) | 2 |
 | 4 | S6 | **Checks de saúde + alerta** | 8 |
 | 5 | S7 | Módulo `health` | 5 |
@@ -368,39 +401,43 @@ jogo.**
 | 17 | S12 | Home | 5 |
 | 18 | S12 | Públicas + gate | 5 |
 
-**100 SP · 7 sprints.** (105 na conferência de 2026-08-21, menos os 5 SP da S6.1 cancelada em 2026-08-22)
+**95 SP · 7 sprints.** (105 na conferência de 2026-08-21, menos os 5 SP da S6.1 cancelada em
+2026-08-22 e os 5 SP da S6.2, concluída pelo dono em 2026-08-20 e reconhecida em 2026-08-23)
 
 ### ⚠️ Desbalanço conhecido — decisão pendente do dono
 
-Com a capacidade planejada de 13 SP/sprint, duas sprints estouram:
+Com a capacidade planejada de 13 SP/sprint, **restou uma sprint estourando**:
 
 | sprint | SP | situação |
 |---|---|---|
-| **S6** | ~~22~~ → **17** | era 69% acima; com a S6.1 cancelada, caiu para 31% acima |
+| **S6** | ~~22~~ → ~~17~~ → **12** | **resolvido.** S6.1 cancelada (−5) e S6.2 concluída fora do fluxo (−5). Dentro da capacidade |
 | S7–S11 | 13 cada | dentro |
-| **S12** | **18** | 38% acima. Três histórias grandes |
+| **S12** | **18** | 38% acima. Três histórias grandes — **único estouro restante** |
 
 **A S6 é sprint de prazo, não de capacidade.** O limite dela é a data do unban all, não a
-velocidade. Opções:
+velocidade — e a questão de capacidade dela **fechou sozinha**. Opções:
 
-1. **Aceitar 17 SP como sprint estendida** — S6.2 e S6.3 não são cortáveis (instrumentação antes da
-   campanha), S6.0 é irreversível se atrasar, e não sobrou história cortável
-2. ~~**Mover S6.1 para a S7**~~ — **sem objeto desde 2026-08-22**: a S6.1 foi cancelada, e o
-   efeito que essa opção buscava (S6 em 17 SP) já aconteceu
-3. **Dividir a S12 em duas** (S12 + S13), voltando para 8 sprints — segue de pé, é o único
-   estouro restante
+1. ~~**Aceitar 17 SP como sprint estendida**~~ — **sem objeto desde 2026-08-23**: a S6 está em
+   12 SP, abaixo dos 13 de capacidade. Não precisa ser estendida
+2. ~~**Mover S6.1 para a S7**~~ — **sem objeto desde 2026-08-22**: a S6.1 foi cancelada
+3. **Dividir a S12 em duas** (S12 + S13), voltando para 8 sprints — **segue de pé, e é a única
+   decisão que resta**
 
-**A escolher antes de abrir o worktree da S6.** Enquanto não decidido, o plano tem 7 sprints
-nominais e ~8 semanas de trabalho real.
+**A decidir antes de abrir o worktree da S12** (não mais o da S6, que já está em execução).
+
+> Nota de calibração: duas das três sprints "estouradas" do plano original se resolveram por
+> **descoberta**, não por execução — trabalho que não existia (S6.1) ou que já estava feito (S6.2).
+> Isso não é velocidade, e não deve ser lido como tal ao medir a S6.
 
 ## Dependências
 
 ```
 S6.0 (baseline) ─── independente, tem prazo externo
 S10.1 ─► S10.2 ─► S10.3            (a S6.1 era o gate; cancelada, S10 nao depende da S6)
-S6.2 (banco unico) ─► S6.3 (saude) ─► S7.1 ─────────► S12.1
-                            └──────► S7.2 ─► S8.1 ──► S12.1
-                                            └► S8.2 ─► S9.2
+S6.3 (saude) ─► S7.1 ───────────────────────────────► S12.1
+      └───────► S7.2 ─► S8.1 ────────────────────────► S12.1
+                        └► S8.2 ─► S9.2
+   (a S6.2 era o gate da S6.3; concluida 2026-08-20, a S6.3 nao depende de nada)
 S9.1 (economy) ───────────────────────────────────► S12.2
 S11.1 ────────────────────────────────────────────► S12.3
 S11.2 ────────────────────────────────────────────► S12.2
