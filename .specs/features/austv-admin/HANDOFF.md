@@ -159,6 +159,50 @@ sugerida e dependências. Mapeamento: sprint → milestone, história → issue,
 
 ---
 
+## ⚠️ Bloqueio descoberto na implementação da S6.3 (2026-08-23)
+
+**O check de "taxa de entrada no tutorial" não tem fonte de dados.** Descoberto ao desenhar o port
+do Plan para os 7 checks da §6.1.
+
+Dos sete checks, seis têm origem definida; um não tem:
+
+| check | fonte | situação |
+|---|---|---|
+| Coleta viva por servidor | `/v1/sessions`, `/v1/serverOverview` | ✅ |
+| Registro vivo no proxy | `/v1/graph?type=uniqueAndNew` | ✅ |
+| Instância órfã | `/v1/serverOverview` | ✅ |
+| Versões divergentes | `/v1/serverOverview` | ✅ |
+| Conversão rede → survival | `/v1/sessions` por servidor | ✅ |
+| Share de conta offline | `/v1/playersTable` + ADR-003 (UUID) | ✅ |
+| **Taxa de entrada no tutorial** | — | ❌ **não existe** |
+
+**Por quê:** o Plan não coleta nada do tutorial. Os números de tutorial deste documento vieram de
+ler `Quests/playerdata/*.yml` **na máquina do game**, com os scripts do baseline. Esses arquivos
+não são alcançáveis pela API, não estão no MySQL do Plan e não estão no PostgreSQL do `ausTvSales`.
+
+**O que isso torna inexequível como está escrito:**
+
+- Critério da S6.3: *"alerta de taxa de entrada no tutorial testado com valor forçado"*
+- Degrau `tutorial_entrou` do funil de 4 degraus da §6.2 — e portanto parte da **S8.1**
+- O check que teria evitado o desastre de 8 meses (§6.1) é justamente este
+
+**As opções, para o dono decidir:**
+
+| # | opção | custo | o que perde |
+|---|---|---|---|
+| 1 | ETL noturno lendo `Quests/playerdata` na máquina do game | novo ETL de arquivo (não de banco); precisa de acesso ao FS da máquina do game | nada — é a fonte real |
+| 2 | Usar os proxies do Essentials (`kit prot` = 02tutorial, `home` ≥1 = 05tutorial) via ETL | mais barato; a fonte já é lida pelos scripts do baseline | são **proxies** — kit/home obtidos por outra via inflam o número (registrado no README do baseline) |
+| 3 | Entregar 6 dos 7 checks na S6.3 e mover o do tutorial para a sprint que criar a fonte | zero agora | o épico fica sem o check que cobre o desastre mais longo já ocorrido |
+| 4 | Instrumentar o tutorial na origem (plugin/comando) | contraria o ADR-007 (**zero Java na v1**) | reabre decisão fechada |
+
+**Recomendação:** opção 3 agora — não segurar a S6.3 inteira por um check —, com a opção 1 aberta
+como história própria. A opção 2 é tentadora e é a que eu **não** recomendaria sem registro: trocar
+a métrica pela proxy sem rotular seria repetir a classe de erro que este documento inteiro existe
+para impedir.
+
+> Nada foi implementado sobre essa decisão. Os seis checks com fonte definida seguem; o sétimo está
+> parado à espera desta escolha.
+
 ## Perguntas em aberto (não são código, e valem mais que sprint)
 
 1. **O que aconteceu em fevereiro/2026?** Aquisição de rede caiu de 1.177 para 645. **Nenhuma
