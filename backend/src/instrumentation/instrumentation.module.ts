@@ -6,6 +6,7 @@ import { HEALTH_CHECKS } from './health-check.contract';
 import { HealthCheckRunner } from './health-check.runner';
 import { HealthCheckScheduler } from './health-check.scheduler';
 import { HealthCheckStore } from './health-check.store';
+import { OrphanInstanceCheck } from './orphan-instance.check';
 import { PlanApiClient } from './plan-api.client';
 import { PlanDatabase } from './plan-database';
 import { PlanServersConfig } from './plan-servers.config';
@@ -41,12 +42,13 @@ import { VersionDivergenceCheck } from './version-divergence.check';
     PlanDatabase,
     CollectionAliveCheck,
     VersionDivergenceCheck,
+    OrphanInstanceCheck,
     {
       // The registry the runner iterates. The runner must not know which checks
       // exist, so adding one is a line here and nothing there.
       //
-      // Still absent from spec 6.1: `plan.orphan_instance` (buildable now that
-      // ADR-002 exception 2 is approved), `plan.proxy_registration_alive` and
+      // Still absent from spec 6.1: `funnel.network_to_survival` (buildable from
+      // `serverOverview` of two servers), `plan.proxy_registration_alive` and
       // `platform.offline_account_share` (need the shape of `/v1/graph` and
       // `/v1/playersTable`), and `funnel.tutorial_entry_rate`, which has no data
       // source at all — Plan collects nothing about the tutorial. That last one
@@ -55,8 +57,13 @@ import { VersionDivergenceCheck } from './version-divergence.check';
       useFactory: (
         collectionAlive: CollectionAliveCheck,
         versionDivergence: VersionDivergenceCheck,
-      ) => [collectionAlive, versionDivergence],
-      inject: [CollectionAliveCheck, VersionDivergenceCheck],
+        orphanInstance: OrphanInstanceCheck,
+      ) => [collectionAlive, versionDivergence, orphanInstance],
+      inject: [
+        CollectionAliveCheck,
+        VersionDivergenceCheck,
+        OrphanInstanceCheck,
+      ],
     },
   ],
   exports: [
