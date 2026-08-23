@@ -87,22 +87,35 @@ EOF
 sec "2. Contorno da whitelist por X-Forwarded-For"
 
 BASE_URL="http://$GAME_HOST:$PLAN_PORT"
-probe_http() { # probe_http <rotulo> [args extras do curl...]
-  local label="$1"; shift
+
+# Devolve SO o codigo HTTP em stdout — nada mais.
+#
+# Separar isto da impressao e obrigatorio, nao estilo: se a funcao tambem
+# imprimisse o rotulo, a captura por $(...) levaria o rotulo junto do codigo. Como
+# os rotulos diferem entre as chamadas, TODA comparacao daria "diferente" e o
+# veredito sairia CONTORNAVEL em qualquer cenario, inclusive num Plan que ignora
+# o header por completo.
+http_code() { # http_code [args extras do curl...]
   local code
-  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time "$TIMEOUT" "$@" "$BASE_URL/" 2>/dev/null || echo '000')
-  printf '%-46s -> HTTP %s\n' "$label" "$code"
-  printf '%s' "$code"
+  # Em falha de conexao o proprio curl ja imprime 000 e sai != 0; o `|| true`
+  # impede que um `|| echo 000` concatene um segundo 000 e produza "000000".
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time "$TIMEOUT" "$@" "$BASE_URL/" 2>/dev/null) || true
+  printf '%s' "${code:-000}"
 }
 
-CODE_PLAIN=$(probe_http "sem header (controle)" )
-echo
-CODE_XFF=$(probe_http "X-Forwarded-For: $SPOOF_IP" -H "X-Forwarded-For: $SPOOF_IP")
-echo
-CODE_XREAL=$(probe_http "X-Real-IP: $SPOOF_IP" -H "X-Real-IP: $SPOOF_IP")
-echo
-CODE_XFF_CHAIN=$(probe_http "X-Forwarded-For: $SPOOF_IP, 127.0.0.1" -H "X-Forwarded-For: $SPOOF_IP, 127.0.0.1")
-echo
+report() { printf '%-46s -> HTTP %s\n' "$1" "$2"; }
+
+CODE_PLAIN=$(http_code)
+report "sem header (controle)" "$CODE_PLAIN"
+
+CODE_XFF=$(http_code -H "X-Forwarded-For: $SPOOF_IP")
+report "X-Forwarded-For: $SPOOF_IP" "$CODE_XFF"
+
+CODE_XREAL=$(http_code -H "X-Real-IP: $SPOOF_IP")
+report "X-Real-IP: $SPOOF_IP" "$CODE_XREAL"
+
+CODE_XFF_CHAIN=$(http_code -H "X-Forwarded-For: $SPOOF_IP, 127.0.0.1")
+report "X-Forwarded-For: $SPOOF_IP, 127.0.0.1" "$CODE_XFF_CHAIN"
 
 hr
 cat <<'EOF'
