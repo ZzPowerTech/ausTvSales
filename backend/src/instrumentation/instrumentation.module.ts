@@ -1,8 +1,10 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { CollectionAliveCheck } from './collection-alive.check';
 import { DiscordAlerter } from './discord-alerter';
 import { HEALTH_CHECKS } from './health-check.contract';
 import { HealthCheckRunner } from './health-check.runner';
+import { HealthCheckScheduler } from './health-check.scheduler';
 import { HealthCheckStore } from './health-check.store';
 import { PlanApiClient } from './plan-api.client';
 import { PlanServersConfig } from './plan-servers.config';
@@ -26,7 +28,9 @@ import { PlanServersConfig } from './plan-servers.config';
  * paper over here.
  */
 @Module({
+  imports: [ScheduleModule.forRoot()],
   providers: [
+    HealthCheckScheduler,
     HealthCheckStore,
     DiscordAlerter,
     PlanApiClient,
