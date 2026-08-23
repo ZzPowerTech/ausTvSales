@@ -229,6 +229,37 @@ export class EnvironmentVariables {
   @Max(1_440)
   HEALTH_CHECK_INTERVAL_MINUTES?: number;
 
+  // --- MySQL do Plan, somente leitura (ADR-002 excecao 2, S6.3) ---
+  //
+  // Usado por UM modulo isolado (PlanDatabase) e por UMA tabela (`plan_servers`),
+  // porque o Plan nao expoe endpoint de lista de servidores. Qualquer outra
+  // tabela exige nova excecao numerada no spec.
+  //
+  // O usuario tem de ser read-only e dedicado — nunca o usuario dos plugins.
+
+  @IsOptional()
+  @MinLength(1, { message: 'PLAN_DB_HOST must not be empty when set' })
+  PLAN_DB_HOST?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(65_535)
+  PLAN_DB_PORT?: number;
+
+  @IsOptional()
+  @MinLength(1, { message: 'PLAN_DB_NAME must not be empty when set' })
+  PLAN_DB_NAME?: string;
+
+  @IsOptional()
+  @MinLength(1, { message: 'PLAN_DB_USER must not be empty when set' })
+  PLAN_DB_USER?: string;
+
+  // Nunca logada. Opcional para permitir socket/auth externa, mas na pratica
+  // sempre definida junto com as demais.
+  @IsOptional()
+  PLAN_DB_PASSWORD?: string;
+
   // Express `trust proxy` setting, applied in main.ts so `req.ip` reflects the
   // real client from the Nginx-supplied X-Forwarded-For (and a header forged by a
   // direct client is ignored). A number = trust that many hops; otherwise a

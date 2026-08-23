@@ -71,9 +71,44 @@ Lista atual em `/docs` do webserver.
 
 ### ADR-002 — NestJS fala com `/v1/*`, nunca com as tabelas do Plan
 
-Schema interno muda entre versões; a API JSON é a superfície estável. Exceção única e documentada:
-as consultas de coorte histórica (§6.2), que precisam de SQL direto — em usuário **read-only**, e
-isoladas num único módulo.
+Schema interno muda entre versões; a API JSON é a superfície estável. Exceções **numeradas,
+documentadas e isoladas em módulo próprio**, sempre em usuário **read-only**:
+
+| # | escopo | tabelas | por quê a API não serve |
+|---|---|---|---|
+| 1 | Coorte histórica (§6.2, S8.2) | `plan_users`, `plan_user_info`, `plan_sessions` | agregação por coorte × plataforma não existe em nenhum endpoint |
+| 2 | **Inventário de instâncias (§6.1, S6.3)** — *aprovada em 2026-08-23* | **`plan_servers` apenas** | o Plan **não expõe lista de servidores**: `/v1/servers` e `/v1/networkOverview` retornam **404** na instância do AusTV (verificado 2026-08-23) |
+
+#### Exceção 2 — inventário de instâncias (2026-08-23)
+
+**Problema.** Dois dos sete checks da §6.1 precisam saber *quais servidores existem* e *em que build
+cada um roda*:
+
+- `plan.orphan_instance` — servidor registrado no Plan sem dado recente
+- `plan.version_divergence` — builds diferentes entre instâncias, que corrompem schema compartilhado
+  (ADR-005)
+
+**Por que a API não resolve.** Não há endpoint de catálogo. `/v1/serverOverview` responde por *um*
+servidor, endereçado por nome, e não carrega versão. Sem lista, `orphan_instance` só poderia checar
+servidores que alguém já configurou à mão — o que dá atestado de saúde **exatamente no caso que o
+check existe para pegar**: a instância que ninguém sabia que existia.
+
+**Decisão do dono (Murilo, 2026-08-23):** abrir a exceção.
+
+**Limites, que fazem parte da decisão:**
+
+1. **Uma tabela só: `plan_servers`.** Qualquer outra tabela exige nova exceção numerada aqui.
+2. **Usuário MySQL read-only dedicado**, separado do usuário dos plugins e do usuário da exceção 1.
+   `SELECT` apenas, e apenas nessa tabela.
+3. **Um único módulo isolado.** Nenhum outro ponto do NestJS abre conexão com o MySQL do Plan.
+4. **Credencial em variável de ambiente**, nunca versionada.
+5. **Degradação honesta:** banco inalcançável → os dois checks reportam `error` com o motivo, nunca
+   `ok` e nunca zero.
+
+**Custo aceito.** `plan_servers` é schema interno e pode mudar entre versões do Plan. É acoplamento
+real, e a mitigação é o tamanho do alvo: uma tabela, quatro colunas (`uuid`, `name`, `is_proxy`,
+`plan_version`), lida por um módulo só. Se o schema mudar, o parser falha alto e vira veredito
+`error` — não número errado em silêncio.
 
 ### ADR-003 — `platform` é dimensão de primeira classe, derivada do UUID
 
