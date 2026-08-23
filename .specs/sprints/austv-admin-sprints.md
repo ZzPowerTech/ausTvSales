@@ -160,12 +160,34 @@ e não vale):
 
 A entrega mais importante do plano. Sem ela, tudo pode parar em silêncio de novo.
 
-1. Os 7 checks da §6.1 do spec implementados e agendados
-2. Falha dispara **alerta ativo no canal do Discord**, não espera alguém abrir página
-3. Estado de cada check persistido em `health_check`, com histórico
-4. **Verificado derrubando uma instância de propósito** — o alerta precisa chegar
-5. Alerta de taxa de entrada no tutorial testado com valor forçado
-6. Alerta repetido é agrupado, não vira flood
+1. [x] **6 dos 7 checks** da §6.1 implementados e agendados — *escopo reduzido de 7 para 6 em
+   2026-08-23, decisão do dono (opção 3)*. O sétimo, `funnel.tutorial_entry_rate`, **não tem fonte
+   de dado** e virou a história própria [S8.0](#s80--fonte-de-dados-do-tutorial--5-sp--featutorial-data-source)
+2. [x] Falha dispara **alerta ativo no canal do Discord**, não espera alguém abrir página
+3. [x] Estado de cada check persistido em `health_check`, com histórico
+4. [ ] **Verificado derrubando uma instância de propósito** — o alerta precisa chegar.
+   **Pendente:** exige o agendamento ligado com webhook num ambiente real
+5. ~~Alerta de taxa de entrada no tutorial testado com valor forçado~~ — **movido para a S8.0**;
+   inexequível enquanto o check não tiver fonte
+6. [x] Alerta repetido é agrupado, não vira flood
+
+> **Entregue em 2026-08-23** (PRs #127, #128, #131, #135, #137, #139, #140, #141, #143, #144, #145,
+> #146, #147): store, política de alerta, alerter do Discord, transporte HTTP do Plan, adapter do
+> `serverOverview`, runner com guarda de ciclo sobreposto, agendamento opt-in e os seis checks.
+>
+> #### Calibração pendente, e não é detalhe
+>
+> Três limiares entraram como **chute conservador, não medida**, e estão marcados como tal no
+> `.env.example` e no `env.validation`:
+>
+> | variável | padrão | risco de não calibrar |
+> |---|---|---|
+> | `PLATFORM_OFFLINE_SHARE_MAX` | `0.5` | alerta errado ou nunca alerta |
+> | `FUNNEL_MIN_NETWORK_TO_SERVER` | `0.3` | idem — o histórico é 0,46 |
+> | `PROXY_REGISTRATION_MAX_SILENCE_HOURS` | `24` | o menos crítico dos três |
+>
+> Enquanto não forem calibrados contra o baseline, o alerta é ruído em potencial — que é como um
+> canal do Discord vira mudo.
 
 ### DoD da S6
 
@@ -173,7 +195,7 @@ A entrega mais importante do plano. Sem ela, tudo pode parar em silêncio de nov
       fora do fluxo de sprint (ver S6.2)
 - [ ] ~~Dump restaurável dos dois bancos guardado fora da VPS~~ — sem objeto: a unificação já
       aconteceu e não existem mais "dois bancos" a dumpar
-- [ ] Alerta comprovado por teste destrutivo intencional
+- [ ] Alerta comprovado por teste destrutivo intencional — **último item aberto da S6**
 - [ ] Baseline pré-campanha commitado
 - [ ] Spec órfão `specs/spec.md` (coleta de sessão no proxy) marcado superseded
 
@@ -219,6 +241,44 @@ A entrega mais importante do plano. Sem ela, tudo pode parar em silêncio de nov
 # Sprint 8 — O funil de 4 degraus
 
 **Objetivo:** transformar a descoberta da investigação em métrica contínua.
+
+### S8.0 — Fonte de dados do tutorial · 5 SP · `feat/tutorial-data-source`
+
+> **Aberta em 2026-08-23** pela decisão do dono (opção 3): a S6.3 entregou 6 dos 7 checks, e o
+> sétimo virou esta história em vez de segurar a sprint inteira.
+
+**Bloqueia:** o degrau `tutorial_entrou` da S8.1 · o check `funnel.tutorial_entry_rate` da §6.1 ·
+o critério 5 da S6.3.
+
+**O problema.** O Plan **não coleta nada do tutorial**. Os números de tutorial do `HANDOFF.md`
+vieram de ler `Quests/playerdata/*.yml` **na máquina do game** com os scripts do baseline. Esses
+arquivos não são alcançáveis pela API `/v1/*`, não estão no MySQL do Plan e não estão no PostgreSQL
+do `ausTvSales`. Nenhuma das duas exceções ao ADR-002 ajuda — o dado não está em banco nenhum.
+
+É o check que teria evitado o desastre mais longo já registrado: o tutorial parou de capturar
+novatos em **dez/2025** e a taxa de entrada caiu de ~100% para 12% ao longo de **8 meses**, sem
+ninguém notar.
+
+**Primeira tarefa da história: escolher a fonte.** As opções, do `HANDOFF.md`:
+
+| # | opção | custo | o que perde |
+|---|---|---|---|
+| 1 | ETL noturno lendo `Quests/playerdata` na máquina do game | ETL de **arquivo**, não de banco; exige acesso ao FS do game | nada — é a fonte real |
+| 2 | Proxies do Essentials (`kit prot` = 02tutorial, `home` ≥1 = 05tutorial) | mais barato; os scripts do baseline já leem | são **proxies** — kit/home obtidos por outra via inflam o número |
+| 4 | Instrumentar o tutorial na origem (plugin/comando) | contraria o ADR-007 (**zero Java na v1**) | reabre decisão fechada |
+
+**Recomendação:** opção 1. A 2 é tentadora e é a que **não** recomendo sem rótulo explícito —
+trocar a métrica pela proxy sem marcar seria repetir a classe de erro que o `HANDOFF.md` inteiro
+existe para impedir.
+
+**Critérios de aceite:**
+
+1. Fonte escolhida e registrada como ADR, com o custo declarado
+2. ETL idempotente e re-executável, fora do pico
+3. Fonte indisponível → **"sem dados" explícito**, nunca zero
+4. `funnel.tutorial_entry_rate` implementado sobre a fonte nova, fechando o 7º check da §6.1
+5. Alerta testado com **valor forçado** (critério 5 herdado da S6.3)
+6. Se a opção 2 for escolhida, o número é **rotulado como proxy** em todo lugar que aparece
 
 ### S8.1 — Módulo `funnel` · 8 SP · `feat/api-funnel`
 
@@ -394,6 +454,7 @@ jogo.**
 | 4 | S6 | **Checks de saúde + alerta** | 8 |
 | 5 | S7 | Módulo `health` | 5 |
 | 6 | S7 | `metrics` core | 8 |
+| 6b | S8 | **Fonte de dados do tutorial** — *aberta 2026-08-23* | 5 |
 | 7 | S8 | Módulo `funnel` (4 degraus) | 8 |
 | 8 | S8 | Retenção por coorte | 5 |
 | 9 | S9 | Módulo `economy` (sem plugin) | 8 |
@@ -407,8 +468,12 @@ jogo.**
 | 17 | S12 | Home | 5 |
 | 18 | S12 | Públicas + gate | 5 |
 
-**95 SP · 7 sprints.** (105 na conferência de 2026-08-21, menos os 5 SP da S6.1 cancelada em
-2026-08-22 e os 5 SP da S6.2, concluída pelo dono em 2026-08-20 e reconhecida em 2026-08-23)
+**100 SP · 7 sprints.** (105 na conferência de 2026-08-21, menos os 5 SP da S6.1 cancelada em
+2026-08-22 e os 5 SP da S6.2 concluída em 2026-08-20, mais os 5 SP da S8.0 aberta em 2026-08-23)
+
+> A S8.0 não é escopo novo: é escopo que **sempre esteve na S6.3** e foi movido quando se descobriu
+> que não tinha fonte de dado. O total voltar a 100 SP registra o custo real, em vez de fazer o
+> trabalho sumir da conta ao trocar de sprint.
 
 ### ⚠️ Desbalanço conhecido — decisão pendente do dono
 
@@ -417,8 +482,13 @@ Com a capacidade planejada de 13 SP/sprint, **restou uma sprint estourando**:
 | sprint | SP | situação |
 |---|---|---|
 | **S6** | ~~22~~ → ~~17~~ → **12** | **resolvido.** S6.1 cancelada (−5) e S6.2 concluída fora do fluxo (−5). Dentro da capacidade |
-| S7–S11 | 13 cada | dentro |
-| **S12** | **18** | 38% acima. Três histórias grandes — **único estouro restante** |
+| S7 · S9 · S10 · S11 | 13 cada | dentro |
+| **S8** | ~~13~~ → **18** | **novo estouro (2026-08-23):** a S8.0 (5 SP) entrou com a fonte do tutorial |
+| **S12** | **18** | 38% acima. Três histórias grandes |
+
+**Dois estouros agora, não um.** A S8 pode ser aliviada movendo a **S8.2** (retenção por coorte,
+5 SP, já marcada `[CORTE]`) para a S9 — a S8.0 é pré-requisito da S8.1 e não pode sair. Decisão do
+dono, junto com a da S12.
 
 **A S6 é sprint de prazo, não de capacidade.** O limite dela é a data do unban all, não a
 velocidade — e a questão de capacidade dela **fechou sozinha**. Opções:
@@ -440,9 +510,11 @@ velocidade — e a questão de capacidade dela **fechou sozinha**. Opções:
 ```
 S6.0 (baseline) ─── independente, tem prazo externo
 S10.1 ─► S10.2 ─► S10.3            (a S6.1 era o gate; cancelada, S10 nao depende da S6)
-S6.3 (saude) ─► S7.1 ───────────────────────────────► S12.1
-      └───────► S7.2 ─► S8.1 ────────────────────────► S12.1
-                        └► S8.2 ─► S9.2
+S6.3 (saude, 6/7) ─► S7.1 ──────────────────────────► S12.1
+      └───────────────► S7.2 ─► S8.1 ─────────────────► S12.1
+                                 └► S8.2 ─► S9.2
+S8.0 (fonte do tutorial) ─► S8.1 (degrau tutorial_entrou)
+      └──────────────────► fecha o 7o check da S6.3, retroativamente
    (a S6.2 era o gate da S6.3; concluida 2026-08-20, a S6.3 nao depende de nada)
 S9.1 (economy) ───────────────────────────────────► S12.2
 S11.1 ────────────────────────────────────────────► S12.3

@@ -337,7 +337,13 @@ Cada check roda periodicamente e **alerta ativamente no Discord** quando falha.
 | Registro vivo no proxy | nenhum `plan_users.registered` novo em 24h | idem |
 | Instância órfã | servidor em `plan_servers` sem dado recente | Plan em SQLite invisível |
 | Versões divergentes | builds diferentes entre instâncias | risco de corromper schema |
-| **Taxa de entrada no tutorial** | `novatos_no_tutorial / novatos_no_survival` cai abaixo de 70% por 3 dias | tutorial sem capturar por 8 meses |
+| **Taxa de entrada no tutorial** ⚠️ | `novatos_no_tutorial / novatos_no_survival` cai abaixo de 70% por 3 dias | tutorial sem capturar por 8 meses |
+
+> ⚠️ **O check de tutorial não tem fonte de dado** (descoberto em 2026-08-23). O Plan não coleta
+> nada do tutorial; os números do `HANDOFF.md` vieram de ler `Quests/playerdata/*.yml` na máquina
+> do game. Nenhuma das duas exceções ao ADR-002 ajuda — o dado não está em banco nenhum. Os outros
+> **seis** checks foram entregues na S6.3; este virou a história **S8.0**, que começa escolhendo a
+> fonte.
 | Conversão rede → survival | desvio > 15 pontos da média de 30 dias | degrau do lobby |
 | Crescimento anormal de conta offline | share de `java_offline` na rede sobe fora da faixa | tráfego de bot inflando aquisição |
 
@@ -439,9 +445,13 @@ sem sanitizar**.
 - ~~webserver só no proxy em `127.0.0.1`~~ — **contraditório com a §8 e não resolvido.** A §8 exige
   o webserver alcançável pela rede, senão o NestJS da VPS não consome `/v1/*` (ADR-001/002). Este
   critério não pode ser aceito como está; depende da decisão de exposição de rede da §10b
-- Os 7 checks de saúde da §6.1 rodando e alertando no Discord — verificado **derrubando uma
-  instância de propósito**
-- Alerta de taxa de entrada no tutorial testado com valor forçado
+- [x] **6 dos 7** checks de saúde da §6.1 rodando e alertando no Discord — *escopo reduzido de 7
+  para 6 em 2026-08-23, decisão do dono (opção 3)*. O sétimo,
+  `funnel.tutorial_entry_rate`, não tem fonte de dado e virou a história **S8.0**
+- [ ] Verificado **derrubando uma instância de propósito** — pendente: exige o agendamento ligado
+  com webhook num ambiente real
+- ~~Alerta de taxa de entrada no tutorial testado com valor forçado~~ — **movido para a S8.0**;
+  inexequível enquanto o check não tiver fonte
 - Funil de 4 degraus disponível por mês e por plataforma, com `n` visível
 - Sessão, AFK e tempo por servidor conferidos contra **observação manual**
 - NestJS não referencia tabela interna do Plan fora do módulo de coorte

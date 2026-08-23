@@ -210,8 +210,28 @@ como história própria. A opção 2 é tentadora e é a que eu **não** recomen
 a métrica pela proxy sem rotular seria repetir a classe de erro que este documento inteiro existe
 para impedir.
 
-> Nada foi implementado sobre essa decisão. Os seis checks com fonte definida seguem; o sétimo está
-> parado à espera desta escolha.
+### ✅ DECIDIDO em 2026-08-23 — opção 3
+
+**Decisão do dono:** entregar os 6 checks com fonte e abrir história própria para a fonte do
+tutorial.
+
+- A **S6.3 fechou com 6 de 7 checks**, escopo reduzido explicitamente e não por omissão.
+- Nasceu a **S8.0 — Fonte de dados do tutorial** (5 SP, `feat/tutorial-data-source`), na Sprint 8,
+  porque o degrau `tutorial_entrou` da S8.1 depende da mesma fonte.
+- A escolha entre as opções 1, 2 e 4 é a **primeira tarefa da S8.0**, não uma decisão tomada agora.
+- O critério 5 da S6.3 (*alerta de tutorial testado com valor forçado*) foi **movido** para a S8.0,
+  não descartado.
+
+**Custo registrado, não escondido:** o total do plano voltou de 95 para **100 SP**. A S8.0 não é
+escopo novo — é escopo que sempre esteve na S6.3 e mudou de lugar quando se descobriu que não tinha
+fonte. E a S8 passou de 13 para **18 SP**, virando o segundo estouro ao lado da S12.
+
+**O que fica sem cobertura enquanto isso:** o desastre mais longo já registrado neste servidor — o
+tutorial parou de capturar novatos em dez/2025 e a taxa caiu de ~100% para 12% ao longo de 8 meses
+— segue **sem alerta automático**. Foi um trade-off aceito com esse fato à vista.
+
+> **Atualizado em 2026-08-23:** os seis checks com fonte estão **implementados e mergeados**. O
+> sétimo virou a S8.0.
 
 ## Estado da S6.3 em 2026-08-23 — o que está pronto e o que trava
 
