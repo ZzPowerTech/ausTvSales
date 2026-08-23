@@ -39,7 +39,13 @@ function record(
 }
 
 function decision(overrides: Partial<AlertDecision> = {}): AlertDecision {
-  return { announce: [], recovered: [], suppressed: [], ...overrides };
+  return {
+    announce: [],
+    recovered: [],
+    lostSignal: [],
+    suppressed: [],
+    ...overrides,
+  };
 }
 
 /**
@@ -364,6 +370,72 @@ describe('DiscordAlerter', () => {
       expect(payload.embeds[0].fields).toHaveLength(25);
       // Truncar em silencio leria como "era so isso" quando nao era.
       expect(payload.content).toContain('nao exibido');
+    });
+
+    it('mantem no titulo a contagem real, mesmo truncando os campos', async () => {
+      fetchMock.mockResolvedValue(okResponse());
+      const many = Array.from({ length: 30 }, (_, index) =>
+        record(`plan.collection_alive:s${index}`, 'breached'),
+      );
+
+      await buildEnabled().publish(decision({ announce: many }));
+
+      expect(sentPayload().embeds[0].title).toContain('30 check(s) em falha');
+    });
+
+    it('NAO devolve como entregue o que foi truncado da mensagem', async () => {
+      fetchMock.mockResolvedValue(okResponse());
+      const many = Array.from({ length: 30 }, (_, index) =>
+        record(`plan.collection_alive:s${index}`, 'breached'),
+      );
+
+      const delivered = await buildEnabled().publish(
+        decision({ announce: many }),
+      );
+
+      // Regressao: o chamador carimba `alerted_at` no que devolvemos aqui.
+      // Devolver os 30 marcava 5 checks como anunciados sem que ninguem os
+      // tivesse visto, e a politica os agrupava (silenciava) pela janela
+      // inteira de re-alerta. O que nao coube fica sem carimbo de proposito.
+      expect(delivered).toHaveLength(25);
+      expect(delivered).toEqual(many.slice(0, 25).map((r) => r.id));
+    });
+  });
+
+  describe('sinal perdido (no_data apos falha)', () => {
+    it('nao pinta de verde nem chama de normalizado', async () => {
+      fetchMock.mockResolvedValue(okResponse());
+      const gone = record('plan.collection_alive:survival', 'no_data');
+
+      await buildEnabled().publish(decision({ lostSignal: [gone] }));
+
+      const embed = sentPayload().embeds[0];
+      // Verde + "normalizado" sobre uma perda de coleta e um falso all-clear:
+      // o check nao melhorou, so deixou de poder ser medido.
+      expect(embed.title).not.toContain('normalizado');
+      expect(embed.title).toContain('sem dados');
+      expect(embed.description).toContain('NAO e recuperacao');
+      expect(embed.color).not.toBe(0x2e8b57);
+    });
+
+    it('entrega o id do check sem dados para o carimbo', async () => {
+      fetchMock.mockResolvedValue(okResponse());
+      const gone = record('plan.collection_alive:survival', 'no_data');
+
+      const delivered = await buildEnabled().publish(
+        decision({ lostSignal: [gone] }),
+      );
+
+      expect(delivered).toEqual([gone.id]);
+    });
+
+    it('conta o sinal perdido no resumo', async () => {
+      fetchMock.mockResolvedValue(okResponse());
+      const gone = record('plan.collection_alive:survival', 'no_data');
+
+      await buildEnabled().publish(decision({ lostSignal: [gone] }));
+
+      expect(sentPayload().content).toContain('1 sem dados');
     });
   });
 

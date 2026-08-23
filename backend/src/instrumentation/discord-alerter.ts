@@ -11,9 +11,16 @@ const DISCORD_LIMITS = {
   fieldValueChars: 1024,
 } as const;
 
-/** Red for failures, green for recoveries — the only two messages we send. */
+/**
+ * Red for failures, green for recoveries, amber for lost signal.
+ *
+ * The third colour is not decoration. A check that fell to `no_data` after
+ * failing has not recovered — it stopped being measurable — and painting that
+ * green is a false all-clear on exactly the kind of gap ADR-006 exists to catch.
+ */
 const COLOR_FAILURE = 0xd9_36_3c;
 const COLOR_RECOVERY = 0x2e_8b_57;
+const COLOR_LOST_SIGNAL = 0xd7_8b_1f;
 
 /** One retry is enough for a rate limit; beyond that the next cycle covers it. */
 const MAX_RATE_LIMIT_RETRIES = 1;
@@ -92,13 +99,31 @@ export class DiscordAlerter implements OnModuleInit {
    * reached the channel — never that nothing was wrong.
    */
   async publish(decision: AlertDecision): Promise<number[]> {
+    // Slice FIRST, then derive the returned ids from the same slices that became
+    // embed fields.
+    //
+    // The previous version built the embeds from `slice(0, 25)` but returned
+    // every id in the decision. The caller stamps `alerted_at` on what we return,
+    // so with 30 failing checks, 5 were recorded as announced without ever
+    // appearing in the message — and `decideAlerts` then suppressed them as
+    // `grouped` for the whole re-alert window. Broken checks went quiet for a
+    // day while the database claimed they had been reported.
+    const failures = decision.announce.slice(0, DISCORD_LIMITS.embedFields);
+    const recoveries = decision.recovered.slice(0, DISCORD_LIMITS.embedFields);
+    const lost = decision.lostSignal.slice(0, DISCORD_LIMITS.embedFields);
+
     const embeds: DiscordEmbed[] = [];
 
-    if (decision.announce.length > 0) {
-      embeds.push(this.buildFailureEmbed(decision.announce));
+    if (failures.length > 0) {
+      embeds.push(this.buildFailureEmbed(failures, decision.announce.length));
     }
-    if (decision.recovered.length > 0) {
-      embeds.push(this.buildRecoveryEmbed(decision.recovered));
+    if (recoveries.length > 0) {
+      embeds.push(
+        this.buildRecoveryEmbed(recoveries, decision.recovered.length),
+      );
+    }
+    if (lost.length > 0) {
+      embeds.push(this.buildLostSignalEmbed(lost, decision.lostSignal.length));
     }
     if (embeds.length === 0) {
       return [];
@@ -107,7 +132,8 @@ export class DiscordAlerter implements OnModuleInit {
     if (!this.enabled) {
       this.logger.warn(
         `Alerta suprimido por falta de webhook: ${decision.announce.length} falha(s), ` +
-          `${decision.recovered.length} recuperacao(oes)`,
+          `${decision.recovered.length} recuperacao(oes), ` +
+          `${decision.lostSignal.length} sem dados`,
       );
       return [];
     }
@@ -124,9 +150,9 @@ export class DiscordAlerter implements OnModuleInit {
       return [];
     }
 
-    return [...decision.announce, ...decision.recovered].map(
-      (record) => record.id,
-    );
+    // Only what actually reached the channel. Anything truncated stays unstamped
+    // so the next cycle announces it instead of grouping it away.
+    return [...failures, ...recoveries, ...lost].map((record) => record.id);
   }
 
   /** POST the payload, retrying once on a rate limit. Never throws. */
@@ -170,27 +196,57 @@ export class DiscordAlerter implements OnModuleInit {
     return false;
   }
 
-  private buildFailureEmbed(records: HealthCheckRecord[]): DiscordEmbed {
+  /**
+   * @param shown records that fit inside the message
+   * @param total how many there were before truncation — the title states the
+   *   real count even when the fields cannot show them all
+   */
+  private buildFailureEmbed(
+    shown: HealthCheckRecord[],
+    total: number,
+  ): DiscordEmbed {
     return {
-      title: `🔴 Instrumentacao: ${records.length} check(s) em falha`,
+      title: `🔴 Instrumentacao: ${total} check(s) em falha`,
       description:
         'A medicao da rede do jogo parou de responder como esperado. ' +
         'Detalhe por check abaixo.',
       color: COLOR_FAILURE,
-      fields: records
-        .slice(0, DISCORD_LIMITS.embedFields)
-        .map((record) => toField(record)),
+      fields: shown.map((record) => toField(record)),
       timestamp: new Date().toISOString(),
     };
   }
 
-  private buildRecoveryEmbed(records: HealthCheckRecord[]): DiscordEmbed {
+  private buildRecoveryEmbed(
+    shown: HealthCheckRecord[],
+    total: number,
+  ): DiscordEmbed {
     return {
-      title: `🟢 Instrumentacao: ${records.length} check(s) normalizado(s)`,
+      title: `🟢 Instrumentacao: ${total} check(s) normalizado(s)`,
       color: COLOR_RECOVERY,
-      fields: records
-        .slice(0, DISCORD_LIMITS.embedFields)
-        .map((record) => toField(record)),
+      fields: shown.map((record) => toField(record)),
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Checks that went quiet after failing — explicitly *not* a recovery.
+   *
+   * The wording matters as much as the colour: someone skimming a green banner
+   * concludes the incident is over. This one has to say that measurement
+   * stopped, because that is what happened.
+   */
+  private buildLostSignalEmbed(
+    shown: HealthCheckRecord[],
+    total: number,
+  ): DiscordEmbed {
+    return {
+      title: `🟡 Instrumentacao: ${total} check(s) sem dados`,
+      description:
+        'Estes checks estavam em falha e agora nao retornam dado nenhum. ' +
+        'Isso NAO e recuperacao: a fonte parou de responder, e o problema ' +
+        'anterior segue sem poder ser medido.',
+      color: COLOR_LOST_SIGNAL,
+      fields: shown.map((record) => toField(record)),
       timestamp: new Date().toISOString(),
     };
   }
@@ -204,9 +260,13 @@ function buildSummary(decision: AlertDecision): string {
   if (decision.recovered.length > 0) {
     parts.push(`${decision.recovered.length} normalizado(s)`);
   }
+  if (decision.lostSignal.length > 0) {
+    parts.push(`${decision.lostSignal.length} sem dados`);
+  }
   const overflow =
     Math.max(0, decision.announce.length - DISCORD_LIMITS.embedFields) +
-    Math.max(0, decision.recovered.length - DISCORD_LIMITS.embedFields);
+    Math.max(0, decision.recovered.length - DISCORD_LIMITS.embedFields) +
+    Math.max(0, decision.lostSignal.length - DISCORD_LIMITS.embedFields);
   if (overflow > 0) {
     // Silent truncation would read as "that was everything" when it was not.
     parts.push(`${overflow} nao exibido(s) por limite do Discord`);
