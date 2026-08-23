@@ -95,7 +95,13 @@ Rodar os três `austv-diagnostico*.ps1` uma última vez e versionar scripts + sa
 ### S6.2b — Auditar exposição de rede da máquina do game · 2 SP · `chore/db-network-exposure`
 
 Arquitetura: **duas máquinas** — VPS (`sales.austv.net`, hospeda o `ausTvSales`) e game
-(`jogar.austv.net` / `198.89.99.229`, produção do Minecraft). O ETL cruza entre elas.
+(`jogar.austv.net` / **`198.89.99.70`**, produção do Minecraft). O ETL cruza entre elas.
+
+> **Correção de 2026-08-23:** este documento dizia `198.89.99.229`, que **não é endereço da máquina
+> do game** (`ip -4 addr` mostra `198.89.99.70/24` em `enp4s0`, e nada mais público). O erro estava
+> replicado no spec e no `Alternative_IP` do próprio Plan, e custou uma investigação inteira de "a
+> VPS não alcança o Plan" que era só endereço errado. Com o IP certo, a VPS alcança:
+> `curl http://198.89.99.70:25504/v1/serverOverview` devolve `400`, igual ao localhost.
 
 Método **autoritativo** (não sondagem de porta — teste rodado na própria máquina do game é loopback
 e não vale):

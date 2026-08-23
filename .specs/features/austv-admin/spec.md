@@ -191,7 +191,8 @@ Consequências práticas:
 - **E3/E4 (social)** dependem do ETL de `PAY_*`.
 
 **Rede e segredos:** o ETL cruza da VPS do sales.austv.net para a do jogo (jogar.austv.net /
-198.89.99.229). A porta do MySQL do jogo **não pode estar aberta à internet** — túnel SSH ou
+198.89.99.70 — **corrigido em 2026-08-23**, o `.229` que estava aqui não é endereço da máquina).
+A porta do MySQL do jogo **não pode estar aberta à internet** — túnel SSH ou
 allowlist do IP da VPS da aplicação. Credenciais em variável de ambiente; usuário **read-only**
 dedicado por fonte, nunca o usuário do plugin.
 
