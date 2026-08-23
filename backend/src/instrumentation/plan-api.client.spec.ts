@@ -4,6 +4,7 @@ import {
   PlanAuthError,
   PlanHttpError,
   PlanMalformedResponseError,
+  PlanNotConfiguredError,
   PlanUnreachableError,
 } from './plan-api.errors';
 
@@ -66,9 +67,22 @@ describe('PlanApiClient', () => {
       // The point of the epic is that a missing source is visible. Returning an
       // empty payload here would let a check report `ok` while measuring nothing.
       await expect(client.getJson('v1/serverOverview')).rejects.toBeInstanceOf(
-        PlanUnreachableError,
+        PlanNotConfiguredError,
       );
       expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('classifies a missing base URL as permanent, not transient', async () => {
+      const client = new PlanApiClient(configWith({}));
+
+      // A runner that backs off on transient failures must not loop forever
+      // against a missing env var, and the operator must be pointed at the
+      // deploy config rather than at a network incident.
+      const error = (await client
+        .getJson('v1/serverOverview')
+        .catch((e: unknown) => e)) as PlanNotConfiguredError;
+
+      expect(error.transient).toBe(false);
     });
 
     it('warns at boot when unconfigured, rather than failing silently', () => {

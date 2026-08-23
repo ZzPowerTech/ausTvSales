@@ -5,6 +5,7 @@ import {
   PlanAuthError,
   PlanHttpError,
   PlanMalformedResponseError,
+  PlanNotConfiguredError,
   PlanUnreachableError,
 } from './plan-api.errors';
 
@@ -108,7 +109,11 @@ export class PlanApiClient implements OnModuleInit {
     query?: Readonly<Record<string, string>>,
   ): Promise<unknown> {
     if (!this.baseUrl) {
-      throw new PlanUnreachableError('(PLAN_BASE_URL nao configurada)');
+      // Not `PlanUnreachableError`: that one is transient, and a missing env var
+      // is never going to fix itself on a retry. The runner in the next slice
+      // branches on `.transient`, so getting this wrong here would make it back
+      // off forever against a configuration fault.
+      throw new PlanNotConfiguredError();
     }
 
     const url = this.buildUrl(this.baseUrl, path, query);

@@ -45,6 +45,26 @@ export class PlanUnreachableError extends PlanApiError {
 }
 
 /**
+ * `PLAN_BASE_URL` is not set, so there is no host to ask.
+ *
+ * Deliberately **not** transient, and deliberately not folded into
+ * {@link PlanUnreachableError}. The taxonomy in this file exists to separate
+ * "the game VPS is down" from "we are misconfigured", and an unset base URL is
+ * squarely the second: no amount of retrying or waiting will make it succeed,
+ * and an operator paged for it should be sent to the deploy config, not to the
+ * server room.
+ */
+export class PlanNotConfiguredError extends PlanApiError {
+  constructor() {
+    super(
+      'PLAN_BASE_URL nao configurada — nao ha host do Plan para consultar',
+      false,
+      undefined,
+    );
+  }
+}
+
+/**
  * Plan answered 401 or 403.
  *
  * Deliberately **not** transient: retrying a rejected credential just burns the
