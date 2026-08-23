@@ -3,6 +3,7 @@ import {
   IsBoolean,
   IsEnum,
   IsInt,
+  IsNumber,
   IsOptional,
   IsUrl,
   Matches,
@@ -259,6 +260,33 @@ export class EnvironmentVariables {
   // sempre definida junto com as demais.
   @IsOptional()
   PLAN_DB_PASSWORD?: string;
+
+  // --- Check de share de conta offline (S6.3, secao 6.1) ---
+
+  // Janela em dias sobre `registered`. O check mede CHEGADAS na janela, nunca o
+  // estoque: o mix all-time (59,2% bedrock) nao e o mix atual, e um numero de
+  // plataforma sem janela explicita nao significa nada.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(90)
+  PLATFORM_OFFLINE_WINDOW_DAYS?: number;
+
+  // Teto da fracao de java_offline entre as chegadas da janela, de 0 a 1.
+  // PRECISA ser calibrado contra o baseline antes de ser levado a serio — o
+  // padrao de 0.5 e um chute conservador, nao uma medida.
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  PLATFORM_OFFLINE_SHARE_MAX?: number;
+
+  // Abaixo disso o percentual nao e publicado: com poucas chegadas o share
+  // oscila demais e ruido vira tendencia.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  PLATFORM_OFFLINE_MIN_SAMPLE?: number;
 
   // Express `trust proxy` setting, applied in main.ts so `req.ip` reflects the
   // real client from the Nginx-supplied X-Forwarded-For (and a header forged by a

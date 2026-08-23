@@ -10,6 +10,7 @@ import { OrphanInstanceCheck } from './orphan-instance.check';
 import { PlanApiClient } from './plan-api.client';
 import { PlanDatabase } from './plan-database';
 import { PlanServersConfig } from './plan-servers.config';
+import { PlatformOfflineShareCheck } from './platform-offline-share.check';
 import { VersionDivergenceCheck } from './version-divergence.check';
 
 /**
@@ -43,26 +44,29 @@ import { VersionDivergenceCheck } from './version-divergence.check';
     CollectionAliveCheck,
     VersionDivergenceCheck,
     OrphanInstanceCheck,
+    PlatformOfflineShareCheck,
     {
       // The registry the runner iterates. The runner must not know which checks
       // exist, so adding one is a line here and nothing there.
       //
-      // Still absent from spec 6.1: `funnel.network_to_survival` (buildable from
-      // `serverOverview` of two servers), `plan.proxy_registration_alive` and
-      // `platform.offline_account_share` (need the shape of `/v1/graph` and
-      // `/v1/playersTable`), and `funnel.tutorial_entry_rate`, which has no data
-      // source at all — Plan collects nothing about the tutorial. That last one
-      // is a decision for the owner, recorded in HANDOFF.md.
+      // Still absent from spec 6.1: `plan.proxy_registration_alive` and
+      // `funnel.network_to_survival`, which both need a network-level arrival
+      // count that no session-derived endpoint can give (the proxy records users,
+      // not sessions); and `funnel.tutorial_entry_rate`, which has no data source
+      // at all — Plan collects nothing about the tutorial. Both are decisions for
+      // the owner, recorded in HANDOFF.md.
       provide: HEALTH_CHECKS,
       useFactory: (
         collectionAlive: CollectionAliveCheck,
         versionDivergence: VersionDivergenceCheck,
         orphanInstance: OrphanInstanceCheck,
-      ) => [collectionAlive, versionDivergence, orphanInstance],
+        offlineShare: PlatformOfflineShareCheck,
+      ) => [collectionAlive, versionDivergence, orphanInstance, offlineShare],
       inject: [
         CollectionAliveCheck,
         VersionDivergenceCheck,
         OrphanInstanceCheck,
+        PlatformOfflineShareCheck,
       ],
     },
   ],
