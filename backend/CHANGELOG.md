@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.12.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.11.0...backend-v0.12.0) (2026-08-23)
+
+
+### Features
+
+* **backend:** transporte HTTP para a API JSON do Plan (S6.3) ([2a6972c](https://github.com/ZzPowerTech/ausTvSales/commit/2a6972cd9c63ded0c99a25ea5a0a7b91a96943b2))
+* **backend:** transporte HTTP para a API JSON do Plan (S6.3) ([aff4508](https://github.com/ZzPowerTech/ausTvSales/commit/aff45084809a5964cb3a9ff10705b19c648575e1))
+
+
+### Bug Fixes
+
+* **backend:** o alerter nao pode mentir sobre o que entregou (S6.3) ([758a14e](https://github.com/ZzPowerTech/ausTvSales/commit/758a14e6cd9f9b38562f3568e87a7fe2cc53ac8f))
+* **backend:** o alerter nao pode mentir sobre o que entregou (S6.3) ([4045ba0](https://github.com/ZzPowerTech/ausTvSales/commit/4045ba0bc9aeb133aeb2b0d05a449de5f061815e))
+* **backend:** PLAN_BASE_URL ausente e erro permanente, nao transitorio (S6.3) ([2bc0f2e](https://github.com/ZzPowerTech/ausTvSales/commit/2bc0f2e25c58d5fc64163c33cb9451a2297a650e))
+
 ## [0.11.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.10.1...backend-v0.11.0) (2026-08-23)
 
 
