@@ -142,6 +142,53 @@ export class EnvironmentVariables {
   @Max(720)
   HEALTH_ALERT_REALERT_HOURS?: number;
 
+  // --- Plan JSON API (AusTV Admin S6.3, ADR-001/ADR-002) ---
+
+  // Base URL of the Plan webserver, e.g. http://198.89.99.229:25504. Per ADR-001
+  // the NestJS API consumes Plan over the network from the sales VPS, so this is
+  // deliberately not a loopback address; spec §8 requires the port to be
+  // firewalled to this VPS plus Plan's own IP whitelist.
+  //
+  // `require_tld: false` because the target is addressed by IP today, not by a
+  // hostname. Optional for now, for the same deploy-ordering reason as the
+  // webhook above: nothing schedules a check yet. The slice that starts the
+  // scheduler must promote this to required-in-production — checks that cannot
+  // reach their source would report `error` forever.
+  @IsOptional()
+  @IsUrl(
+    {
+      require_tld: false,
+      require_protocol: true,
+      protocols: ['http', 'https'],
+    },
+    { message: 'PLAN_BASE_URL must be an absolute http(s) URL' },
+  )
+  PLAN_BASE_URL?: string;
+
+  // Credential for the Plan webserver, sent as a bearer token. Never logged.
+  // Absent is legitimate while Plan's auth scheme is still being confirmed
+  // against the live instance.
+  @IsOptional()
+  @MinLength(1, { message: 'PLAN_API_TOKEN must not be empty when set' })
+  PLAN_API_TOKEN?: string;
+
+  // Per-request timeout against Plan. Covers connect *and* body read. Kept well
+  // under any scheduler interval so a stalled Plan cannot pile requests up.
+  @IsOptional()
+  @IsInt()
+  @Min(1_000)
+  @Max(60_000)
+  PLAN_TIMEOUT_MS?: number;
+
+  // Retries for *transient* failures only (5xx, 429, network). An auth rejection
+  // or a 404 is never retried — see plan-api.errors.ts. Small on purpose:
+  // retrying a genuinely dead Plan only delays the alert it should produce.
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(5)
+  PLAN_RETRIES?: number;
+
   // Express `trust proxy` setting, applied in main.ts so `req.ip` reflects the
   // real client from the Nginx-supplied X-Forwarded-For (and a header forged by a
   // direct client is ignored). A number = trust that many hops; otherwise a
