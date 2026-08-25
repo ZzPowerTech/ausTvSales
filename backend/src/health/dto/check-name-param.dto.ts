@@ -4,18 +4,25 @@ import { Matches, MaxLength } from 'class-validator';
 /**
  * Charset of a persisted check name.
  *
- * Derived from what the system actually writes: the names in `HealthCheckName`
- * are dotted lower-case identifiers, and a per-target check appends
- * `:<server name>` via `scopedCheckName` — Plan server names being things like
- * `AusTv` and `Survival`.
+ * The base names in `HealthCheckName` are dotted lower-case identifiers, but a
+ * per-target check appends `:<server name>` via `scopedCheckName`, and that
+ * suffix is **whatever `PLAN_SERVERS` contains** — free-form configuration with
+ * no charset validation of its own.
  *
- * The bound is not an injection defence: Drizzle parameterises the query, so a
- * quote in here was never going to reach the planner. It is there so a caller
- * cannot spend a database round trip on a megabyte of junk, and so that a
- * typo comes back as a 400 that names the problem instead of an empty history
- * that looks like "this check never ran".
+ * The first version of this pattern was `[A-Za-z0-9._:-]+`, taken from the two
+ * names that happen to sit in `.env.example` (`AusTv`, `Survival`). A server
+ * called `Survival Renascer` or `Cidade Alfa` — entirely ordinary here — writes
+ * a verdict whose history route would then answer `400` forever, and it would be
+ * the check the operator most wanted history for. So letters of any script,
+ * digits and spaces are allowed.
+ *
+ * None of this is an injection defence: Drizzle parameterises the query, so a
+ * quote was never going to reach the planner. The bound exists so a caller
+ * cannot spend a database round trip on a megabyte of junk, and so a typo comes
+ * back as a 400 that names the problem instead of an empty history that reads
+ * like "this check never ran".
  */
-export const CHECK_NAME_PATTERN = /^[A-Za-z0-9._:-]+$/;
+export const CHECK_NAME_PATTERN = /^[\p{L}\p{N} ._:-]+$/u;
 
 export const MAX_CHECK_NAME_LENGTH = 120;
 
@@ -29,7 +36,7 @@ export class CheckNameParamDto {
   @MaxLength(MAX_CHECK_NAME_LENGTH)
   @Matches(CHECK_NAME_PATTERN, {
     message:
-      'name must contain only letters, digits, dot, underscore, colon or hyphen',
+      'name must contain only letters, digits, spaces, dot, underscore, colon or hyphen',
   })
   name!: string;
 }
