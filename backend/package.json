@@ -98,6 +98,10 @@
     "coverageDirectory": "./coverage",
     "testEnvironment": "node"
   },
+  "_comment_scarfSettings": "swagger-ui-dist puxa @scarf/scarf, cujo postinstall faz uma chamada de rede para scarf.sh a cada npm ci — CI e build de imagem inclusos. Desligado: telemetria de terceiros entrando pela porta dos fundos de uma dependencia de documentacao nao e decisao que se toma por omissao.",
+  "scarfSettings": {
+    "enabled": false
+  },
   "allowScripts": {
     "esbuild@0.18.20": true,
     "esbuild@0.25.12": true,
