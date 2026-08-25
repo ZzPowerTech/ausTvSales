@@ -2,6 +2,12 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 import { createAuthenticatedApp } from './e2e-utils';
 
+/** The slice of an OpenAPI path item these assertions read. */
+interface PathItem {
+  get?: { security?: unknown[] };
+  post?: { security?: unknown[] };
+}
+
 /**
  * OpenAPI docs (AusTV Admin S7, issues #110/#111).
  *
@@ -54,6 +60,37 @@ describe('OpenAPI docs (e2e)', () => {
       expect(response.status).toBe(401);
     });
 
+    it('refuses every asset path Swagger registers, not just the three obvious ones', async () => {
+      // Swagger registers twelve handlers under the prefix, and the three easy
+      // ones to forget are the static-asset mount, the trailing-slash variant
+      // and a duplicated `docs/docs/swagger-ui-init.js`. A future version that
+      // prefixed assets differently would escape the mount, and every other test
+      // in this file would still pass.
+      const paths = [
+        '/docs/',
+        '/docs/index.html',
+        '/docs/swagger-ui-bundle.js',
+        '/docs/swagger-ui.css',
+        '/docs/swagger-ui-init.js',
+        '/docs/docs/swagger-ui-init.js',
+      ];
+
+      const statuses = await Promise.all(
+        paths.map(async (path) => [path, (await http().get(path)).status]),
+      );
+
+      expect(statuses).toEqual(paths.map((path) => [path, 401]));
+    });
+
+    it('refuses the case-insensitive variants Express also routes', async () => {
+      // Express matches paths case-insensitively by default, so `/DOCS` reaches
+      // the same handlers. The mount is equally case-insensitive, so this is not
+      // a bypass — but it is the first thing anyone asks, and an untested
+      // assumption is how the first thing anyone asks becomes the answer.
+      expect((await http().get('/DOCS')).status).toBe(401);
+      expect((await http().get('/docs/JSON')).status).toBe(401);
+    });
+
     it('does not serve the spec at Swagger default sibling paths', async () => {
       // `/docs-json` and `/docs-yaml` are Nest's defaults and are siblings of
       // `/docs`, not children — a mount on `/docs` would never have covered
@@ -85,20 +122,69 @@ describe('OpenAPI docs (e2e)', () => {
       expect(body.paths).toHaveProperty('/analytics/items/{itemId}/series');
     });
 
+    it('marks the public routes as public and everything else as session-guarded', async () => {
+      // The document declares a global session requirement, so a public route
+      // that forgets to override it is described as needing a cookie it does not
+      // need — and `info.description` would be making a claim the paths deny.
+      const response = await http()
+        .get('/docs/json')
+        .set('Cookie', authCookie)
+        .expect(200);
+
+      const paths = (response.body as { paths: Record<string, PathItem> })
+        .paths;
+
+      expect(paths['/health'].get?.security).toEqual([]);
+      expect(paths['/auth/discord/login'].get?.security).toEqual([]);
+      expect(paths['/auth/discord/callback'].get?.security).toEqual([]);
+      expect(paths['/auth/logout'].post?.security).toEqual([]);
+
+      // Guarded routes inherit the global requirement: no `security` of their own.
+      expect(paths['/auth/me'].get?.security).toBeUndefined();
+      expect(
+        paths['/analytics/items/{itemId}/series'].get?.security,
+      ).toBeUndefined();
+    });
+
+    it('documents the ingest routes under the API key, not the session', async () => {
+      // They are `@Public()` to the session guard but far from open: IP
+      // allowlist plus a shared key. Describing them as cookie-authenticated or
+      // as anonymous would both be wrong, in opposite directions.
+      const response = await http()
+        .get('/docs/json')
+        .set('Cookie', authCookie)
+        .expect(200);
+
+      const paths = (response.body as { paths: Record<string, PathItem> })
+        .paths;
+
+      expect(paths['/sales'].post?.security).toEqual([
+        { 'ingest-api-key': [] },
+      ]);
+    });
+
     it('serves the UI under a CSP that lets it actually render', async () => {
       const response = await http()
         .get('/docs')
         .set('Cookie', authCookie)
         .expect(200);
 
-      const csp = response.headers['content-security-policy'];
-      // The global policy is `default-src 'none'`, which renders the page blank.
-      // The path-scoped policy has to win here — and only here.
-      expect(csp).toContain("script-src 'self'");
-      expect(csp).toContain("style-src 'self' 'unsafe-inline'");
-      // Scripts stay same-origin: the template loads three script *files*, so
-      // there is no reason to grant inline execution alongside the styles.
-      expect(csp).not.toContain("script-src 'self' 'unsafe-inline'");
+      // Asserted whole, not by `toContain`. The option type helmet exposes is a
+      // `Record<string, ...>`, so a typo in a directive name compiles fine and
+      // is emitted verbatim; equality here is the only thing that catches it —
+      // and it also catches a relaxation slipped in by reordering.
+      expect(response.headers['content-security-policy']).toBe(
+        [
+          "default-src 'none'",
+          "script-src 'self'",
+          "style-src 'self' 'unsafe-inline'",
+          "img-src 'self' data:",
+          "connect-src 'self'",
+          "base-uri 'none'",
+          "form-action 'none'",
+          "frame-ancestors 'none'",
+        ].join(';'),
+      );
     });
 
     it('leaves the strict policy in place everywhere else', async () => {
