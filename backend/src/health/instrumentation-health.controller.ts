@@ -53,6 +53,15 @@ const NO_STORE = () => Header('Cache-Control', 'no-store');
  * contractually limited to those — see `HealthCheckDetail` — so criterion 3's
  * "nenhum dado de jogador" holds by the shape of what is stored, not by
  * filtering on the way out.
+ *
+ * That last clause is the load-bearing one, and it cuts both ways: **nothing is
+ * filtered here.** `HealthCheckRunner` writes the message of an escaped
+ * exception straight into `detail.summary`, so a `PlanApiError` can carry the
+ * Plan host, and a pg error can carry connection detail. Behind the session and
+ * the two-person allowlist that is acceptable and is the more useful behaviour —
+ * an operator debugging a dead check wants the real reason. It stops being
+ * acceptable the moment any of this is served to a wider audience, and that is
+ * the change that would have to add the filter.
  */
 @ApiTags('Saude da instrumentacao')
 @Controller('health/instrumentation')

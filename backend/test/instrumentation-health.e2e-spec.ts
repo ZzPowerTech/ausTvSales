@@ -72,9 +72,25 @@ describe('Instrumentation health (e2e)', () => {
       expect(response.status).toBe(400);
     });
 
-    it('rejects a check name outside the persisted charset', async () => {
+    it('accepts a name with a space, because PLAN_SERVERS may contain one', async () => {
+      // `Survival Renascer` is an ordinary name for a server here, and
+      // `scopedCheckName` would write it verbatim. Rejecting it would make the
+      // history route permanently 400 for the check most worth reading.
       const response = await http()
-        .get(`${CHECKS}/${encodeURIComponent('nome com espaço')}/history`)
+        .get(
+          `${CHECKS}/${encodeURIComponent('plan.collection_alive:Survival Renascer')}/history`,
+        )
+        .set('Cookie', authCookie);
+
+      expect(response.status).toBe(200);
+    });
+
+    it('rejects a check name outside the persisted charset', async () => {
+      // A quote was never reaching the planner — Drizzle parameterises — but a
+      // 400 that names the problem beats an empty history that reads like
+      // "this check never ran".
+      const response = await http()
+        .get(`${CHECKS}/${encodeURIComponent("plan.x'; DROP--")}/history`)
         .set('Cookie', authCookie);
 
       expect(response.status).toBe(400);
@@ -107,10 +123,18 @@ describe('Instrumentation health (e2e)', () => {
       expect(body.lastCheckedAt).toBeNull();
     });
 
-    it('never caches a health answer', async () => {
-      const response = await http().get(SUMMARY).set('Cookie', authCookie);
+    it('never caches a health answer, on any of the three routes', async () => {
+      // Same decorator on all three, but "same decorator" is the assumption a
+      // future edit breaks quietly on exactly one of them.
+      const paths = [SUMMARY, CHECKS, `${CHECKS}/plan.orphan_instance/history`];
 
-      expect(response.headers['cache-control']).toBe('no-store');
+      for (const path of paths) {
+        const response = await http().get(path).set('Cookie', authCookie);
+        expect([path, response.headers['cache-control']]).toEqual([
+          path,
+          'no-store',
+        ]);
+      }
     });
 
     it('reports `down` with the scheduler off, however fresh the rows', async () => {
@@ -224,6 +248,70 @@ describe('Instrumentation health (e2e)', () => {
         'error',
         'breached',
       ]);
+    });
+
+    it('carries a scoped name through routing, decoding and the query', async () => {
+      // `plan.collection_alive:Survival` is the DTO's own example, and the colon
+      // is the character most likely to be re-interpreted by a future Express or
+      // path-to-regexp bump. Written and read back through the real stack.
+      const scoped = 'plan.collection_alive:Survival';
+      await pool.query(
+        `INSERT INTO health_checks (check_name, status, detail) VALUES ($1, 'breached', $2)`,
+        [scoped, JSON.stringify({ summary: 'sem sessao nova em 6h' })],
+      );
+
+      const response = await http()
+        .get(`${CHECKS}/${encodeURIComponent(scoped)}/history`)
+        .set('Cookie', authCookie)
+        .expect(200);
+
+      const body = response.body as {
+        name: string;
+        count: number;
+        entries: Array<{ check: string; target: string | null }>;
+      };
+
+      expect(body.name).toBe(scoped);
+      expect(body.count).toBe(1);
+      expect(body.entries[0]).toMatchObject({
+        check: 'plan.collection_alive',
+        target: 'Survival',
+      });
+    });
+
+    it('publishes both ends of the freshness spread', async () => {
+      // A single `max` would report the newest and call the layer fresh. The
+      // whole reason both ends are published is that one silent check is enough
+      // to make the aggregate a lie.
+      await pool.query(
+        `INSERT INTO health_checks (check_name, status, checked_at, detail) VALUES
+           ($1, 'ok', now() - interval '90 minutes', $3),
+           ($2, 'ok', now(), $3)`,
+        [
+          'plan.collection_alive:Survival',
+          'plan.version_divergence',
+          JSON.stringify({ summary: 'ok' }),
+        ],
+      );
+
+      const response = await http()
+        .get(SUMMARY)
+        .set('Cookie', authCookie)
+        .expect(200);
+
+      const body = response.body as {
+        lastCheckedAt: string;
+        oldestCheckedAt: string;
+        staleChecks: string[];
+      };
+
+      expect(new Date(body.oldestCheckedAt).getTime()).toBeLessThan(
+        new Date(body.lastCheckedAt).getTime(),
+      );
+      // The scheduler is off in CI, so every row is stale — which is itself the
+      // correct answer, and the reason this asserts the spread rather than the
+      // verdict.
+      expect(body.staleChecks).toContain('plan.collection_alive:Survival');
     });
 
     it('answers an empty history for a check that never ran, not a 404', async () => {
