@@ -43,9 +43,12 @@ export function createDocsSessionMiddleware(
       return;
     }
 
-    session
-      .verify(token)
-      .then((user) => {
+    // `then(onFulfilled, onRejected)` rather than `.then(...).catch(...)`: a
+    // trailing catch would also swallow anything thrown by the allowlist lookup
+    // or by `next()`, and report a downstream fault to the operator as
+    // "invalid session". The rejection handler here only ever sees `verify`.
+    session.verify(token).then(
+      (user) => {
         if (!allowlist.isAllowed(user.discordId)) {
           logger.warn(
             `Rejected ${request.method} ${request.originalUrl}: user ${user.discordId} not on allowlist`,
@@ -54,13 +57,14 @@ export function createDocsSessionMiddleware(
           return;
         }
         next();
-      })
-      .catch(() => {
+      },
+      () => {
         logger.warn(
           `Rejected ${request.method} ${request.originalUrl}: invalid session`,
         );
         deny(response);
-      });
+      },
+    );
   };
 }
 
@@ -73,5 +77,5 @@ export function createDocsSessionMiddleware(
  * the operator back to the login screen.
  */
 function deny(response: Response): void {
-  response.status(401).json({ message: 'Unauthorized', statusCode: 401 }).end();
+  response.status(401).json({ message: 'Unauthorized', statusCode: 401 });
 }
