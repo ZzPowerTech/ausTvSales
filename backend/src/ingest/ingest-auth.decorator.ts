@@ -19,7 +19,7 @@ import { IngestIpAllowlistGuard } from './ingest-ip-allowlist.guard';
  *    `@Public()` never leaves the route open — it swaps session auth for
  *    IP + key auth rather than removing auth.
  *  - `ThrottlerGuard` applies the ingest rate limit (see {@link
- *    ingestThrottlerOptions}); throttling is scoped here, never global, so
+ *    appThrottlerOptions}); throttling is scoped here, never global, so
  *    dashboard routes keep their own profile.
  *  - `ApiSecurity` overrides the document's global session requirement with the
  *    API-key scheme. Without it these routes would be documented as needing a
@@ -54,7 +54,7 @@ export function IngestAuth(): ReturnType<typeof applyDecorators> {
     ApiResponse({
       status: 429,
       description:
-        'Limite de taxa do grupo de ingest excedido (ver ingestThrottlerOptions).',
+        'Limite de taxa do grupo de ingest excedido (ver appThrottlerOptions).',
     }),
   );
 }
