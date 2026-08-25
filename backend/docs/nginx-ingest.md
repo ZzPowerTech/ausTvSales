@@ -97,6 +97,10 @@ Se **não houver** linha de recusa alguma, o `403` veio da borda (o `deny all` d
 - [ ] `allow <ip da VPS do jogo>; deny all;` aplicado no `location` do ingest.
 - [ ] `location` casa o prefixo real (`/api/...` no deploy atual) e tem o `rewrite`.
 - [ ] `limit_req_zone` declarado no `http{}` e `limit_req` no `location`.
+- [ ] `TRUST_PROXY` conferido **tambem** pelo lado do rate limiting: o balde do
+      throttler e particionado por `req.ip`, entao um valor errado coloca todos
+      os clientes do dashboard no mesmo balde. O sintoma nao e o 403 desta
+      pagina — sao 429 intermitentes que nao correlacionam com nenhum usuario.
 - [ ] `X-Forwarded-For` repassado pelo Nginx.
 - [ ] `INGEST_ALLOWED_IPS` (backend) = IP público da VPS do jogo.
 - [ ] `TRUST_PROXY` (backend) = `1` com backend em container (ver tabela acima).

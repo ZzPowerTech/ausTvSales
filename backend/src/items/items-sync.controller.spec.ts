@@ -9,7 +9,7 @@ import { IngestApiKeyGuard } from '../ingest/ingest-api-key.guard';
 import { IngestApiKeyService } from '../ingest/ingest-api-key.service';
 import { IngestIpAllowlistGuard } from '../ingest/ingest-ip-allowlist.guard';
 import { IngestIpAllowlistService } from '../ingest/ingest-ip-allowlist.service';
-import { ingestThrottlerOptions } from '../ingest/ingest.throttle';
+import { appThrottlerOptions } from '../config/throttling';
 import { ItemsSyncController } from './items-sync.controller';
 import { ItemsService, type ItemSyncEntry } from './items.service';
 
@@ -37,7 +37,7 @@ describe('ItemsSyncController (GET /items/sync)', () => {
     } as unknown as ConfigService;
 
     const moduleRef = await Test.createTestingModule({
-      imports: [ThrottlerModule.forRoot(ingestThrottlerOptions)],
+      imports: [ThrottlerModule.forRoot(appThrottlerOptions)],
       controllers: [ItemsSyncController],
       providers: [
         IngestApiKeyGuard,
