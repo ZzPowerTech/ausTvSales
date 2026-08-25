@@ -3,8 +3,10 @@ import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { ConfigService } from '@nestjs/config';
 import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { AppModule } from './app.module';
+import { securityHeadersOptions } from './config/security-headers.config';
 import { validationPipeOptions } from './config/validation-pipe.config';
 import { resolveTrustProxy } from './config/trust-proxy';
 import { DRIZZLE, type DrizzleDB } from './db/database.module';
@@ -47,6 +49,12 @@ async function bootstrap() {
   if (corsOrigin) {
     app.enableCors({ origin: corsOrigin, credentials: true });
   }
+
+  // Cabecalhos de seguranca da resposta (S7.2). Depois do enableCors de
+  // proposito: a politica de cross-origin-resource-policy e derivada da MESMA
+  // decisao de CORS acima, e o helmet precisa ver o valor ja resolvido para nao
+  // fechar por baixo uma porta que a linha anterior abriu de proposito.
+  app.use(helmet(securityHeadersOptions(corsOrigin)));
 
   app.useGlobalPipes(new ValidationPipe(validationPipeOptions));
 
