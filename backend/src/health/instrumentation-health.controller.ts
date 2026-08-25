@@ -1,5 +1,19 @@
-import { Controller, Get, Header, Param, Query } from '@nestjs/common';
-import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  Controller,
+  Get,
+  Header,
+  Param,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiOkResponse,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
+import { dashboardThrottle } from '../config/throttling';
 import {
   CheckHistoryQueryDto,
   DEFAULT_HISTORY_LIMIT,
@@ -40,6 +54,13 @@ const NO_STORE = () => Header('Cache-Control', 'no-store');
  * owner, not a side effect of this story. The shape is machine-friendly
  * regardless, so it costs nothing to keep it closed until that decision exists.
  *
+ * ## Rate limited, and the reason is not abuse
+ *
+ * The dashboard profile is applied here (`ThrottlerGuard` + `@Throttle`). It is
+ * generous enough that an operator never meets it; what it bounds is a leaked
+ * session cookie, and a runaway polling loop in the frontend — which would turn
+ * into load on the Plan behind the cache, on the machine that runs the game.
+ *
  * ## Read-only, deliberately
  *
  * There is no route to trigger a cycle. One cycle is an HTTP request per
@@ -64,6 +85,13 @@ const NO_STORE = () => Header('Cache-Control', 'no-store');
  * the change that would have to add the filter.
  */
 @ApiTags('Saude da instrumentacao')
+@UseGuards(ThrottlerGuard)
+@Throttle(dashboardThrottle)
+@ApiResponse({
+  status: 429,
+  description:
+    'Limite de taxa das leituras de dashboard excedido (ver dashboardThrottle).',
+})
 @Controller('health/instrumentation')
 export class InstrumentationHealthController {
   constructor(private readonly health: InstrumentationHealthService) {}

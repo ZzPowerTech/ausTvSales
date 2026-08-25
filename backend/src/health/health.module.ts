@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ThrottlingModule } from '../config/throttling';
 import { InstrumentationModule } from '../instrumentation/instrumentation.module';
 import { HealthController } from './health.controller';
 import { HealthService } from './health.service';
@@ -23,7 +24,11 @@ import { InstrumentationHealthService } from './instrumentation-health.service';
  * cycle — see the controller for why that is deliberate.
  */
 @Module({
-  imports: [InstrumentationModule],
+  // `ThrottlingModule` so the `ThrottlerGuard` on the instrumentation routes can
+  // resolve its options and storage. `/health` itself stays unthrottled: it is
+  // the liveness probe Nginx and the container poll, and a 429 there would read
+  // as an outage.
+  imports: [InstrumentationModule, ThrottlingModule],
   controllers: [HealthController, InstrumentationHealthController],
   providers: [HealthService, InstrumentationHealthService],
   exports: [HealthService],
