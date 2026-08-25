@@ -1,4 +1,4 @@
-import { INestApplication } from '@nestjs/common';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AllowlistService } from '../auth/allowlist.service';
@@ -22,6 +22,21 @@ export const DOCS_PATH = 'docs';
  */
 export const API_DOC_VERSION = '1.0';
 
+/** Name of the session security scheme, referenced by `@ApiCookieAuth()`. */
+export const SESSION_SECURITY_SCHEME = 'session';
+
+/**
+ * Name of the ingest security scheme, referenced by `@IngestAuth()`.
+ *
+ * The ingest routes are `@Public()` to the session guard but are **not** open:
+ * they swap session auth for an IP allowlist plus a shared API key. Documenting
+ * them under the global session requirement would be a lie in one direction, and
+ * leaving them with the empty requirement the truly public routes carry would be
+ * a lie in the other — it would tell a reader that `POST /sales` accepts
+ * anonymous writes.
+ */
+export const INGEST_SECURITY_SCHEME = 'ingest-api-key';
+
 /**
  * CSP for the docs page only.
  *
@@ -30,17 +45,30 @@ export const API_DOC_VERSION = '1.0';
  * wins by `setHeader` on this path and nowhere else — never a relaxation of the
  * global policy that every other route depends on.
  *
- * `'unsafe-inline'` appears for **styles only**. The Swagger UI template ships
- * two inline `<style>` blocks, but all three of its scripts are separate files
- * served from this same origin, so `script-src` stays at `'self'` — which is the
- * half that matters, and the half most snippets on the internet give away.
+ * Every entry was checked against the shipped assets rather than copied from a
+ * snippet. `'unsafe-inline'` appears for **styles only**: the template has two
+ * inline `<style>` blocks but loads all three of its scripts as separate files
+ * from this origin, so `script-src` stays at `'self'` — which is the half that
+ * matters, and the half most snippets on the internet give away. No `font-src`,
+ * because `swagger-ui.css` declares no `@font-face`; no `worker-src`/`blob:`,
+ * because the bundle constructs no `Worker`. All the icons are inline `data:`
+ * SVGs, which is what `img-src` covers.
+ *
+ * Typed from helmet's own signature, which pins the *values* but not the
+ * directive names — the option type is a `Record<string, ...>`, so `scrpit-src`
+ * would still compile and be emitted verbatim. The guard that actually catches
+ * that is the e2e assertion on the whole header string, which is why it is an
+ * equality check and not a `toContain`.
  */
-const DOCS_CSP_DIRECTIVES: Record<string, string[]> = {
+type CspDirectives = NonNullable<
+  NonNullable<Parameters<typeof helmet.contentSecurityPolicy>[0]>['directives']
+>;
+
+const DOCS_CSP_DIRECTIVES: CspDirectives = {
   'default-src': ["'none'"],
   'script-src': ["'self'"],
   'style-src': ["'self'", "'unsafe-inline'"],
   'img-src': ["'self'", 'data:'],
-  'font-src': ["'self'", 'data:'],
   'connect-src': ["'self'"],
   'base-uri': ["'none'"],
   'form-action': ["'none'"],
@@ -59,15 +87,35 @@ const DOCS_CSP_DIRECTIVES: Record<string, string[]> = {
  * inventory of this API, including the ingest surface, would be readable by
  * anyone who can reach the port.
  *
+ * **The same gap applies to `ThrottlerGuard`**, and it is the one thing this
+ * slice makes harder for the next. When the throttling slice of S7.2 lands, it
+ * will be a Nest guard and it will not see `/docs/*` either — so any rate control
+ * for this surface has to be Express-level, mounted next to the session
+ * middleware below. Left unrated, each request with a garbage cookie costs a JWT
+ * verify, and this would be the one route family in the API with no limit.
+ *
  * ## One prefix, on purpose
  *
  * `jsonDocumentUrl` and `yamlDocumentUrl` are moved under `${DOCS_PATH}/` rather
  * than left at Nest's defaults of `/docs-json` and `/docs-yaml`. Those defaults
  * are *siblings* of `/docs`, not children, so `app.use('/docs', ...)` would not
  * cover them and the raw specification would have been served unauthenticated
- * next to a protected UI. Keeping everything under one prefix means one mount
- * point protects all of it, and adding a Swagger route later cannot silently
- * escape the check.
+ * next to a protected UI.
+ *
+ * The prefix covers more than the three obvious routes: Swagger also registers a
+ * duplicated `${DOCS_PATH}/docs/swagger-ui-init.js` and mounts the whole
+ * `swagger-ui-dist` folder as static assets. Both sit under the mount, and the
+ * e2e suite asserts it — a future version that prefixed assets differently would
+ * otherwise escape the check in silence.
+ *
+ * ## Yes, in production too
+ *
+ * There is no env kill switch, and that is a decision rather than an oversight.
+ * The docs are behind the same session as the dashboard and the same two-person
+ * allowlist (`ALLOWED_DISCORD_IDS`), so the audience is identical to the one
+ * that can already read every response the API produces. A flag would add a
+ * configuration that is wrong in one of its two positions and would tempt
+ * somebody to disable the docs instead of protecting them.
  *
  * ## No `@nestjs/swagger` CLI plugin
  *
@@ -76,15 +124,19 @@ const DOCS_CSP_DIRECTIVES: Record<string, string[]> = {
  * `nest build` pipeline and **not** under ts-jest, so the document the tests see
  * would differ from the one production serves. This project already has a rule
  * about not confusing two different things for one, and documentation that is
- * only correct in one of the two builds is exactly that. Properties are declared
- * explicitly instead, one decorator at a time, where somebody chose them.
+ * only correct in one of the two builds is exactly that.
+ *
+ * The cost is stated rather than hidden: the DTOs written before S7 carry no
+ * `@ApiProperty` yet, so their schemas are empty objects in this document. The
+ * S7 modules are annotated as they are written; annotating the earlier ones is
+ * its own piece of work, not a passenger on this one.
  */
-export function setupSwagger(app: INestApplication): void {
+export function setupSwagger(app: NestExpressApplication): void {
   // Same services the global guard uses. Resolved from the container rather than
   // reimplemented — one answer to "is this session valid", not two.
   const middleware = createDocsSessionMiddleware(
-    app.get(SessionService, { strict: false }),
-    app.get(AllowlistService, { strict: false }),
+    app.get(SessionService),
+    app.get(AllowlistService),
   );
 
   // Auth first, then the relaxed CSP: an unauthenticated request must be turned
@@ -102,18 +154,38 @@ export function setupSwagger(app: INestApplication): void {
     .setTitle('AusTV Admin API')
     .setDescription(
       'API do dashboard AusTV: vendas por cash (ausTvSales) e saude da ' +
-        'instrumentacao da rede de jogo (AusTV Admin). Toda rota exige sessao, ' +
-        'exceto as marcadas como publicas.',
+        'instrumentacao da rede de jogo (AusTV Admin). A sessao e o requisito ' +
+        'padrao; as rotas que fogem dele dizem isso na propria operacao.',
     )
     .setVersion(API_DOC_VERSION)
-    .addCookieAuth(SESSION_COOKIE, {
-      type: 'apiKey',
-      in: 'cookie',
-      name: SESSION_COOKIE,
-      description:
-        'Cookie httpOnly emitido pelo login via Discord. Nao e possivel ' +
-        'preenche-lo aqui — faca login no dashboard e o browser o envia sozinho.',
-    })
+    .addCookieAuth(
+      SESSION_COOKIE,
+      {
+        type: 'apiKey',
+        in: 'cookie',
+        name: SESSION_COOKIE,
+        description:
+          'Cookie httpOnly emitido pelo login via Discord. Nao e possivel ' +
+          'preenche-lo aqui — faca login no dashboard e o browser o envia sozinho.',
+      },
+      SESSION_SECURITY_SCHEME,
+    )
+    .addApiKey(
+      {
+        type: 'apiKey',
+        in: 'header',
+        name: 'X-Api-Key',
+        description:
+          'Chave compartilhada do plugin do servidor de jogo (ADR-0001). Vale ' +
+          'apenas para as rotas de ingest, e somente a partir dos IPs da ' +
+          'allowlist — a chave sozinha nao abre nada de fora da VPS do jogo.',
+      },
+      INGEST_SECURITY_SCHEME,
+    )
+    // Requisito global: quem nao declarar o proprio esquema exige sessao. Sem
+    // isto o documento nao distingue rota protegida de rota publica, e a
+    // descricao acima viraria mentira.
+    .addSecurityRequirements(SESSION_SECURITY_SCHEME)
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
@@ -126,7 +198,11 @@ export function setupSwagger(app: INestApplication): void {
       // a reordering of controller registration.
       operationsSorter: 'alpha',
       tagsSorter: 'alpha',
-      persistAuthorization: true,
+      // Read-only "try it out". Every write route here is session-authorized, so
+      // the page would otherwise hand an operator a one-click path to inserting
+      // catalog rows in production while they are reading documentation. The
+      // dashboard is where writes belong; this is where they are described.
+      supportedSubmitMethods: ['get'],
     },
   });
 }

@@ -1,6 +1,8 @@
 import { applyDecorators, UseGuards } from '@nestjs/common';
+import { ApiSecurity } from '@nestjs/swagger';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { Public } from '../auth/public.decorator';
+import { INGEST_SECURITY_SCHEME } from '../config/swagger';
 import { IngestApiKeyGuard } from './ingest-api-key.guard';
 import { IngestIpAllowlistGuard } from './ingest-ip-allowlist.guard';
 
@@ -19,6 +21,10 @@ import { IngestIpAllowlistGuard } from './ingest-ip-allowlist.guard';
  *  - `ThrottlerGuard` applies the ingest rate limit (see {@link
  *    ingestThrottlerOptions}); throttling is scoped here, never global, so
  *    dashboard routes keep their own profile.
+ *  - `ApiSecurity` overrides the document's global session requirement with the
+ *    API-key scheme. Without it these routes would be documented as needing a
+ *    dashboard cookie, which is the opposite of true — and describing an ingest
+ *    route wrongly is how somebody eventually tries to call it wrongly.
  *
  * Bundling all four means it is impossible to mark an ingest route public
  * without also allowlisting, authenticating and rate-limiting it (risk
@@ -28,5 +34,6 @@ export function IngestAuth(): ReturnType<typeof applyDecorators> {
   return applyDecorators(
     Public(),
     UseGuards(IngestIpAllowlistGuard, IngestApiKeyGuard, ThrottlerGuard),
+    ApiSecurity(INGEST_SECURITY_SCHEME),
   );
 }
