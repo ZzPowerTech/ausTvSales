@@ -5,6 +5,21 @@ import { HealthCheckRunner } from './health-check.runner';
 
 /** Matches the default documented in `.env.example`. */
 const DEFAULT_INTERVAL_MINUTES = 15;
+
+/**
+ * The cadence, as resolved from configuration.
+ *
+ * Published because a reader of the health layer cannot interpret a verdict
+ * without it: "the newest check ran 40 minutes ago" is fine on an hourly cycle
+ * and an outage on a 15-minute one. Story S7.1 turns that into the staleness
+ * rule, and it has to derive the tolerance from the real interval rather than
+ * from a second constant that would drift away from this one.
+ */
+export interface HealthCheckSchedule {
+  /** False when `HEALTH_CHECK_ENABLED` is off — nothing is being measured. */
+  enabled: boolean;
+  intervalMinutes: number;
+}
 const MS_PER_MINUTE = 60_000;
 
 const TIMER_NAME = 'instrumentation-health';
@@ -52,6 +67,20 @@ export class HealthCheckScheduler implements OnModuleInit {
       config.get<number>('HEALTH_CHECK_INTERVAL_MINUTES') ??
       DEFAULT_INTERVAL_MINUTES;
     this.intervalMs = minutes * MS_PER_MINUTE;
+  }
+
+  /**
+   * The configured cadence.
+   *
+   * Reports `enabled` as configured, not as "a timer object currently exists":
+   * the two are the same today, and a getter that inspected the timer would
+   * quietly start answering a different question if the registration ever moved.
+   */
+  get schedule(): HealthCheckSchedule {
+    return {
+      enabled: this.enabled,
+      intervalMinutes: this.intervalMs / MS_PER_MINUTE,
+    };
   }
 
   onModuleInit(): void {

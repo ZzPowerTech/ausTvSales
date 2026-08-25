@@ -90,6 +90,9 @@ import { VersionDivergenceCheck } from './version-divergence.check';
     DiscordAlerter,
     PlanApiClient,
     HealthCheckRunner,
+    // Exported for the S7.1 read model, which needs the cadence to decide
+    // whether a stored verdict is still a measurement or already a photograph.
+    HealthCheckScheduler,
     PlanServersConfig,
   ],
 })
