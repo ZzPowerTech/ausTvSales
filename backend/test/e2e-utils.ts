@@ -1,11 +1,8 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
-import cookieParser from 'cookie-parser';
-import helmet from 'helmet';
-import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
-import { securityHeadersOptions } from './../src/config/security-headers.config';
-import { validationPipeOptions } from './../src/config/validation-pipe.config';
+import { configureApp } from './../src/config/configure-app';
 import { SESSION_COOKIE } from './../src/auth/auth.types';
 import { SessionService } from './../src/auth/session.service';
 
@@ -13,25 +10,35 @@ import { SessionService } from './../src/auth/session.service';
 export const TEST_DISCORD_ID = '111111111111111111';
 
 export interface E2eContext {
-  app: INestApplication<App>;
+  app: NestExpressApplication;
   /** `Cookie` header value carrying a valid session for an allowlisted user. */
   authCookie: string;
 }
 
-/** Boot the full app the same way `main.ts` does and mint an auth cookie. */
-export async function createAuthenticatedApp(): Promise<E2eContext> {
+/**
+ * Boot the app through the same `configureApp` as `main.ts`.
+ *
+ * The shared call is the point. This helper used to re-list the middleware by
+ * hand, which meant the suite was exercising an app that merely resembled the
+ * deployed one — and the resemblance had already broken in three places before
+ * anyone noticed. Anything that has to hold in production is now covered here by
+ * construction rather than by remembering to copy a line.
+ */
+export async function createApp(): Promise<NestExpressApplication> {
   const moduleFixture = await Test.createTestingModule({
     imports: [AppModule],
   }).compile();
 
-  const app = moduleFixture.createNestApplication<INestApplication<App>>();
-  app.use(cookieParser());
-  // Same middleware stack as `main.ts`, in the same order. An e2e helper that
-  // quietly boots a *different* app proves the wrong thing — the security
-  // headers below were invisible to every e2e test until this line existed.
-  app.use(helmet(securityHeadersOptions(process.env.CORS_ORIGIN)));
-  app.useGlobalPipes(new ValidationPipe(validationPipeOptions));
+  const app = moduleFixture.createNestApplication<NestExpressApplication>();
+  configureApp(app, moduleFixture.get(ConfigService));
   await app.init();
+
+  return app;
+}
+
+/** {@link createApp}, plus a signed session cookie for an allowlisted user. */
+export async function createAuthenticatedApp(): Promise<E2eContext> {
+  const app = await createApp();
 
   const token = await app.get(SessionService).sign({
     discordId: TEST_DISCORD_ID,

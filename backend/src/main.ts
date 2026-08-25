@@ -1,36 +1,15 @@
-import { Logger, ValidationPipe } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { ConfigService } from '@nestjs/config';
-import cookieParser from 'cookie-parser';
-import helmet from 'helmet';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { AppModule } from './app.module';
-import { securityHeadersOptions } from './config/security-headers.config';
-import { validationPipeOptions } from './config/validation-pipe.config';
-import { resolveTrustProxy } from './config/trust-proxy';
+import { configureApp } from './config/configure-app';
 import { DRIZZLE, type DrizzleDB } from './db/database.module';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const configService = app.get(ConfigService);
-
-  // Trust only the Nginx hop so req.ip is the real client from X-Forwarded-For
-  // and a forged header from a direct connection is ignored — the ingest IP
-  // allowlist (ADR-0001) is only as trustworthy as this setting.
-  const trustProxy = resolveTrustProxy(
-    configService.get<string>('TRUST_PROXY'),
-  );
-  app.set('trust proxy', trustProxy);
-
-  // Logado no boot de proposito: este valor decide de onde sai o `req.ip` que a
-  // allowlist de ingest compara, e um valor errado se manifesta la na frente
-  // como um 403 em trafego legitimo — sem nada no boot que aponte para ca.
-  Logger.log(
-    `Trust proxy: ${JSON.stringify(trustProxy)} ` +
-      '(define o req.ip usado pela allowlist de ingest)',
-    'Bootstrap',
-  );
 
   // Aplica migrations pendentes no boot. O drizzle-kit (CLI) e devDependency e
   // nao vai na imagem de producao, entao usamos o migrator do drizzle-orm sobre
@@ -39,24 +18,10 @@ async function bootstrap() {
   await migrate(db, { migrationsFolder: './drizzle' });
   Logger.log('Migrations verificadas/aplicadas', 'Bootstrap');
 
-  // Sessao de dashboard vive em cookie httpOnly assinado — precisamos ler cookies.
-  app.use(cookieParser());
-
-  // CORS com credenciais so quando ha origem cross-site configurada (dev: o
-  // Angular dev server em outra porta). Em producao frontend e API dividem a
-  // origem sales.austv.net, entao CORS_ORIGIN fica vazio e CORS desligado.
-  const corsOrigin = configService.get<string>('CORS_ORIGIN');
-  if (corsOrigin) {
-    app.enableCors({ origin: corsOrigin, credentials: true });
-  }
-
-  // Cabecalhos de seguranca da resposta (S7.2). Depois do enableCors de
-  // proposito: a politica de cross-origin-resource-policy e derivada da MESMA
-  // decisao de CORS acima, e o helmet precisa ver o valor ja resolvido para nao
-  // fechar por baixo uma porta que a linha anterior abriu de proposito.
-  app.use(helmet(securityHeadersOptions(corsOrigin)));
-
-  app.useGlobalPipes(new ValidationPipe(validationPipeOptions));
+  // Trust proxy, cabecalhos de seguranca, CORS, cookies e o ValidationPipe —
+  // numa funcao unica que o harness e2e tambem chama, para que a suite nunca
+  // teste um app diferente do que sobe aqui.
+  configureApp(app, configService);
 
   const port = configService.get<number>('PORT') ?? 3000;
   await app.listen(port);

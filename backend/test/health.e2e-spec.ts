@@ -1,21 +1,14 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { Test, TestingModule } from '@nestjs/testing';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
-import { App } from 'supertest/types';
-import { AppModule } from './../src/app.module';
-import { validationPipeOptions } from './../src/config/validation-pipe.config';
+import { createApp } from './e2e-utils';
 
 describe('HealthController (e2e)', () => {
-  let app: INestApplication<App>;
+  let app: NestExpressApplication;
 
   beforeEach(async () => {
-    const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
-
-    app = moduleFixture.createNestApplication();
-    app.useGlobalPipes(new ValidationPipe(validationPipeOptions));
-    await app.init();
+    // Through `createApp` so the probe is exercised on the same middleware
+    // stack that serves it in production.
+    app = await createApp();
   });
 
   it('/health (GET) returns status ok', () => {

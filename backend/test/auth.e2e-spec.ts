@@ -1,12 +1,8 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { Test, TestingModule } from '@nestjs/testing';
-import cookieParser from 'cookie-parser';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
-import { App } from 'supertest/types';
-import { AppModule } from './../src/app.module';
-import { validationPipeOptions } from './../src/config/validation-pipe.config';
 import { SESSION_COOKIE } from './../src/auth/auth.types';
 import { SessionService } from './../src/auth/session.service';
+import { createApp } from './e2e-utils';
 
 /**
  * End-to-end coverage of the deny-by-default posture (spec §7): nothing but the
@@ -14,19 +10,14 @@ import { SessionService } from './../src/auth/session.service';
  * kickoff behaves correctly.
  */
 describe('Auth (e2e)', () => {
-  let app: INestApplication<App>;
+  let app: NestExpressApplication;
   let sessionService: SessionService;
 
   beforeAll(async () => {
-    const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
-
-    app = moduleFixture.createNestApplication();
-    app.use(cookieParser());
-    app.useGlobalPipes(new ValidationPipe(validationPipeOptions));
-    await app.init();
-
+    // Through `createApp` so this suite boots the same middleware stack as
+    // production. It covers the OAuth redirects, which are the responses most
+    // worth having the real stack around them.
+    app = await createApp();
     sessionService = app.get(SessionService);
   });
 
