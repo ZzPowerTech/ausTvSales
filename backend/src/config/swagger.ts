@@ -5,6 +5,10 @@ import { AllowlistService } from '../auth/allowlist.service';
 import { SESSION_COOKIE } from '../auth/auth.types';
 import { createDocsSessionMiddleware } from '../auth/docs-session.middleware';
 import { SessionService } from '../auth/session.service';
+import {
+  INGEST_SECURITY_SCHEME,
+  SESSION_SECURITY_SCHEME,
+} from './swagger.constants';
 
 /**
  * Where the docs live. Everything Swagger serves hangs under this one prefix —
@@ -21,21 +25,6 @@ export const DOCS_PATH = 'docs';
  * contract moves.
  */
 export const API_DOC_VERSION = '1.0';
-
-/** Name of the session security scheme, referenced by `@ApiCookieAuth()`. */
-export const SESSION_SECURITY_SCHEME = 'session';
-
-/**
- * Name of the ingest security scheme, referenced by `@IngestAuth()`.
- *
- * The ingest routes are `@Public()` to the session guard but are **not** open:
- * they swap session auth for an IP allowlist plus a shared API key. Documenting
- * them under the global session requirement would be a lie in one direction, and
- * leaving them with the empty requirement the truly public routes carry would be
- * a lie in the other — it would tell a reader that `POST /sales` accepts
- * anonymous writes.
- */
-export const INGEST_SECURITY_SCHEME = 'ingest-api-key';
 
 /**
  * CSP for the docs page only.
@@ -178,7 +167,10 @@ export function setupSwagger(app: NestExpressApplication): void {
         description:
           'Chave compartilhada do plugin do servidor de jogo (ADR-0001). Vale ' +
           'apenas para as rotas de ingest, e somente a partir dos IPs da ' +
-          'allowlist — a chave sozinha nao abre nada de fora da VPS do jogo.',
+          'allowlist — a chave sozinha nao abre nada de fora da VPS do jogo, e ' +
+          'um IP de fora leva 403, nao 401. Aceita tambem como ' +
+          '`Authorization: Bearer <chave>`, que o OpenAPI nao tem como declarar ' +
+          'junto do header no mesmo esquema.',
       },
       INGEST_SECURITY_SCHEME,
     )
