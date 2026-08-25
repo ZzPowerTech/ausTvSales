@@ -75,9 +75,14 @@ describe('OpenAPI docs (e2e)', () => {
         '/docs/docs/swagger-ui-init.js',
       ];
 
-      const statuses = await Promise.all(
-        paths.map(async (path) => [path, (await http().get(path)).status]),
-      );
+      // Sequential, not `Promise.all`. Each `request()` call binds its own
+      // ephemeral listener on the same http.Server, and six of them racing at
+      // once produces ECONNRESET rather than an answer — a flaky red that says
+      // nothing about the mount this case is here to check.
+      const statuses: Array<[string, number]> = [];
+      for (const path of paths) {
+        statuses.push([path, (await http().get(path)).status]);
+      }
 
       expect(statuses).toEqual(paths.map((path) => [path, 401]));
     });
