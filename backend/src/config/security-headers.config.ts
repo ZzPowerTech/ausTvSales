@@ -21,20 +21,27 @@ export const HSTS_MAX_AGE_SECONDS = 31_536_000;
  * allowed — rather than Helmet's default, which is written for a page that
  * actually loads scripts and fonts.
  *
- * ## Everything Helmet sends is named here, including the boring ones
+ * ## Every header with a security consequence is named here
  *
- * Helmet applies every default middleware for any key that is *not* passed. The
- * headers below that look redundant are written out precisely because they are
- * not: an option nobody wrote down is an option nobody decided. `strictTransport-
- * Security` is the one that matters — see its own note.
+ * Helmet applies every default middleware for any key that is *not* passed, so
+ * an option nobody wrote down is an option nobody decided. The ones that can
+ * change what a browser does for this API are therefore stated below even when
+ * the value matches Helmet's default — `strictTransportSecurity` above all, see
+ * its own note.
+ *
+ * What is left inherited is the legacy set, inert for a JSON API and listed here
+ * so the omission reads as a decision rather than an oversight:
+ * `origin-agent-cluster`, `x-dns-prefetch-control`, `x-download-options`,
+ * `x-permitted-cross-domain-policies`, `x-xss-protection: 0` (the correct modern
+ * value — the legacy auditor caused bugs of its own) and the removal of
+ * `x-powered-by`.
  *
  * ## What is deliberately *not* here
  *
- * - **No `sandbox` directive.** It would harden the rendered-response case a
- *   little further at no cost to JSON, but the OAuth routes answer with 302s and
- *   the resulting documents are Discord's and the SPA's. Nothing in the test
- *   suite exercises that round trip in a real browser, so it stays out until
- *   something can prove it harmless rather than argue it.
+ * - **No `sandbox` directive.** Its upside here is already spent: `default-src
+ *   'none'` neuters the only two HTML responses this API produces, and
+ *   `finalhandler` HTML-escapes the path it echoes back, so there is no live
+ *   reflection left for a sandbox to contain.
  * - **No `Access-Control-*` handling** (that is `enableCors`) and **no rate
  *   limiting** (that is the throttler). Helmet sets headers; it is not a request
  *   filter, and treating it as one is how a team ends up believing it has

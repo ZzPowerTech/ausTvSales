@@ -34,11 +34,13 @@ import { validationPipeOptions } from './validation-pipe.config';
  *    never rendered — but there is no cost to being ahead of it, and "some
  *    responses have the headers" is a worse invariant to reason about than "all
  *    of them do".
- * 3. **CORS**, then the cookie parser, then the validation pipe.
+ * 3. **CORS**, then the cookie parser, then the validation pipe. The cookie
+ *    parser sits after CORS rather than before it, which is inert: `cors` reads
+ *    only the `Origin` header, and a preflight carries no cookies.
  *
  * Migrations are deliberately **not** here. They are a deploy step that belongs
- * to the real boot in `main.ts`; the e2e suites run them themselves against the
- * test database.
+ * to the real boot in `main.ts`; for the e2e job the CI workflow migrates the
+ * test database in a separate step before the suites run.
  */
 export function configureApp(
   app: NestExpressApplication,
