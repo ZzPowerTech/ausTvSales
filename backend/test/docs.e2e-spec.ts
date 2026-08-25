@@ -163,7 +163,13 @@ describe('OpenAPI docs (e2e)', () => {
       const paths = (response.body as { paths: Record<string, PathItem> })
         .paths;
 
+      // As duas rotas de ingest, nao so a mais obvia: uma rota nova adicionada
+      // sem `@IngestAuth()` cai no requisito global de sessao e e documentada
+      // errada, sem nada ficar vermelho.
       expect(paths['/sales'].post?.security).toEqual([
+        { 'ingest-api-key': [] },
+      ]);
+      expect(paths['/items/sync'].get?.security).toEqual([
         { 'ingest-api-key': [] },
       ]);
     });
