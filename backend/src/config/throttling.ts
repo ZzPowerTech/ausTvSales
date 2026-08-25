@@ -68,7 +68,18 @@ import {
  * `ttl` is in milliseconds (@nestjs/throttler v6 convention).
  */
 export const INGEST_THROTTLE_TTL_MS = 1_000; // window: 1 second
-export const INGEST_THROTTLE_LIMIT = 10; // ~10 req/s with a small burst → 429
+/**
+ * Hard 10 per one-second window. **No burst allowance** — and the absence is
+ * load-bearing rather than an omission.
+ *
+ * Nginx's edge rule is `rate=10r/s burst=20 nodelay` and answers with 503, which
+ * the plugin retries safely. This limit is stricter, so it fires *first*, and it
+ * answers 429 — which the plugin currently treats as permanent and discards
+ * (issue #157). Widening the burst here would paper over that; fixing the
+ * classification is the correct resolution, and until it lands this number is
+ * the one that decides whether a queue drain loses sales.
+ */
+export const INGEST_THROTTLE_LIMIT = 10;
 
 /**
  * Profile for authenticated dashboard reads.
