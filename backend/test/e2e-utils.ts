@@ -1,8 +1,10 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
+import { securityHeadersOptions } from './../src/config/security-headers.config';
 import { validationPipeOptions } from './../src/config/validation-pipe.config';
 import { SESSION_COOKIE } from './../src/auth/auth.types';
 import { SessionService } from './../src/auth/session.service';
@@ -24,6 +26,10 @@ export async function createAuthenticatedApp(): Promise<E2eContext> {
 
   const app = moduleFixture.createNestApplication<INestApplication<App>>();
   app.use(cookieParser());
+  // Same middleware stack as `main.ts`, in the same order. An e2e helper that
+  // quietly boots a *different* app proves the wrong thing — the security
+  // headers below were invisible to every e2e test until this line existed.
+  app.use(helmet(securityHeadersOptions(process.env.CORS_ORIGIN)));
   app.useGlobalPipes(new ValidationPipe(validationPipeOptions));
   await app.init();
 
