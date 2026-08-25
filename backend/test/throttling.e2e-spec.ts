@@ -30,9 +30,12 @@ describe('Dashboard throttling (e2e)', () => {
 
   const CHECKS = '/health/instrumentation/checks';
 
+  // 30s on the hook, not only on the cases: Jest applies its 5s default to
+  // hooks regardless of a test's own timeout, and this one boots the whole
+  // AppModule three times.
   beforeEach(async () => {
     ({ app, authCookie } = await createAuthenticatedApp());
-  });
+  }, 30_000);
 
   afterEach(async () => {
     await app.close();
@@ -50,7 +53,12 @@ describe('Dashboard throttling (e2e)', () => {
       statuses.push(response.status);
     }
 
-    expect(statuses.slice(0, DASHBOARD_THROTTLE_LIMIT)).not.toContain(429);
+    // Every request below the limit must be a real 200, not merely "not 429" —
+    // 120 consecutive 500s would satisfy the weaker assertion and prove nothing
+    // about the route the flood is supposed to be exercising.
+    expect(statuses.slice(0, DASHBOARD_THROTTLE_LIMIT)).toEqual(
+      Array<number>(DASHBOARD_THROTTLE_LIMIT).fill(200),
+    );
     expect(statuses[DASHBOARD_THROTTLE_LIMIT]).toBe(429);
   }, 60_000);
 
@@ -58,9 +66,16 @@ describe('Dashboard throttling (e2e)', () => {
     // `/health` is what Nginx and the container poll. A 429 there reads as an
     // outage of a process that is perfectly healthy, so it is deliberately
     // outside the throttled controller even though it shares the prefix.
-    for (let i = 0; i < 20; i++) {
-      expect((await http().get('/health')).status).toBe(200);
-    }
+    //
+    // Asserted by the ABSENCE of the rate-limit headers rather than by a loop.
+    // A loop of 20 would pass even if the dashboard profile applied here, since
+    // the limit is 120 — it would only catch the route accidentally inheriting
+    // ingest's 10/s, which is a much smaller claim than the one being made.
+    const response = await http().get('/health');
+
+    expect(response.status).toBe(200);
+    expect(response.headers['x-ratelimit-limit']).toBeUndefined();
+    expect(response.headers['x-ratelimit-remaining']).toBeUndefined();
   }, 30_000);
 
   it('rejects an unauthenticated request before spending the bucket', async () => {
