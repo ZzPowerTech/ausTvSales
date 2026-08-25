@@ -59,15 +59,14 @@ export function configureApp(
     'Bootstrap',
   );
 
-  const corsOrigin = config.get<string>('CORS_ORIGIN');
-
   // Cabecalhos de seguranca da resposta (S7.2). Antes do CORS — ver a nota de
   // ordem no doc desta funcao.
-  app.use(helmet(securityHeadersOptions(corsOrigin)));
+  app.use(helmet(securityHeadersOptions()));
 
   // CORS com credenciais so quando ha origem cross-site configurada (dev: o
   // Angular dev server em outra porta). Em producao frontend e API dividem a
   // origem sales.austv.net, entao CORS_ORIGIN fica vazio e CORS desligado.
+  const corsOrigin = config.get<string>('CORS_ORIGIN');
   if (corsOrigin) {
     app.enableCors({ origin: corsOrigin, credentials: true });
   }
