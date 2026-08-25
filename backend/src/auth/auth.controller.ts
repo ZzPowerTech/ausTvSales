@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { Controller, Get, Logger, Post, Query, Req, Res } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { AllowlistService } from './allowlist.service';
 import {
@@ -16,6 +17,16 @@ import { SessionService } from './session.service';
 /** Lifetime of the CSRF `state` cookie: the OAuth round-trip is quick. */
 const STATE_TTL_MS = 10 * 60 * 1000;
 
+/**
+ * Discord login for the dashboard (spec 7).
+ *
+ * Three of the four routes here are `@Public()`, and each one says so in the
+ * document with `security: []`. That is not decoration: the document declares a
+ * global session requirement, so an undocumented public route would be described
+ * as needing a cookie it does not need — and the OAuth kickoff is precisely the
+ * route somebody reads the docs to understand.
+ */
+@ApiTags('Autenticacao')
 @Controller('auth')
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
@@ -32,6 +43,12 @@ export class AuthController {
 
   /** Start the Discord OAuth flow: set a CSRF state cookie and redirect. */
   @Public()
+  @ApiOperation({
+    summary: 'Inicia o fluxo OAuth do Discord',
+    description:
+      'Grava o cookie de `state` (CSRF) e redireciona para o Discord.',
+    security: [],
+  })
   @Get('discord/login')
   login(@Res() res: Response): void {
     const state = randomBytes(32).toString('hex');
@@ -47,6 +64,13 @@ export class AuthController {
 
   /** OAuth callback: validate state, resolve the user, gate on the allowlist. */
   @Public()
+  @ApiOperation({
+    summary: 'Retorno do Discord',
+    description:
+      'Troca o `code` pela identidade, confere o `state` e a allowlist, e ' +
+      'grava o cookie de sessao. Publica porque quem chega aqui ainda nao tem sessao.',
+    security: [],
+  })
   @Get('discord/callback')
   async callback(
     @Query('code') code: string | undefined,
@@ -90,6 +114,13 @@ export class AuthController {
 
   /** Clear the session cookie. Public so it always succeeds, even if expired. */
   @Public()
+  @ApiOperation({
+    summary: 'Encerra a sessao',
+    description:
+      'Publica de proposito: um logout que exige sessao valida falha justamente ' +
+      'para quem mais precisa dele, o usuario com cookie expirado.',
+    security: [],
+  })
   @Post('logout')
   logout(@Res() res: Response): void {
     res.clearCookie(SESSION_COOKIE, this.session.clearCookieOptions());
@@ -97,6 +128,7 @@ export class AuthController {
   }
 
   /** Return the authenticated user (guarded route). */
+  @ApiOperation({ summary: 'Usuario da sessao atual' })
   @Get('me')
   me(@CurrentUser() user: AuthUser): AuthUser {
     return user;
