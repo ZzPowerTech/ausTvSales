@@ -4,6 +4,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { securityHeadersOptions } from './security-headers.config';
+import { setupSwagger } from './swagger';
 import { resolveTrustProxy } from './trust-proxy';
 import { validationPipeOptions } from './validation-pipe.config';
 
@@ -37,6 +38,9 @@ import { validationPipeOptions } from './validation-pipe.config';
  * 3. **CORS**, then the cookie parser, then the validation pipe. The cookie
  *    parser sits after CORS rather than before it, which is inert: `cors` reads
  *    only the `Origin` header, and a preflight carries no cookies.
+ * 4. **Swagger last.** Its session middleware reads a cookie, so it has to come
+ *    after the cookie parser, and its relaxed per-path CSP only wins over the
+ *    global one by being registered after it.
  *
  * Migrations are deliberately **not** here. They are a deploy step that belongs
  * to the real boot in `main.ts`; for the e2e job the CI workflow migrates the
@@ -77,4 +81,9 @@ export function configureApp(
   app.use(cookieParser());
 
   app.useGlobalPipes(new ValidationPipe(validationPipeOptions));
+
+  // Documentacao OpenAPI, atras da sessao. Mora aqui, e nao no `main.ts`, pela
+  // mesma razao que todo o resto: o que sobe em producao e o que a suite e2e
+  // exercita precisam ser o mesmo app.
+  setupSwagger(app);
 }
