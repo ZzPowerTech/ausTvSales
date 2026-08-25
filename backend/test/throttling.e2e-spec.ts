@@ -6,13 +6,17 @@ import { createAuthenticatedApp } from './e2e-utils';
 /**
  * Rate limiting on the dashboard reads (AusTV Admin S7.2, issue #111).
  *
- * ## Its own app instance, on purpose
+ * ## A fresh app per case, on purpose
  *
  * The throttler stores counters in memory, keyed by client, for the lifetime of
- * the process. A flood test sharing an app with other suites would leave the
- * bucket exhausted behind it and turn an unrelated assertion red — and worse, it
- * would do so intermittently, depending on execution order. A private app makes
- * this suite unable to affect anything else.
+ * the process — so a flood leaves the bucket exhausted behind it. The first
+ * version of this suite gave the *suite* its own app, which stopped it poisoning
+ * other suites but not itself: the flood case emptied the bucket and the case
+ * after it got a 429 where it expected a 200. CI caught it; the local run could
+ * not, because those cases need Postgres.
+ *
+ * So the app is rebuilt per case. Booting three apps costs a couple of seconds
+ * and buys an isolation that no ordering convention can be relied on to provide.
  *
  * ## Sequential, not parallel
  *
@@ -26,11 +30,11 @@ describe('Dashboard throttling (e2e)', () => {
 
   const CHECKS = '/health/instrumentation/checks';
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     ({ app, authCookie } = await createAuthenticatedApp());
   });
 
-  afterAll(async () => {
+  afterEach(async () => {
     await app.close();
   });
 
@@ -64,7 +68,7 @@ describe('Dashboard throttling (e2e)', () => {
     // route-scoped ThrottlerGuard, so anonymous traffic cannot consume an
     // operator's allowance. If this ever inverts, a flood of anonymous requests
     // would lock the real operator out during the incident they are responding
-    // to.
+    // to — and the 200 below is what proves it has not inverted.
     for (let i = 0; i < 10; i++) {
       expect((await http().get(CHECKS)).status).toBe(401);
     }
