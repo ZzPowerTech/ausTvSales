@@ -29,6 +29,26 @@ export interface HealthCheckObservation {
  * `checked_at` is stamped by the database (`defaultNow()`) rather than by the
  * application, so the ordering the history depends on cannot be scrambled by
  * clock skew between the API container and Postgres.
+ *
+ * ## Retiring a check name is a manual step, and it has to be
+ *
+ * There is no `delete` here and no retention policy — the price of append-only.
+ * One consequence is worth knowing before it surprises somebody: a check name
+ * that stops being written (a server renamed in `PLAN_SERVERS`, a check dropped
+ * from the registry) keeps its last row forever, so the S7.1 read model watches
+ * it age past the tolerance and reports the layer as `down` permanently.
+ *
+ * That is the correct default. Dropping the name automatically would be the same
+ * class of mistake as reading a collection gap as zero: the row *is* the
+ * evidence that something used to report and stopped. Retiring it is a
+ * deliberate act:
+ *
+ * ```sql
+ * DELETE FROM health_checks WHERE check_name = 'plan.collection_alive:NomeAntigo';
+ * ```
+ *
+ * Run it when the name is genuinely gone — never to quiet an endpoint that is
+ * telling the truth.
  */
 @Injectable()
 export class HealthCheckStore {

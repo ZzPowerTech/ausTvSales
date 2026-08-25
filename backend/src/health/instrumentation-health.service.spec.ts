@@ -217,6 +217,29 @@ describe('InstrumentationHealthService', () => {
       // different problems with different fixes.
       expect(summary.failing).toEqual([]);
     });
+
+    it('escalates to `down` once more of the registry is silent than reporting', async () => {
+      // The asymmetry this corrects: a check that ran once and went quiet makes
+      // the layer `down`, while one that NEVER ran was only `degraded` — even
+      // though it is strictly worse, being blind since day one with no baseline.
+      // The line is a strict majority so an unconfigured staging box does not
+      // sit permanently red.
+      const summary = await build(
+        [record('plan.collection_alive:Survival', 'ok')],
+        { enabled: true, intervalMinutes: 15 },
+        [
+          registered(HealthCheckName.CollectionAlive),
+          registered(HealthCheckName.VersionDivergence),
+          registered(HealthCheckName.OrphanInstance),
+        ],
+      ).summary(NOW);
+
+      expect(summary.missing).toHaveLength(2);
+      expect(summary.status).toBe('down');
+      // Still not a failure of measurement — the one check that runs is fine.
+      expect(summary.stale).toBe(false);
+      expect(summary.failing).toEqual([]);
+    });
   });
 
   describe('checks', () => {

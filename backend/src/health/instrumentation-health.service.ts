@@ -110,14 +110,21 @@ export class InstrumentationHealthService {
     // oldest verdict rather than the newest.
     const stale = records.length === 0 || staleChecks.length > 0;
     const missing = this.missing(records);
+    const { newest, oldest } = bounds(records);
 
     return {
-      status: resolveStatus(records.length, stale, counts, missing),
+      status: resolveStatus(records.length, stale, counts, {
+        missing: missing.length,
+        // Base names, not rows: one registered check emits several scoped
+        // observations, so counting rows here would compare two different
+        // things and fire the majority rule at the wrong moment.
+        reporting: new Set(
+          records.map((record) => parseCheckName(record.checkName).name),
+        ).size,
+      }),
       stale,
-      lastCheckedAt:
-        boundaryTimestamp(records, 'newest')?.toISOString() ?? null,
-      oldestCheckedAt:
-        boundaryTimestamp(records, 'oldest')?.toISOString() ?? null,
+      lastCheckedAt: newest?.toISOString() ?? null,
+      oldestCheckedAt: oldest?.toISOString() ?? null,
       total: records.length,
       counts,
       failing: records
@@ -219,20 +226,24 @@ function tally(
   return counts;
 }
 
-function boundaryTimestamp(
-  records: readonly HealthCheckRecord[],
-  which: 'newest' | 'oldest',
-): Date | null {
-  let bound: Date | null = null;
+/** Both ends of the freshness spread, in one pass. */
+function bounds(records: readonly HealthCheckRecord[]): {
+  newest: Date | null;
+  oldest: Date | null;
+} {
+  let newest: Date | null = null;
+  let oldest: Date | null = null;
+
   for (const record of records) {
-    if (
-      bound === null ||
-      (which === 'newest' ? record.checkedAt > bound : record.checkedAt < bound)
-    ) {
-      bound = record.checkedAt;
+    if (newest === null || record.checkedAt > newest) {
+      newest = record.checkedAt;
+    }
+    if (oldest === null || record.checkedAt < oldest) {
+      oldest = record.checkedAt;
     }
   }
-  return bound;
+
+  return { newest, oldest };
 }
 
 /**
@@ -272,11 +283,19 @@ function isStale(checkedAt: Date, cutoff: Date | null): boolean {
   return cutoff === null || checkedAt < cutoff;
 }
 
+/** How much of the registry is silent, for the majority rule below. */
+interface RegistryCoverage {
+  /** Registered base names with no stored verdict at all. */
+  missing: number;
+  /** Registered base names that do have one. */
+  reporting: number;
+}
+
 function resolveStatus(
   total: number,
   stale: boolean,
   counts: Record<HealthCheckStatus, number>,
-  missing: readonly string[],
+  coverage: RegistryCoverage,
 ): InstrumentationStatus {
   if (total === 0) {
     // Never measured is not healthy and it is not broken either. Saying `ok`
@@ -288,7 +307,24 @@ function resolveStatus(
     // mean the same thing to a reader: we are not measuring right now.
     return 'down';
   }
-  if (counts.breached > 0 || counts.no_data > 0 || missing.length > 0) {
+  if (coverage.missing > coverage.reporting) {
+    // ## The asymmetry this rule exists to correct
+    //
+    // A check that ran once and went quiet lands in `staleChecks` and makes the
+    // layer `down`. A check that **never** ran was only `degraded` — even though
+    // it is strictly worse: no history, no baseline, and blind since day one
+    // rather than since a moment somebody can locate.
+    //
+    // Escalating on every missing check would be wrong in the other direction: a
+    // staging box with no `PLAN_SERVERS` would sit permanently red, which is the
+    // alert fatigue `MISSED_CYCLES_BEFORE_STALE` was calibrated against. So the
+    // line is a strict majority: `>` and not `>=`, because half the registry
+    // silent is a plausible partial setup, while more silent than reporting is
+    // blindness with a green light on it. One unconfigured check stays
+    // `degraded` and says so in `missing`.
+    return 'down';
+  }
+  if (counts.breached > 0 || counts.no_data > 0 || coverage.missing > 0) {
     // A registered check with no verdict at all is not a smaller problem than a
     // breached one: part of the layer is not measuring, and it is the part
     // nobody would notice, because absence reads as fine.
