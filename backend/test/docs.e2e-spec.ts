@@ -149,6 +149,16 @@ describe('OpenAPI docs (e2e)', () => {
       expect(
         paths['/analytics/items/{itemId}/series'].get?.security,
       ).toBeUndefined();
+      // The instrumentation reads (S7.1) are guarded too, and the fact that
+      // `/health` right next to them is public is exactly why they are asserted
+      // here by name rather than assumed from the prefix.
+      expect(paths['/health/instrumentation'].get?.security).toBeUndefined();
+      expect(
+        paths['/health/instrumentation/checks'].get?.security,
+      ).toBeUndefined();
+      expect(
+        paths['/health/instrumentation/checks/{name}/history'].get?.security,
+      ).toBeUndefined();
     });
 
     it('documents the ingest routes under the API key, not the session', async () => {
