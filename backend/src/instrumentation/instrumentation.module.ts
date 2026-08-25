@@ -93,6 +93,10 @@ import { VersionDivergenceCheck } from './version-divergence.check';
     // Exported for the S7.1 read model, which needs the cadence to decide
     // whether a stored verdict is still a measurement or already a photograph.
     HealthCheckScheduler,
+    // Also for S7.1: the read model compares the registry against what the
+    // store holds, because a registered check that never wrote a verdict is
+    // absent from every count — and absence reads as fine.
+    HEALTH_CHECKS,
     PlanServersConfig,
   ],
 })

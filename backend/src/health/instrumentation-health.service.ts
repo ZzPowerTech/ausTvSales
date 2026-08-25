@@ -1,4 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
+import {
+  HEALTH_CHECKS,
+  type HealthCheck,
+} from '../instrumentation/health-check.contract';
 import {
   HealthCheckScheduler,
   type HealthCheckSchedule,
@@ -45,17 +49,48 @@ export const MISSED_CYCLES_BEFORE_STALE = 2;
  * ## `ok` is never the default answer
  *
  * The aggregate is `unknown` when nothing has ever run and `down` when the cycle
- * itself is not alive — the scheduler switched off, or the last verdict older
- * than {@link MISSED_CYCLES_BEFORE_STALE} intervals. A health endpoint that
- * answers `ok` because it has no bad news to report is the exact failure this
- * epic was built to remove: three months of a dead proxy looked like silence,
- * and silence looked like health.
+ * itself is not alive — the scheduler switched off, or a verdict older than
+ * {@link MISSED_CYCLES_BEFORE_STALE} intervals. A health endpoint that answers
+ * `ok` because it has no bad news to report is the exact failure this epic was
+ * built to remove: three months of a dead proxy looked like silence, and silence
+ * looked like health.
+ *
+ * ## Freshness is the OLDEST check, not the newest
+ *
+ * The first version of this service derived staleness from the newest row across
+ * the whole set, which answers "has *anything* run recently" and not "is *every*
+ * check still running". Those two differ in exactly the case this endpoint
+ * exists for: a check that goes quiet keeps its last row forever, contributes a
+ * stale `ok` to the counts, and is masked by any sibling that is still writing.
+ *
+ * Not hypothetical here. `CollectionAliveCheck` and `NetworkToSurvivalCheck`
+ * return no observations at all when `PLAN_SERVERS` lists no backends, so
+ * renaming a server during a deploy freezes them at their last verdict while the
+ * MySQL-backed checks keep reporting. Under a `max` the summary stays green and
+ * fresh — the founding disaster of this epic one level up, since the proxy also
+ * died *while everything else kept working*.
+ *
+ * So `stale` comes from the oldest of the newest-per-check rows, and both
+ * `lastCheckedAt` and `oldestCheckedAt` are published, so the spread is visible
+ * instead of collapsed into one reassuring number.
+ *
+ * ## A check that never ran is invisible unless we look for it
+ *
+ * `latestAll()` can only report names that have written a row at least once, so
+ * a registered check that never produced a verdict appears in neither `total`,
+ * `counts` nor `failing` — it is absent, and absence reads as fine. The registry
+ * is therefore injected and compared against what the store holds, and the
+ * difference is published as `missing`.
+ *
+ * Same shape as the `plan.orphan_instance` check itself: a thing that should be
+ * reporting and is not.
  */
 @Injectable()
 export class InstrumentationHealthService {
   constructor(
     private readonly store: HealthCheckStore,
     private readonly scheduler: HealthCheckScheduler,
+    @Inject(HEALTH_CHECKS) private readonly registry: readonly HealthCheck[],
   ) {}
 
   /** Aggregate verdict, shaped for an external uptime probe. */
@@ -64,34 +99,72 @@ export class InstrumentationHealthService {
     const schedule = this.scheduler.schedule;
     const staleAfterMinutes =
       schedule.intervalMinutes * MISSED_CYCLES_BEFORE_STALE;
+    const cutoff = staleCutoff(schedule, staleAfterMinutes, now);
 
     const counts = tally(records.map((record) => record.status));
-    const lastCheckedAt = latestTimestamp(records);
-    const stale = isStale(lastCheckedAt, schedule, staleAfterMinutes, now);
+    const staleChecks = records
+      .filter((record) => isStale(record.checkedAt, cutoff))
+      .map((record) => record.checkName)
+      .sort();
+    // One silent check is enough. That is the entire reason this looks at the
+    // oldest verdict rather than the newest.
+    const stale = records.length === 0 || staleChecks.length > 0;
+    const missing = this.missing(records);
 
     return {
-      status: resolveStatus(records.length, stale, counts),
+      status: resolveStatus(records.length, stale, counts, missing),
       stale,
-      lastCheckedAt: lastCheckedAt?.toISOString() ?? null,
+      lastCheckedAt:
+        boundaryTimestamp(records, 'newest')?.toISOString() ?? null,
+      oldestCheckedAt:
+        boundaryTimestamp(records, 'oldest')?.toISOString() ?? null,
       total: records.length,
       counts,
       failing: records
         .filter((record) => record.status !== 'ok')
         .map((record) => record.checkName)
         .sort(),
+      staleChecks,
+      missing,
       schedule: { ...schedule, staleAfterMinutes },
     };
   }
 
   /** Current verdict of every check that has ever run, newest state per name. */
-  async checks(): Promise<HealthCheckListDto> {
+  async checks(now: Date = new Date()): Promise<HealthCheckListDto> {
     const records = await this.store.latestAll();
-    const checks = records.map(toView);
+    const schedule = this.scheduler.schedule;
+    const cutoff = staleCutoff(
+      schedule,
+      schedule.intervalMinutes * MISSED_CYCLES_BEFORE_STALE,
+      now,
+    );
+
+    const checks = records.map((record) =>
+      toView(record, isStale(record.checkedAt, cutoff)),
+    );
     // Sorted by name so a diff between two polls reflects a change of state and
     // not the order Postgres happened to return the rows in.
     checks.sort((a, b) => a.name.localeCompare(b.name));
 
     return { count: checks.length, checks };
+  }
+
+  /**
+   * Registered checks with no stored verdict at all.
+   *
+   * Compared on the **base** name, because one registered check can emit several
+   * scoped observations (`plan.collection_alive:Survival`), and counting rows
+   * against registrations would be comparing two different things.
+   */
+  private missing(records: readonly HealthCheckRecord[]): string[] {
+    const present = new Set(
+      records.map((record) => parseCheckName(record.checkName).name),
+    );
+    return this.registry
+      .map((check) => check.name)
+      .filter((name) => !present.has(name))
+      .sort();
   }
 
   /**
@@ -108,12 +181,15 @@ export class InstrumentationHealthService {
       name,
       limit,
       count: records.length,
-      entries: records.map(toView),
+      // History rows are never marked stale: every entry but the first is
+      // *meant* to be old. Staleness is a property of the newest verdict, and
+      // flagging a three-week-old historical row would say nothing at all.
+      entries: records.map((record) => toView(record, false)),
     };
   }
 }
 
-function toView(record: HealthCheckRecord): HealthCheckViewDto {
+function toView(record: HealthCheckRecord, stale: boolean): HealthCheckViewDto {
   const { name, target } = parseCheckName(record.checkName);
 
   return {
@@ -121,6 +197,7 @@ function toView(record: HealthCheckRecord): HealthCheckViewDto {
     check: name,
     target,
     status: record.status,
+    stale,
     checkedAt: record.checkedAt.toISOString(),
     alertedAt: record.alertedAt?.toISOString() ?? null,
     detail: record.detail,
@@ -142,37 +219,64 @@ function tally(
   return counts;
 }
 
-function latestTimestamp(records: readonly HealthCheckRecord[]): Date | null {
-  let latest: Date | null = null;
+function boundaryTimestamp(
+  records: readonly HealthCheckRecord[],
+  which: 'newest' | 'oldest',
+): Date | null {
+  let bound: Date | null = null;
   for (const record of records) {
-    if (latest === null || record.checkedAt > latest) {
-      latest = record.checkedAt;
+    if (
+      bound === null ||
+      (which === 'newest' ? record.checkedAt > bound : record.checkedAt < bound)
+    ) {
+      bound = record.checkedAt;
     }
   }
-  return latest;
+  return bound;
 }
 
-function isStale(
-  lastCheckedAt: Date | null,
+/**
+ * The instant before which a verdict counts as stale, or `null` when every
+ * verdict is stale no matter its timestamp.
+ *
+ * `null` when the scheduler is off: nothing is running, so what is stored is a
+ * photograph of the past, and how recent the photograph is does not make the
+ * layer alive.
+ *
+ * ## Two clocks, and why comparing them is still safe here
+ *
+ * `checked_at` is stamped by Postgres — `HealthCheckStore` does that on purpose,
+ * so the ordering the history depends on cannot be scrambled by skew between the
+ * API container and the database — while `now` comes from the container.
+ * Comparing them therefore crosses clocks, and skew moves the verdict in both
+ * directions.
+ *
+ * Tolerable because the tolerance absorbs it: the default window is 30 minutes
+ * (two 15-minute cycles) and skew between two hosts of one deployment is
+ * seconds. If the window is ever tightened toward that magnitude, this has to
+ * move into the database (`now() - max(checked_at)`) instead of being reasoned
+ * about again.
+ */
+function staleCutoff(
   schedule: HealthCheckSchedule,
   staleAfterMinutes: number,
   now: Date,
-): boolean {
+): Date | null {
   if (!schedule.enabled) {
-    // Nothing is running, so whatever is stored is a photograph of the past. It
-    // does not matter how recent it is.
-    return true;
+    return null;
   }
-  if (lastCheckedAt === null) {
-    return true;
-  }
-  return now.getTime() - lastCheckedAt.getTime() > staleAfterMinutes * 60_000;
+  return new Date(now.getTime() - staleAfterMinutes * 60_000);
+}
+
+function isStale(checkedAt: Date, cutoff: Date | null): boolean {
+  return cutoff === null || checkedAt < cutoff;
 }
 
 function resolveStatus(
   total: number,
   stale: boolean,
   counts: Record<HealthCheckStatus, number>,
+  missing: readonly string[],
 ): InstrumentationStatus {
   if (total === 0) {
     // Never measured is not healthy and it is not broken either. Saying `ok`
@@ -184,7 +288,10 @@ function resolveStatus(
     // mean the same thing to a reader: we are not measuring right now.
     return 'down';
   }
-  if (counts.breached > 0 || counts.no_data > 0) {
+  if (counts.breached > 0 || counts.no_data > 0 || missing.length > 0) {
+    // A registered check with no verdict at all is not a smaller problem than a
+    // breached one: part of the layer is not measuring, and it is the part
+    // nobody would notice, because absence reads as fine.
     return 'degraded';
   }
   return 'ok';

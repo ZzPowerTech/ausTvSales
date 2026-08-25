@@ -1,17 +1,25 @@
+import type { HealthCheck } from '../instrumentation/health-check.contract';
 import { HealthCheckScheduler } from '../instrumentation/health-check.scheduler';
 import { HealthCheckStore } from '../instrumentation/health-check.store';
-import type {
-  HealthCheckRecord,
-  HealthCheckStatus,
+import {
+  HealthCheckName,
+  type HealthCheckRecord,
+  type HealthCheckStatus,
 } from '../instrumentation/health-check.types';
 import { InstrumentationHealthService } from './instrumentation-health.service';
 
 const NOW = new Date('2026-08-25T12:00:00.000Z');
 
+/** Minutes past `NOW`'s reference, as a timestamp in the past. */
+function minutesAgo(minutes: number): Date {
+  return new Date(NOW.getTime() - minutes * 60_000);
+}
+
 function record(
   checkName: string,
   status: HealthCheckStatus,
   checkedAt: Date = NOW,
+  overrides: Partial<HealthCheckRecord> = {},
 ): HealthCheckRecord {
   return {
     id: 1,
@@ -20,21 +28,53 @@ function record(
     checkedAt,
     detail: { summary: `veredito de ${checkName}` },
     alertedAt: null,
+    ...overrides,
   };
+}
+
+/** A registry entry for a base check name. `run` is never called here. */
+function registered(name: string): HealthCheck {
+  return { name, run: jest.fn() } as unknown as HealthCheck;
+}
+
+/**
+ * Registry that exactly matches the fixtures, unless a case says otherwise.
+ *
+ * The service compares the registry against what the store holds and publishes
+ * the difference as `missing`, so a default of "everything in the fixture is
+ * registered" keeps each case testing the one thing it is about. The cases that
+ * are about `missing` pass their own registry explicitly.
+ */
+function registryFor(records: readonly HealthCheckRecord[]): HealthCheck[] {
+  const names = new Set(
+    records.map((record) => record.checkName.split(':')[0]),
+  );
+  return [...names].map(registered);
 }
 
 function build(
   records: HealthCheckRecord[],
   schedule = { enabled: true, intervalMinutes: 15 },
+  registry: readonly HealthCheck[] = registryFor(records),
 ): InstrumentationHealthService {
+  // `Pick` rather than a bare cast: the service only touches these two members,
+  // and pinning them keeps a signature change failing here instead of compiling
+  // into a fake that no longer resembles the real store.
   const store = {
     latestAll: jest.fn().mockResolvedValue(records),
     history: jest.fn().mockResolvedValue(records),
-  } as unknown as HealthCheckStore;
+  } satisfies Pick<HealthCheckStore, 'latestAll' | 'history'>;
 
-  const scheduler = { schedule } as unknown as HealthCheckScheduler;
+  const scheduler = { schedule } satisfies Pick<
+    HealthCheckScheduler,
+    'schedule'
+  >;
 
-  return new InstrumentationHealthService(store, scheduler);
+  return new InstrumentationHealthService(
+    store as unknown as HealthCheckStore,
+    scheduler as unknown as HealthCheckScheduler,
+    registry,
+  );
 }
 
 describe('InstrumentationHealthService', () => {
@@ -140,15 +180,42 @@ describe('InstrumentationHealthService', () => {
       expect(summary.schedule.enabled).toBe(false);
     });
 
-    it('reports the newest timestamp across checks, not the first row', async () => {
-      const older = new Date(NOW.getTime() - 5 * 60_000);
-
+    it('does NOT let a fresh check mask a silent sibling', async () => {
+      // The bug this replaced: staleness came from the newest row across the
+      // whole set, so a check that stopped emitting kept its last `ok` forever
+      // and any sibling still writing hid it. That is the founding disaster of
+      // this epic one level up — the proxy died while everything else kept
+      // working.
       const summary = await build([
-        record('a', 'ok', older),
-        record('b', 'ok', NOW),
+        record('plan.collection_alive:Survival', 'ok', minutesAgo(90)),
+        record('plan.version_divergence', 'ok', NOW),
       ]).summary(NOW);
 
+      expect(summary.status).toBe('down');
+      expect(summary.stale).toBe(true);
+      expect(summary.staleChecks).toEqual(['plan.collection_alive:Survival']);
+      // Both ends published, so the spread is visible instead of collapsed.
       expect(summary.lastCheckedAt).toBe(NOW.toISOString());
+      expect(summary.oldestCheckedAt).toBe(minutesAgo(90).toISOString());
+    });
+
+    it('reports a registered check that never wrote a verdict', async () => {
+      // It cannot appear in `total` or in `counts`, because there is no row —
+      // and absence reads as fine. This is the only place it becomes visible.
+      const summary = await build(
+        [record('plan.collection_alive:Survival', 'ok')],
+        { enabled: true, intervalMinutes: 15 },
+        [
+          registered(HealthCheckName.CollectionAlive),
+          registered(HealthCheckName.VersionDivergence),
+        ],
+      ).summary(NOW);
+
+      expect(summary.missing).toEqual([HealthCheckName.VersionDivergence]);
+      expect(summary.status).toBe('degraded');
+      // Not folded into `failing`: "never measured" and "measured and bad" are
+      // different problems with different fixes.
+      expect(summary.failing).toEqual([]);
     });
   });
 
@@ -171,6 +238,35 @@ describe('InstrumentationHealthService', () => {
       ]).checks();
 
       expect(checks[0].target).toBeNull();
+    });
+
+    it('marks the individual check that went silent', async () => {
+      // The summary says the layer is stale; this says WHICH one, which is the
+      // difference between an alert and an investigation.
+      const { checks } = await build([
+        record('plan.collection_alive:Survival', 'ok', minutesAgo(90)),
+        record('plan.version_divergence', 'ok', NOW),
+      ]).checks(NOW);
+
+      const byName = new Map(checks.map((check) => [check.name, check.stale]));
+
+      expect(byName.get('plan.collection_alive:Survival')).toBe(true);
+      expect(byName.get('plan.version_divergence')).toBe(false);
+    });
+
+    it('round-trips an announced verdict and a null detail', async () => {
+      // `alertedAt` non-null and `detail` null are the two nullable branches of
+      // the mapping, and both are contract fields.
+      const alertedAt = minutesAgo(3);
+      const { checks } = await build([
+        record('plan.version_divergence', 'breached', NOW, {
+          alertedAt,
+          detail: null,
+        }),
+      ]).checks(NOW);
+
+      expect(checks[0].alertedAt).toBe(alertedAt.toISOString());
+      expect(checks[0].detail).toBeNull();
     });
 
     it('orders by name so a diff between polls means a change of state', async () => {

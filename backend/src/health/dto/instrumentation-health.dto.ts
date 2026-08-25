@@ -83,19 +83,33 @@ export class InstrumentationSummaryDto {
 
   @ApiProperty({
     description:
-      'True quando o veredito mais novo passou da tolerancia, o agendamento ' +
-      'esta desligado, ou nada nunca rodou. Vem ao lado de `status`, e nao ' +
-      'dentro dele, para que "um check falhou" e "paramos de olhar" sejam ' +
-      'distinguiveis sem abrir a lista.',
+      'True quando QUALQUER check passou da tolerancia, o agendamento esta ' +
+      'desligado, ou nada nunca rodou. Vem do check mais VELHO, nunca do mais ' +
+      'novo: um irmao que continua escrevendo mascararia o que emudeceu, que e ' +
+      'exatamente o caso para o qual este endpoint existe. Fica ao lado de ' +
+      '`status`, e nao dentro dele, para que "um check falhou" e "paramos de ' +
+      'olhar" sejam distinguiveis sem abrir a lista.',
   })
   stale!: boolean;
 
   @ApiProperty({
     type: String,
     nullable: true,
-    description: 'ISO-8601, ou null quando nenhum check jamais rodou.',
+    description:
+      'Veredito mais NOVO, em ISO-8601, ou null quando nada nunca rodou. Bom ' +
+      'para exibir; nao serve para decidir frescor.',
   })
   lastCheckedAt!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Veredito mais VELHO entre os atuais, em ISO-8601. E o numero que decide ' +
+      '`stale`, e a distancia entre ele e `lastCheckedAt` mostra se a camada ' +
+      'esta correndo junto ou se algo ficou para tras.',
+  })
+  oldestCheckedAt!: string | null;
 
   @ApiProperty({
     description: 'Quantos checks distintos tem veredito gravado.',
@@ -111,6 +125,25 @@ export class InstrumentationSummaryDto {
       'Nomes persistidos de todo check cujo veredito atual nao e `ok`.',
   })
   failing!: string[];
+
+  @ApiProperty({
+    type: [String],
+    description:
+      'Checks cujo veredito atual passou da tolerancia — pararam de rodar, mas ' +
+      'a ultima linha continua la. Separado de `failing` de proposito: ' +
+      '"mediu e deu ruim" e "parou de medir" pedem acoes diferentes.',
+  })
+  staleChecks!: string[];
+
+  @ApiProperty({
+    type: [String],
+    description:
+      'Checks registrados que nunca gravaram veredito nenhum. Nao aparecem em ' +
+      '`total` nem em `counts` porque nao existe linha deles — e ausencia se le ' +
+      'como tudo bem. Mesma forma do proprio check `plan.orphan_instance`: ' +
+      'algo que deveria estar reportando e nao esta.',
+  })
+  missing!: string[];
 
   @ApiProperty({ type: InstrumentationScheduleDto })
   schedule!: InstrumentationScheduleDto;
@@ -174,6 +207,14 @@ export class HealthCheckViewDto {
 
   @ApiProperty({ enum: HEALTH_CHECK_STATUSES })
   status!: HealthCheckStatus;
+
+  @ApiProperty({
+    description:
+      'True quando ESTE check passou da tolerancia — o veredito continua ' +
+      'gravado, mas parou de ser renovado. Sempre false no historico, onde toda ' +
+      'linha alem da primeira e velha por definicao.',
+  })
+  stale!: boolean;
 
   @ApiProperty({
     description: 'ISO-8601. Carimbado pelo banco, nunca pelo container da API.',
