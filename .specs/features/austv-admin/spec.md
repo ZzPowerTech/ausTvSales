@@ -63,11 +63,23 @@ reais:
 | Frontend | `ausTvSales` = Angular 19 + Signals. Plan = React/Bootstrap/HighCharts |
 | Manutenção | ~7.090 commits, 189 releases, 12 módulos Gradle |
 
-Endpoints: `/v1/serverOverview` · `/v1/onlineOverview` · `/v1/playerbaseOverview` ·
-`/v1/performanceOverview` · `/v1/playersTable` · `/v1/sessions` · `/v1/player?player=<uuid>` ·
-`/player/<uuid>/raw` ·
-`/v1/graph?type=uniqueAndNew|activity|punchCard|worldPie|geolocation|calendar|aggregatedPing`.
-Lista atual em `/docs` do webserver.
+Endpoints, **conforme o OpenAPI lido em 2026-08-26** em `/docs` do webserver:
+
+**Leitura:** `/v1/networkMetadata` (lista de servidores) · `/v1/retention` · `/v1/query` +
+`/v1/filters` · `/v1/sessions` · `/v1/playersTable` · `/v1/joinAddresses` · `/v1/kills` ·
+`/v1/player` · `/v1/playersOnline` · `/v1/graph?type=…` · `/v1/pluginHistory` ·
+`/v1/datapoint?type=…` · `/v1/version` · `/v1/whoami` · `/v1/metadata` · `/v1/errors`.
+
+**Escrita e autenticação — a API do Plan NÃO é somente leitura:** `POST /auth/login` ·
+`GET /auth/register` · `POST /v1/saveGroupPermissions` · `DELETE /v1/deleteGroup` ·
+`POST /v1/saveTheme` · `POST /v1/deleteTheme` · `POST /v1/storePreferences`. Esta camada nunca os
+chama, mas eles existem na mesma porta e importam para a superfície de ataque da §8 — detalhe no
+[`HANDOFF.md`](HANDOFF.md).
+
+> ⚠️ `/v1/serverOverview` e `/v1/onlineOverview` — que a S6.3 e a S7.2 consomem — **não constam do
+> OpenAPI**, embora funcionassem em 23/08 e 25/08. `/v1/performanceOverview` e `/v1/players` constam
+> marcados `deprecated`. `/v1/playerbaseOverview` e `/player/<uuid>/raw`, que esta lista citava, não
+> aparecem. Detalhe em [`HANDOFF.md`](HANDOFF.md).
 
 ### ADR-002 — NestJS fala com `/v1/*`, nunca com as tabelas do Plan
 
@@ -76,8 +88,8 @@ documentadas e isoladas em módulo próprio**, sempre em usuário **read-only**:
 
 | # | escopo | tabelas | por quê a API não serve |
 |---|---|---|---|
-| 1 | Coorte histórica (§6.2, S8.2) | `plan_users`, `plan_user_info`, `plan_sessions` | agregação por coorte × plataforma não existe em nenhum endpoint |
-| 2 | **Inventário de instâncias e chegadas de rede (§6.1, S6.3)** — *aprovada em 2026-08-23, estendida no mesmo dia* | **`plan_servers` e `plan_users`** | o Plan **não expõe lista de servidores** (`/v1/servers` e `/v1/networkOverview` retornam **404**), e a contagem de chegadas **de rede** não sai de nenhum endpoint derivado de sessão — o proxy grava usuário, não sessão |
+| 1 | Coorte histórica (§6.2, S8.2) | `plan_users`, `plan_user_info`, `plan_sessions` | agregação por coorte × plataforma não existe em nenhum endpoint — *(2026-08-26: `/v1/retention` é candidato **não avaliado**; mesma classe de afirmação de ausência que caiu na exceção 2. Ver [`HANDOFF.md`](HANDOFF.md))* |
+| 2 | **Inventário de instâncias e chegadas de rede (§6.1, S6.3)** — *aprovada em 2026-08-23; **premissa desmentida em 2026-08-26**, ver nota abaixo* | **`plan_servers` e `plan_users`** | ~~o Plan não expõe lista de servidores~~ — **falso**: `/v1/servers` e `/v1/networkOverview` dão 404 por serem nomes errados; o endpoint documentado é **`/v1/networkMetadata`**. A parte sobre chegadas de rede não foi reavaliada |
 
 #### Exceção 2 — inventário de instâncias (2026-08-23)
 
@@ -85,11 +97,18 @@ documentadas e isoladas em módulo próprio**, sempre em usuário **read-only**:
 cada um roda*:
 
 - `plan.orphan_instance` — servidor registrado no Plan sem dado recente
+  > ⚠️ **A frase acima descreve a intenção, não o check construído.** O
+  > `OrphanInstanceCheck` reconcilia duas **listas** (`plan_servers` ×
+  > `PLAN_SERVERS`) e não olha recência: recência por servidor exigiria
+  > `plan_sessions`, que está **fora** desta exceção. Ver o docblock de
+  > `orphan-instance.check.ts`. Esta divergência entre a redação e o
+  > comportamento já produziu uma conclusão errada em 2026-08-26.
 - `plan.version_divergence` — builds diferentes entre instâncias, que corrompem schema compartilhado
   (ADR-005)
 
-**Por que a API não resolve.** Não há endpoint de catálogo. `/v1/serverOverview` responde por *um*
-servidor, endereçado por nome, e não carrega versão. Sem lista, `orphan_instance` só poderia checar
+**Por que a API não resolve.** ~~Não há endpoint de catálogo.~~ — **falso, corrigido em
+2026-08-26: existe `/v1/networkMetadata`. Ver a nota ao fim desta seção.** `/v1/serverOverview`
+responde por *um* servidor, endereçado por nome, e não carrega versão. Sem lista, `orphan_instance` só poderia checar
 servidores que alguém já configurou à mão — o que dá atestado de saúde **exatamente no caso que o
 check existe para pegar**: a instância que ninguém sabia que existia.
 
@@ -124,6 +143,38 @@ tabela de identidade — das mais estáveis do schema do Plan.
 4. **Credencial em variável de ambiente**, nunca versionada.
 5. **Degradação honesta:** banco inalcançável → os dois checks reportam `error` com o motivo, nunca
    `ok` e nunca zero.
+
+> ### ⚠️ A premissa desta exceção caiu em 2026-08-26
+>
+> O `/docs` do webserver do Plan serve um OpenAPI completo, e ele lista
+> **`GET /v1/networkMetadata`** — *"metadata about the network such as list of servers"*.
+>
+> A investigação de 23/08 tentou `/v1/servers` e `/v1/networkOverview`, levou 404, e concluiu que o
+> Plan não expunha a lista. Os dois nomes estavam errados. **Esta exceção foi aberta com o argumento
+> de que não havia alternativa, e havia.**
+>
+> **O que isso não decide:** se o `networkMetadata` traz `plan_version` por instância. O check
+> `plan.version_divergence` precisa disso, e sem verificar o corpo a exceção não pode ser fechada —
+> ela apenas perdeu o motivo alegado. O mesmo vale para a metade de `plan_users`: o
+> `/v1/playersTable` documenta `registered` por jogador, mas ninguém conferiu se serve.
+>
+> **Sem decisão tomada.** Enquanto a exceção estiver de pé, o `PlanDatabase` mantém credencial de
+> MySQL e uma conexão que o ADR-002 existe para evitar.
+>
+> Contra isso pesa um argumento **estrutural** — e a palavra importa: sob 403 na API, os três checks
+> que leem o `PlanDatabase` continuariam respondendo **pela topologia do código**, não por
+> observação. **Ninguém executou os checks durante o 403**, e não se sabe sequer se a VPS foi
+> afetada: o 403 foi visto de uma máquina residencial. Fechar a exceção sem substituir a fonte
+> plausivelmente trocaria dívida de acoplamento por perda de cobertura; "plausivelmente" é o
+> quanto a evidência sustenta.
+>
+> **Gatilho de reavaliação:** ler o corpo de `/v1/networkMetadata` e confirmar se traz `plan_version`
+> e recência por instância. Antes disso não há decisão a tomar. Detalhe no
+> [`HANDOFF.md`](HANDOFF.md).
+>
+> Erro de método, do mesmo tipo que este projeto já registrou quatro vezes: **concluir ausência a
+> partir de uma busca que não achou**, em vez de consultar a fonte que enumera. A fonte existia em
+> `/docs` o tempo todo.
 
 **Custo aceito.** `plan_servers` e `plan_users` são schema interno e podem mudar entre versões do
 Plan. É acoplamento real, e a mitigação é o tamanho do alvo: duas tabelas, seis colunas no total
@@ -331,11 +382,17 @@ Reutiliza os componentes de gráfico da Sprint 5 do `ausTvSales`.
 
 Cada check roda periodicamente e **alerta ativamente no Discord** quando falha.
 
+> ⚠️ **Esta tabela é a intenção; o código é o contrato.** Os identificadores aqui são idênticos aos
+> nomes das classes de check, o que faz *ler esta seção parecer* ler o check — e não é. Onde a
+> implementação divergiu da redação, a divergência está anotada na própria linha. Duas já
+> divergiram, e a confusão entre as duas coisas já custou uma conclusão errada
+> (`HANDOFF.md`, erro 5 e a correção de 2026-08-26).
+
 | check | condição de alerta | desastre que teria evitado |
 |---|---|---|
 | Coleta viva por servidor | nenhuma sessão nova em 6h num servidor que deveria estar online | proxy morto de maio a agosto/2026 |
-| Registro vivo no proxy | nenhum `plan_users.registered` novo em 24h | idem |
-| Instância órfã | servidor em `plan_servers` sem dado recente | Plan em SQLite invisível |
+| Registro vivo no proxy | nenhum `plan_users.registered` novo em 24h — o check lê `PlanDatabase.networkArrivals()`, **não** `/v1/graph?type=uniqueAndNew` como o `HANDOFF.md` de 23/08 supunha | idem |
+| Instância órfã | servidor em `plan_servers` sem dado recente — ⚠️ o check **construído** reconcilia listas, não recência (ver ADR-002, exceção 2) | Plan em SQLite invisível |
 | Versões divergentes | builds diferentes entre instâncias | risco de corromper schema |
 | **Taxa de entrada no tutorial** ⚠️ | `novatos_no_tutorial / novatos_no_survival` cai abaixo de 70% por 3 dias | tutorial sem capturar por 8 meses |
 
