@@ -30,11 +30,6 @@ fora de contexto.
 ## ⚠️ Erros já cometidos — não repetir
 
 **Cinco** afirmações foram feitas com confiança e estavam **erradas**. Todas pela mesma causa raiz.
-**5. "O Plan não expõe lista de servidores."** Falso, descoberto em 2026-08-26. Os dois nomes
-tentados (`/v1/servers`, `/v1/networkOverview`) estavam errados; o endpoint documentado é
-**`/v1/networkMetadata`**. A conclusão errada virou a justificativa da exceção 2 do ADR-002.
-Contexto longo na seção
-[A lista autoritativa de endpoints do Plan](#-a-lista-autoritativa-de-endpoints-do-plan-foi-encontrada-2026-08-26).
 
 **1. "O colapso de aquisição começou em dezembro/2025."** Falso. A série usada vinha do
 `Quests/playerdata` e media **quem entrou no tutorial**, não quem chegou. Em dezembro o tutorial
@@ -55,6 +50,12 @@ software da equipe. Ou seja, a história foi escrita, estimada em 5 SP e marcada
 bloqueante sobre um sistema que a equipe **não escreveu e não controla**. A estimativa de 3.028 não
 tem origem rastreável — e nunca terá, porque o acervo não sai do banco do fornecedor. A história
 foi **cancelada** em 2026-08-22, com a perda dos registros antigos aceita pelo dono.
+
+**5. "O Plan não expõe lista de servidores."** Falso, descoberto em 2026-08-26. Os dois nomes
+tentados — `/v1/servers` e `/v1/networkOverview` — estavam errados; o endpoint documentado é
+**`/v1/networkMetadata`**. A conclusão errada virou a justificativa da **exceção 2 do ADR-002**, que
+autorizou ler `plan_servers` por SQL direto. Contexto na seção
+[A lista autoritativa de endpoints do Plan](#-a-lista-autoritativa-de-endpoints-do-plan-foi-encontrada-2026-08-26).
 
 > **Lição de método, aplicável a tudo:** série derivada de plugin mede o comportamento **daquele
 > plugin**, não a realidade. Confirmar com uma segunda fonte independente antes de tratar qualquer
@@ -257,6 +258,10 @@ tutorial parou de capturar novatos em dez/2025 e a taxa caiu de ~100% para 12% a
 
 ### O que impede declarar a S6.3 concluída
 
+> **Esta seção é um retrato de 2026-08-23** e várias linhas dela envelheceram: os seis checks com
+> fonte foram implementados desde então, e a "decisão pendente do dono" sobre a exceção 2 foi
+> tomada no mesmo dia. As anotações de 2026-08-26 nas linhas abaixo são a exceção, e estão datadas.
+
 **1. Seis dos sete checks da §6.1 não existem.** Três deles **não têm fonte de dado**:
 
 | check | situação | o que falta |
@@ -265,8 +270,8 @@ tutorial parou de capturar novatos em dez/2025 e a taxa caiu de ~100% para 12% a
 | `funnel.network_to_survival` | construível já | `serverOverview` de dois servidores |
 | `plan.proxy_registration_alive` | bloqueado | shape de `/v1/graph?type=uniqueAndNew` |
 | `platform.offline_account_share` | bloqueado | shape de `/v1/playersTable` |
-| `plan.orphan_instance` | **sem fonte** *(premissa corrigida em 2026-08-26)* | A justificativa registrada — "o Plan não expõe lista de servidores" — era **falsa**: `/v1/servers` e `/v1/networkOverview` dão 404 por serem nomes errados. O candidato é **`/v1/networkMetadata`**, cuja descrição promete lista de servidores. Mas este check precisa de **dado recente por servidor**, e a descrição não promete isso; ninguém leu o corpo. Segue sem fonte verificada |
-| `plan.version_divergence` | **sem fonte** | `plan_version` só existe em `plan_servers` — mesmo bloqueio do ADR-002 |
+| `plan.orphan_instance` | ~~**sem fonte**~~ — **implementado**; premissa corrigida em 2026-08-26 | ~~Plan não expõe lista de servidores — `/v1/servers` e `/v1/networkOverview` dão 404~~ — **falso, os nomes estavam errados.** O endpoint é **`/v1/networkMetadata`**, descrito como lista de servidores. E o check **como construído** não usa recência por servidor: ele reconcilia duas LISTAS (`plan_servers` × `PLAN_SERVERS`), e o docblock dele diz que recência exigiria `plan_sessions`, fora da exceção 2. Ou seja, uma lista de servidores plausivelmente basta — falta ler o corpo para confirmar |
+| `plan.version_divergence` | **implementado** sobre a exceção 2 | `plan_version` por instância. **É aqui que a pergunta aberta se concentra**: a descrição do `/v1/networkMetadata` promete lista de servidores e não diz nada sobre versão. Sem ler o corpo, este é o check que impede fechar a exceção 2 |
 | `funnel.tutorial_entry_rate` | **sem fonte** | Plan não coleta nada de tutorial (bloco anterior deste documento) |
 
 **Decisão pendente do dono:** abrir uma segunda exceção documentada ao ADR-002 (SQL read-only sobre
@@ -484,9 +489,10 @@ leu o conteúdo dela. A leitura ter funcionado é, se alguma coisa, indício de 
 permitido. E o 403 de horas depois tem "whitelist ajustada" entre as causas candidatas — o que
 concede que uma whitelist governa este caminho.
 
-Portanto: **se** aquele IP não estiver na whitelist — não verificado — então a superfície de leitura
-está aberta a qualquer origem, e a pergunta seguinte é se a de escrita também está. Nessa hipótese,
-qualquer um que alcance a 25504 altera permissões web.
+Portanto: **se** aquele IP não estiver na whitelist — não verificado — então a superfície de
+**leitura** está aberta a qualquer origem. Se a de **escrita** também está é pergunta separada e não
+sondada, e o pior caso dela — qualquer um que alcance a 25504 alterando permissões web — depende das
+duas hipóteses, não de uma.
 
 Verificação, nesta ordem: **ler a whitelist no `config.yml` do Plan**, depois `/v1/whoami`. **Antes
 do unban all**, que é quando o servidor ganha atenção.
@@ -537,11 +543,14 @@ Mais as rotas de `metrics` da S7.2, que degradam por inteiro.
 > acusação em vez de um registro — mas rotulá-lo errado seria cometer, dentro dela, o erro que ela
 > veio catalogar.
 
-**E o alerta que sair vai apontar para o lugar errado.** O `PlanApiClient` mapeia **401 e 403 para o
-mesmo `PlanAuthError`** (`plan-api.client.ts`), cuja taxonomia diz *"nossa credencial está errada ou
-expirou — bug nosso, não queda"*. Ou seja: sob o 403 observado, o sistema **afirma uma causa** entre
-as quatro possíveis e manda quem investiga atrás do token — que este mesmo documento acabou de
-registrar como estando no esquema errado. Colapsar 401 e 403 vira dívida a corrigir.
+**E o alerta que sair vai rotular a causa errada.** O `PlanApiClient` mapeia **401 e 403 para o
+mesmo `PlanAuthError`** (`plan-api.client.ts`). A mensagem é razoável e já cita as duas pistas —
+*"Plan recusou a credencial (HTTP 403) em … — verifique PLAN_API_TOKEN **e a whitelist de IP do
+Plan**"*. O problema está um nível acima: o docblock da classe (`plan-api.errors.ts`) declara que
+esta falha significa *"nossa credencial está errada ou expirou — **bug nosso, não queda**"*.
+
+Sob um 403 de whitelist isso é um rótulo causal errado, e é o rótulo que o alerta carrega. Colapsar
+401 e 403 numa classe só vira dívida a corrigir.
 
 **Não é o risco da §10b.** Aquele é restrição de IP no nível do provedor quebrando o **ETL na
 3306**. Isto é filtro de aplicação na 25504 e não toca o caminho do ETL. São dois caminhos de dado
