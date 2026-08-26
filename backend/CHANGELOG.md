@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.14.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.13.0...backend-v0.14.0) (2026-08-26)
+
+
+### Features
+
+* **backend:** adapter do /v1/onlineOverview sobre payload real (S7.2) ([e59c6ab](https://github.com/ZzPowerTech/ausTvSales/commit/e59c6ab02159e24fdfd1fcf1a8bb2d4f48efd8ed)), closes [#111](https://github.com/ZzPowerTech/ausTvSales/issues/111)
+* **backend:** agendador publica a cadencia configurada ([bca216e](https://github.com/ZzPowerTech/ausTvSales/commit/bca216efcc25378b4efe5bb8a1d14ed3faa26717)), closes [#110](https://github.com/ZzPowerTech/ausTvSales/issues/110)
+* **backend:** cache com TTL por endpoint na frente do Plan (S7.2) ([fac63b4](https://github.com/ZzPowerTech/ausTvSales/commit/fac63b4be476d5667aa84fd03c9b5622a62bc4b7)), closes [#111](https://github.com/ZzPowerTech/ausTvSales/issues/111)
+* **backend:** documentacao OpenAPI servida atras da sessao ([d715cf8](https://github.com/ZzPowerTech/ausTvSales/commit/d715cf843cd03a4a2e9f4d3116cb56bb75bab8ac))
+* **backend:** documentação OpenAPI servida atrás da sessão (S7) ([a0622db](https://github.com/ZzPowerTech/ausTvSales/commit/a0622db564d79593daa7dadc4a62d40fd7731115))
+* **backend:** modulo health expoe os checks de instrumentacao (S7.1) ([fdc6ade](https://github.com/ZzPowerTech/ausTvSales/commit/fdc6ade0411b63cbd3618b37a963d4e6de03cc1f)), closes [#110](https://github.com/ZzPowerTech/ausTvSales/issues/110)
+* **backend:** módulo health expõe os checks de instrumentação (S7.1) ([5651fe1](https://github.com/ZzPowerTech/ausTvSales/commit/5651fe1aaf593b3b9a3aa43768274a7f1b00af9b))
+* **backend:** módulo metrics — client do Plan, cache e visão de servidor (S7.2) ([5eaa812](https://github.com/ZzPowerTech/ausTvSales/commit/5eaa812346371eced2acd15569f136c3ab20e07b))
+* **backend:** modulo metrics — visao de servidor e de online normalizadas (S7.2) ([ecb9b3d](https://github.com/ZzPowerTech/ausTvSales/commit/ecb9b3d9335c62f7433e80dccb0f9fb422b6df09)), closes [#111](https://github.com/ZzPowerTech/ausTvSales/issues/111)
+* **backend:** rate limit nas leituras de saude da instrumentacao ([3b972a4](https://github.com/ZzPowerTech/ausTvSales/commit/3b972a4792c12b80c9ff272568389f6e2dcf46c4)), closes [#111](https://github.com/ZzPowerTech/ausTvSales/issues/111)
+
+
+### Bug Fixes
+
+* **backend:** charset do nome do check aceita o que PLAN_SERVERS pode conter ([9d26ea5](https://github.com/ZzPowerTech/ausTvSales/commit/9d26ea522ec90cee4991d81dd621e4ff0841a4f0)), closes [#110](https://github.com/ZzPowerTech/ausTvSales/issues/110)
+* **backend:** CORP volta a same-origin; HSTS e COOP viram decisao escrita ([b67fda1](https://github.com/ZzPowerTech/ausTvSales/commit/b67fda1ef2d7a585fb1f86b306cd5f2f824a5f4c)), closes [#111](https://github.com/ZzPowerTech/ausTvSales/issues/111)
+* **backend:** corrige o que o limite do dashboard realmente cobre ([4445e44](https://github.com/ZzPowerTech/ausTvSales/commit/4445e44bf78a1ba67c17d20d5825bbd27adbac94)), closes [#111](https://github.com/ZzPowerTech/ausTvSales/issues/111)
+* **backend:** e2e de throttling reconstroi o app a cada caso ([b7457b0](https://github.com/ZzPowerTech/ausTvSales/commit/b7457b0cd536497c9f15a85bd0c68652b209fe8c)), closes [#111](https://github.com/ZzPowerTech/ausTvSales/issues/111)
+* **backend:** frescor do agregado vem do check mais VELHO, nao do mais novo ([405805b](https://github.com/ZzPowerTech/ausTvSales/commit/405805bb0c841130bb88faef1e7a495431d98fd6)), closes [#110](https://github.com/ZzPowerTech/ausTvSales/issues/110)
+* **backend:** leituras concorrentes compartilham uma busca ao Plan ([42eb3c9](https://github.com/ZzPowerTech/ausTvSales/commit/42eb3c95f028f62a2ef8ef84c1f2bdb8f7345c67)), closes [#111](https://github.com/ZzPowerTech/ausTvSales/issues/111)
+* **backend:** motivo da falha e rotulo fechado, nao a mensagem crua do Plan ([824d314](https://github.com/ZzPowerTech/ausTvSales/commit/824d314bb28e1b7985ecfde8bda5958e27484fe0)), closes [#111](https://github.com/ZzPowerTech/ausTvSales/issues/111)
+* **backend:** o documento OpenAPI deixa de mentir sobre autenticacao ([46b01e2](https://github.com/ZzPowerTech/ausTvSales/commit/46b01e24044a17e11d660b5f776c2ae9323cd05d))
+* **backend:** registro majoritariamente silencioso rebaixa o agregado para down ([b00944d](https://github.com/ZzPowerTech/ausTvSales/commit/b00944d18f3ff4efaea15e0d0b0f518ffd26a058)), closes [#110](https://github.com/ZzPowerTech/ausTvSales/issues/110)
+* **backend:** rejeicao do verify tratada sem engolir falha do allowlist ([9f0034f](https://github.com/ZzPowerTech/ausTvSales/commit/9f0034f75fce1ef00666f2eedb492ec342260efc))
+* **backend:** remove o campo de motivo cru e fecha a corrida do clear() ([21a21f9](https://github.com/ZzPowerTech/ausTvSales/commit/21a21f9a5ba99744afdf1e805f44540b7829c21b)), closes [#111](https://github.com/ZzPowerTech/ausTvSales/issues/111)
+* **backend:** requisicoes do e2e de assets em serie, nao em paralelo ([2f053c5](https://github.com/ZzPowerTech/ausTvSales/commit/2f053c5dc5177cf26c9a2a4272914d96005af36c))
+
 ## [0.13.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.12.0...backend-v0.13.0) (2026-08-23)
 
 
