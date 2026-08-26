@@ -24,7 +24,6 @@ describe('PlanCache', () => {
       value: { players: 8 },
       storedAt: T0,
       ageMs: 0,
-      reason: null,
       error: null,
     });
     expect(fetch).toHaveBeenCalledTimes(1);
@@ -87,7 +86,8 @@ describe('PlanCache', () => {
     // The real age, not a rounded-up one. A stale value that lies about how old
     // it is defeats the point of admitting it is stale.
     expect(result.ageMs).toBe(TTL + 5_000);
-    expect(result.reason).toBe('Plan inalcancavel em http://x/v1/y');
+    // The message itself is logged and goes no further — see `CacheResult`.
+    expect(result.error).toBeInstanceOf(Error);
   });
 
   it('reports unavailable with a null value when there is nothing cached', async () => {
@@ -103,7 +103,6 @@ describe('PlanCache', () => {
       value: null,
       storedAt: null,
       ageMs: null,
-      reason: 'recusou',
       error: expect.any(Error) as Error,
     });
   });
@@ -209,6 +208,35 @@ describe('PlanCache', () => {
     expect(result.outcome).toBe('stale');
     expect(result.value).toBe('bom');
     expect(result.storedAt).toEqual(T0);
+  });
+
+  it('does not let a clear mid-flight reopen the stampede', async () => {
+    // `clear()` empties the in-flight map, but a leader already running still
+    // reaches its `finally`. An unconditional delete there would remove the
+    // registration of the NEWER leader and let the reader after it start a
+    // second concurrent fetch — the exact thing single-flight closes.
+    let releaseFirst!: (value: string) => void;
+    const first = new Promise<string>((resolve) => (releaseFirst = resolve));
+    let releaseSecond!: (value: string) => void;
+    const second = new Promise<string>((resolve) => (releaseSecond = resolve));
+    const fetch = jest
+      .fn()
+      .mockReturnValueOnce(first)
+      .mockReturnValueOnce(second);
+
+    const firstRead = cache.read('k', TTL, fetch, T0);
+    cache.clear();
+    const secondRead = cache.read('k', TTL, fetch, T0);
+    // The stale leader finishes last, after a new one is registered.
+    releaseSecond('novo');
+    await secondRead;
+    releaseFirst('velho');
+    await firstRead;
+
+    // A third reader must join the surviving entry, not open a third fetch.
+    await cache.read('k', TTL, fetch, T0);
+
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 
   it('forgets everything on clear', async () => {

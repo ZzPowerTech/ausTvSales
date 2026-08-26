@@ -23,19 +23,17 @@ export interface CacheResult<T> {
   /** Age of the served value in milliseconds. Null when unavailable. */
   ageMs: number | null;
   /**
-   * The full failure message. Log-only — see the class doc.
-   *
-   * Carries the Plan URL and, for some failures, an excerpt of Plan's own
-   * response body. Useful to whoever is debugging, and not something to hand a
-   * browser.
-   */
-  reason: string | null;
-  /**
    * The failure itself, for a caller that needs to classify it.
    *
-   * Handed over rather than pre-classified here: this class knows about caching,
-   * not about Plan's error taxonomy, and teaching it would put the same
-   * knowledge in two places.
+   * Handed over rather than pre-classified here: this class is generic over
+   * `fetch`, so teaching it Plan's error taxonomy would weld a reusable cache to
+   * one upstream — and the S8.2 cohort module is a second consumer waiting.
+   *
+   * There is deliberately **no** `reason: string` beside it. The raw message
+   * carries the Plan URL and, for some failures, an excerpt of Plan's own
+   * response body; it is logged here and goes no further. A field holding it on
+   * the object the service passes around is a spread away from being republished,
+   * which is the bug this contract was already corrected for once.
    */
   error: unknown;
 }
@@ -140,7 +138,6 @@ export class PlanCache {
         value: cached.value as T,
         storedAt: cached.storedAt,
         ageMs: age,
-        reason: null,
         error: null,
       };
     }
@@ -152,7 +149,6 @@ export class PlanCache {
         value: value as T,
         storedAt: startedAt,
         ageMs: Math.max(0, now.getTime() - startedAt.getTime()),
-        reason: null,
         error: null,
       };
     } catch (error) {
@@ -165,7 +161,6 @@ export class PlanCache {
           value: cached.value as T,
           storedAt: cached.storedAt,
           ageMs: age,
-          reason,
           error,
         };
       }
@@ -176,7 +171,6 @@ export class PlanCache {
         value: null,
         storedAt: null,
         ageMs: null,
-        reason,
         error,
       };
     }
@@ -223,7 +217,15 @@ export class PlanCache {
     } finally {
       // `finally`, not the success path: a rejection that left the entry behind
       // would make every later caller await an already-failed promise forever.
-      this.inFlight.delete(key);
+      //
+      // Guarded on identity because `clear()` can empty the map mid-flight. An
+      // unconditional delete would then remove the registration of a *newer*
+      // leader started after the clear, and the reader after that would open a
+      // second concurrent fetch for the same key — the stampede this method
+      // exists to close, reintroduced by the cleanup of the previous one.
+      if (this.inFlight.get(key)?.promise === promise) {
+        this.inFlight.delete(key);
+      }
     }
   }
 

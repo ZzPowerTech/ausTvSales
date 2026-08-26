@@ -46,8 +46,14 @@ import {
  *
  * The payload also carries an `insights` block —
  * `first_session_length_median`, `lone_joins`, `players_first_join_avg`. None of
- * it is mapped, because §7's entity list does not contain it and S7.2 is about
- * the server and online views.
+ * it is mapped, and the reason that matters is not that §7 omits it.
+ *
+ * **None of those fields carries a window suffix.** Every field in `numbers` is
+ * `<metric>_24h` / `_7d` / `_30d`; these are bare. So there is no way to state
+ * whether `lone_joins: 0` covers a day, a month or the server's lifetime —
+ * and publishing an unwindowed zero into a contract whose entire premise is that
+ * zero is not the same as no-data would be this epic's own failure mode,
+ * committed by the module built to prevent it.
  *
  * Saying so explicitly because two of those are the most on-point onboarding
  * numbers Plan produces, and an undocumented omission would get rediscovered as
