@@ -65,10 +65,16 @@ reais:
 
 Endpoints, **conforme o OpenAPI lido em 2026-08-26** em `/docs` do webserver:
 
-`/v1/networkMetadata` (lista de servidores) · `/v1/retention` · `/v1/query` + `/v1/filters` ·
-`/v1/sessions` · `/v1/playersTable` · `/v1/joinAddresses` · `/v1/kills` · `/v1/player` ·
-`/v1/playersOnline` · `/v1/graph?type=…` · `/v1/pluginHistory` · `/v1/datapoint?type=…` ·
-`/v1/version` · `/v1/whoami` · `/v1/metadata` · `/v1/errors`.
+**Leitura:** `/v1/networkMetadata` (lista de servidores) · `/v1/retention` · `/v1/query` +
+`/v1/filters` · `/v1/sessions` · `/v1/playersTable` · `/v1/joinAddresses` · `/v1/kills` ·
+`/v1/player` · `/v1/playersOnline` · `/v1/graph?type=…` · `/v1/pluginHistory` ·
+`/v1/datapoint?type=…` · `/v1/version` · `/v1/whoami` · `/v1/metadata` · `/v1/errors`.
+
+**Escrita e autenticação — a API do Plan NÃO é somente leitura:** `POST /auth/login` ·
+`GET /auth/register` · `POST /v1/saveGroupPermissions` · `DELETE /v1/deleteGroup` ·
+`POST /v1/saveTheme` · `POST /v1/deleteTheme` · `POST /v1/storePreferences`. Esta camada nunca os
+chama, mas eles existem na mesma porta e importam para a superfície de ataque da §8 — detalhe no
+[`HANDOFF.md`](HANDOFF.md).
 
 > ⚠️ `/v1/serverOverview` e `/v1/onlineOverview` — que a S6.3 e a S7.2 consomem — **não constam do
 > OpenAPI**, embora funcionassem em 23/08 e 25/08. `/v1/performanceOverview` e `/v1/players` constam
@@ -147,10 +153,14 @@ tabela de identidade — das mais estáveis do schema do Plan.
 > `/v1/playersTable` documenta `registered` por jogador, mas ninguém conferiu se serve.
 >
 > **Sem decisão tomada.** Enquanto a exceção estiver de pé, o `PlanDatabase` mantém credencial de
-> MySQL e uma conexão que o ADR-002 existe para evitar. Contra isso pesa um fato observado em
-> 2026-08-26: quando a API passou a responder `403`, os três checks que dependem do `PlanDatabase`
-> seguiram funcionando — a exceção é hoje o que mantém metade da camada de saúde viva durante uma
-> queda da API.
+> MySQL e uma conexão que o ADR-002 existe para evitar.
+>
+> Contra isso pesa um argumento **estrutural** — e a palavra importa: sob 403 na API, os três checks
+> que leem o `PlanDatabase` continuariam respondendo **pela topologia do código**, não por
+> observação. **Ninguém executou os checks durante o 403**, e não se sabe sequer se a VPS foi
+> afetada: o 403 foi visto de uma máquina residencial. Fechar a exceção sem substituir a fonte
+> plausivelmente trocaria dívida de acoplamento por perda de cobertura; "plausivelmente" é o
+> quanto a evidência sustenta.
 >
 > **Gatilho de reavaliação:** ler o corpo de `/v1/networkMetadata` e confirmar se traz `plan_version`
 > e recência por instância. Antes disso não há decisão a tomar. Detalhe no

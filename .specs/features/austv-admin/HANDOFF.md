@@ -30,10 +30,11 @@ fora de contexto.
 ## ⚠️ Erros já cometidos — não repetir
 
 **Cinco** afirmações foram feitas com confiança e estavam **erradas**. Todas pela mesma causa raiz.
-As quatro primeiras estão abaixo; a quinta — *"o Plan não expõe lista de servidores"* — foi
-descoberta em 2026-08-26 e está na seção
-[A lista autoritativa de endpoints do Plan](#-a-lista-autoritativa-de-endpoints-do-plan-foi-encontrada-2026-08-26),
-porque o contexto dela é longo demais para caber aqui.
+**5. "O Plan não expõe lista de servidores."** Falso, descoberto em 2026-08-26. Os dois nomes
+tentados (`/v1/servers`, `/v1/networkOverview`) estavam errados; o endpoint documentado é
+**`/v1/networkMetadata`**. A conclusão errada virou a justificativa da exceção 2 do ADR-002.
+Contexto longo na seção
+[A lista autoritativa de endpoints do Plan](#-a-lista-autoritativa-de-endpoints-do-plan-foi-encontrada-2026-08-26).
 
 **1. "O colapso de aquisição começou em dezembro/2025."** Falso. A série usada vinha do
 `Quests/playerdata` e media **quem entrou no tutorial**, não quem chegou. Em dezembro o tutorial
@@ -507,12 +508,13 @@ inclusive a URL idêntica que havia devolvido dados:
 Não sei a causa e não vou inventar uma: pode ser whitelist ajustada, autenticação ligada, bloqueio
 por volume de sondagens, ou reinício com outra config.
 
-Para quem for pesar a terceira hipótese: nesta sessão saíram **cerca de 15 requisições** desta
-máquina para a 25504, ao longo de algumas horas — 2 de leitura de dados, 7 sondando caminhos de
-spec, e 8 de status na última rodada. Volume baixo, mas registrado para não virar suposição.
+Para quem for pesar a terceira hipótese: nesta sessão saíram **17 requisições** desta máquina para a
+25504, ao longo de algumas horas — 2 de leitura de dados, 7 sondando caminhos de spec, e 8 de status
+na última rodada. Volume baixo, mas registrado para não virar suposição.
 
-**O que importa operacionalmente — e são só metade dos checks.** Sob 403 na API, degradam apenas os
-que falam HTTP com o Plan:
+**O que importa operacionalmente — e são só metade dos checks.** O 403 foi visto de uma máquina
+residencial; **não se conferiu se a VPS do sales também está levando 403**. *Se* estiver, degradam
+apenas os checks que falam HTTP com o Plan:
 
 | check | fonte | sob 403 da API |
 |---|---|---|
@@ -526,10 +528,14 @@ que falam HTTP com o Plan:
 Mais as rotas de `metrics` da S7.2, que degradam por inteiro.
 
 > **Isto corta contra a tese desta própria seção.** A exceção 2 do ADR-002 — a que perdeu a
-> justificativa alegada — é o que mantém três dos seis checks vivos durante uma queda da API. Fechar
-> a exceção sem substituir a fonte trocaria uma dívida de acoplamento por uma perda de cobertura
-> justamente no cenário observado hoje. É argumento a favor de manter, e está aqui porque omiti-lo
-> tornaria esta seção uma peça de acusação em vez de um registro.
+> justificativa alegada — é o que manteria três dos seis checks vivos durante uma queda da API.
+> Fechá-la sem substituir a fonte trocaria dívida de acoplamento por perda de cobertura no cenário
+> que hoje é plausível.
+>
+> **É argumento estrutural, não observação.** Ninguém executou os checks durante o 403; a conclusão
+> vem de ler de onde cada check lê. Está aqui porque omiti-lo tornaria esta seção uma peça de
+> acusação em vez de um registro — mas rotulá-lo errado seria cometer, dentro dela, o erro que ela
+> veio catalogar.
 
 **E o alerta que sair vai apontar para o lugar errado.** O `PlanApiClient` mapeia **401 e 403 para o
 mesmo `PlanAuthError`** (`plan-api.client.ts`), cuja taxonomia diz *"nossa credencial está errada ou
