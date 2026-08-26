@@ -213,28 +213,130 @@ A entrega mais importante do plano. Sem ela, tudo pode parar em silêncio de nov
 
 # Sprint 7 — API: saúde exposta e núcleo de métricas
 
+> **ENTREGUE em 2026-08-26** (PRs #150, #153, #155, #156, #158): **13 de 13 SP**, ambas as
+> histórias, sem corte.
+>
+> `main` verde: **45 suítes unitárias, 437 testes**, build e lint limpos. Os e2e rodam em config
+> separada (`test/jest-e2e.json`) e não entram nessa conta — vão no CI, contra um Postgres real.
+
 ### S7.1 — Módulo `health` no NestJS · 5 SP · `feat/api-health`
 
-1. Expõe estado de cada check com histórico e timestamp da última verificação
-2. Endpoint de status agregado para uso externo (uptime check)
-3. Sob JWT; nenhum dado de jogador exposto aqui
+1. [x] Expõe estado de cada check com histórico e timestamp da última verificação
+2. [~] Endpoint de status agregado para uso externo (uptime check) — **entregue sob a sessão**;
+   ver a tensão registrada abaixo
+3. [x] Sob JWT; nenhum dado de jogador exposto aqui
+
+> **Entregue no PR #155.** `GET /health/instrumentation` (agregado),
+> `/checks` (estado atual por check) e `/checks/:name/history`.
+>
+> #### A decisão de design, e o bug que o review pegou
+>
+> `ok` não é a resposta padrão: o agregado responde `unknown` quando nada nunca rodou e `down`
+> quando o **ciclo** não está vivo. `error` supera `breached` — "não conseguimos medir" é pior que
+> "medimos algo ruim" —, e `no_data` conta como degradado, nunca como saudável.
+>
+> A primeira versão calculava frescor pelo carimbo **mais novo** entre todos os checks, o que
+> responde "algo rodou recentemente" e não "todo mundo continua rodando". Um check que emudece
+> mantém a última linha para sempre e qualquer irmão que ainda escreve o esconde — **é o proxy
+> morto de novo, um nível acima**. Corrigido: `stale` vem do check mais velho, `staleChecks` diz
+> quais pararam, e o registro `HEALTH_CHECKS` é comparado com o banco para expor `missing` (check
+> registrado que nunca gravou linha não aparecia em contagem alguma, e ausência se lê como tudo
+> bem).
+>
+> #### Tensão entre os critérios 2 e 3 — decisão do dono pendente
+>
+> O critério 2 pede endpoint agregado "para uso externo (uptime check)"; o 3 exige JWT. **Um
+> monitor de uptime não completa OAuth do Discord.** Ficou sob a sessão, com a tensão registrada no
+> docblock do controller — endpoint público que informa se a rede de jogo está sendo medida é
+> reconhecimento de graça.
+>
+> Recomendação para quando isso for endereçado: um **heartbeat** que o agendador empurra
+> (dead-man's switch) resolve a lacuna real — "processo vivo mas o ciclo parou" — sem abrir
+> superfície de entrada nenhuma. `GET /health` já é público e cobre "processo morto".
 
 ### S7.2 — Módulo `metrics`: client do Plan, cache e visão de servidor · 8 SP · `feat/api-metrics-core`
 
-1. Visão de servidor e de online normalizadas para o contrato da §7
-2. Cache com **TTL por endpoint**, observável em log
-3. Plan fora do ar → 503 com corpo explícito e último valor cacheado marcado *stale*; **nunca zero
-   inventado**
-4. **Nenhuma referência a tabela interna do Plan** (ADR-002)
-5. Guard JWT, DTO validado, Helmet, throttling, Swagger
+1. [x] Visão de servidor e de online normalizadas para o contrato da §7
+2. [x] Cache com **TTL por endpoint**, observável em log
+3. [x] Plan fora do ar → 503 com corpo explícito e último valor cacheado marcado *stale*; **nunca
+   zero inventado**
+4. [x] **Nenhuma referência a tabela interna do Plan** (ADR-002)
+5. [x] Guard JWT, DTO validado, Helmet, throttling, Swagger
+
+> **Entregue no PR #158**, sobre a base dos PRs #150 (Helmet), #153 (Swagger) e #156 (throttler).
+>
+> #### O adapter do `/v1/onlineOverview` saiu de payload real
+>
+> Regra do projeto, e não zelo: o
+> [Javadoc do Plan](https://plan-player-analytics.github.io/Plan/api/index.html) documenta a **API
+> Java do plugin** e é silencioso sobre esses corpos. Escrever parser a partir dele seria escrever
+> a partir de imaginação — foi assim que a S6.2 nasceu sobre premissa não verificada e teve de ser
+> revertida.
+>
+> #### `/v1/serverOverview` está deprecado, e não migramos
+>
+> O console do Plan avisa em favor do `/v1/datapoint`. **Segundo o changelog do Plan**, os
+> datapoints implementados são PLAYTIME, AFK_TIME, AFK_TIME_PERCENTAGE, WORLD_PIE, SERVER_PIE,
+> MOST_PLAYED_GAME_MODE e MOST_PLAYED_WORLD — nenhum dos quais dá chegadas, jogadores únicos,
+> sessões ou retenção.
+>
+> **Isso não é enumeração verificada.** Os valores válidos de `type` não foram observados, e a
+> lista autoritativa fica no `/docs` do webserver do Plan, que ninguém consultou. O próprio
+> changelog já se mostrou incompleto para esse tipo de lista: ele marca como deprecados o
+> `sessionsOverview` e o `network/sessionsOverview`, **não** os dois que usamos — o aviso de
+> deprecação do `serverOverview` veio da instância viva, não dele.
+>
+> A decisão de não migrar é conservadora e o custo de estar errado é inação, não número errado. Mas
+> ela se apoia numa fonte que a investigação provou incompleta, e isso fica registrado em vez de
+> arredondado. Detalhe e armadilhas de leitura no
+> [`HANDOFF.md`](../features/austv-admin/HANDOFF.md).
+>
+> #### Dois achados do review que valem registro
+>
+> - **O cache não prevenia o stampede que existe para prevenir.** TTL limita a *frequência*, não a
+>   *concorrência*: N leituras numa chave fria davam N chamadas a um webserver que roda dentro do
+>   processo do Minecraft. Corrigido com single-flight.
+> - **O corpo do 503 vazava topologia interna** — a URL do Plan e, em algumas falhas, até 200
+>   caracteres do corpo que ele devolveu (tipicamente uma página de login HTML). O contrato passou
+>   a publicar rótulo fechado (`unreachable`, `auth`, `contract_mismatch`…) e a mensagem completa
+>   ficou no log.
 
 ### DoD da S7
 
-- [ ] Busca por nome de tabela do Plan no diff retorna vazio (fora do módulo de coorte)
-- [ ] Teste de falha: Plan derrubado → 503/stale sem exceção não tratada
-- [ ] 401 sem token e 429 sob flood verificados por teste de integração
+- [x] Busca por nome de tabela do Plan no diff retorna vazio (fora do módulo de coorte) —
+      verificado por `grep` sobre o diff no code review
+- [x] Teste de falha: Plan derrubado → 503/stale sem exceção não tratada — os **dois** ramos:
+      `unavailable` (nada em cache) e `stale` (valor anterior servido), este último com
+      `overrideProvider(PlanApiClient)`
+- [~] 401 sem token e 429 sob flood verificados por teste de integração — **401 e o flood de 429
+      estão cobertos** (`throttling.e2e-spec.ts` esgota o perfil de dashboard e afirma o 429 na
+      requisição seguinte). Nas rotas de `metrics` não há flood próprio: o que o header
+      `x-ratelimit-limit: 120` afirma é o **acoplamento do throttler à rota e qual perfil
+      resolveu** — não o 429 em si. A chave do throttler inclui o nome do handler, então um segundo
+      flood custaria ~1 min de CI para reprovar o mesmo mecanismo. Decisão consciente, registrada
+      aqui em vez de marcada como completa
 
-**[CORTE]** S7.1 pode sair se a S6.3 já entregar visibilidade suficiente no Discord.
+**[CORTE]** ~~S7.1 pode sair se a S6.3 já entregar visibilidade suficiente no Discord.~~ — **não
+foi cortada.** A sprint coube inteira, e a S7.1 é pré-requisito da S12.1.
+
+### O que a S7 exigiu e o plano não enumerava
+
+Três PRs de infraestrutura. Não são escopo extra: Helmet, throttling e Swagger estão nomeados no
+critério 5 da S7.2. Estavam fora da **enumeração** do plano, não fora do plano.
+
+| PR | o que |
+|---|---|
+| #150 | Helmet — política de CSP de **API** (`default-src 'none'`), HSTS explícito, e um `configureApp` único para que a suíte e2e deixe de testar um app diferente do que sobe |
+| #153 | Swagger atrás da sessão. `SwaggerModule.setup()` **não** cria rota do Nest, então o `APP_GUARD` não a alcança — sem a middleware dedicada, o inventário completo de rotas ficaria legível por quem alcançasse a porta |
+| #156 | Raiz do throttler extraída para módulo compartilhado + perfil de dashboard. `ThrottlerModule.forRoot()` só pode ser chamado uma vez por aplicação, e enquanto morava dentro do módulo de ingest, limitar rota de dashboard exigia importar *ingest* de uma feature sem relação |
+
+### Achados que viraram issue
+
+| issue | o que |
+|---|---|
+| [#151](https://github.com/ZzPowerTech/ausTvSales/issues/151) | O Nginx do dashboard serve o `index.html` **sem cabeçalho de segurança nenhum**. A resposta que o browser de fato renderiza não tem CSP; só `/api/*` tem |
+| [#154](https://github.com/ZzPowerTech/ausTvSales/issues/154) | DTOs anteriores à S7 saem com schema vazio no OpenAPI — custo assumido de recusar o plugin de CLI do `@nestjs/swagger` |
+| [#157](https://github.com/ZzPowerTech/ausTvSales/issues/157) | **Perda de dado.** `SaleDelivery.classify()` mapeia todo 4xx para `PERMANENT`, então um **429 descarta a venda para sempre**. E o throttler da app (10/s, sem burst) dispara *antes* do Nginx (`burst=20`, responde 503, que o plugin reenfileira em segurança). Drenar uma fila depois de uma queda pode destruir exatamente as linhas que o fallback SQLite existe para proteger |
 
 ---
 
@@ -452,8 +554,8 @@ jogo.**
 | ~~3~~ | S6 | ~~Unificar bancos do Plan~~ — **concluída 2026-08-20**, fora do fluxo de sprint | ~~5~~ → 0 |
 | 3b | S6 | Auditar exposição do MySQL (3306) | 2 |
 | 4 | S6 | **Checks de saúde + alerta** | 8 |
-| 5 | S7 | Módulo `health` | 5 |
-| 6 | S7 | `metrics` core | 8 |
+| ~~5~~ | S7 | ~~Módulo `health`~~ — **entregue 2026-08-26** | 5 |
+| ~~6~~ | S7 | ~~`metrics` core~~ — **entregue 2026-08-26** | 8 |
 | 6b | S8 | **Fonte de dados do tutorial** — *aberta 2026-08-23* | 5 |
 | 7 | S8 | Módulo `funnel` (4 degraus) | 8 |
 | 8 | S8 | Retenção por coorte | 5 |

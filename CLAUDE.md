@@ -97,9 +97,36 @@ Projeto separado, especificado neste repo em `.specs/features/austv-admin/`. Doc
 colidem na faixa 6. Os documentos **não** são renumerados; a separação é por milestone
 (`AusTV Admin S6` vs `ausTvSales S6`) e por label prefixada (`admin:sprint-6` vs `sales:sprint-6`).
 
-**Em aberto:** o desbalanço de capacidade — a S6 está em 22 SP e a S12 em 18, contra 13 SP/sprint
-planejados. As três opções estão no fim do plano de sprints; decidir antes de abrir o worktree da
-S6.
+**AusTV Admin S7 — entregue.** Módulo `health` expondo os checks, módulo `metrics` com client do
+Plan, cache de TTL por endpoint e degradação honesta. 13 de 13 SP, DoD cumprido.
+
+**AusTV Admin S6 — histórias entregues, DoD com itens em aberto.** Os 6 checks que têm fonte estão
+implementados e alertando (o sétimo virou a S8.0), mas **o critério 4 da S6.3 nunca foi cumprido**:
+ninguém derrubou uma instância de propósito para provar que o alerta chega. Ver o bloco abaixo — a
+distinção importa mais que a contagem de SP.
+
+**Próxima: Sprint 8** — fonte de dados do tutorial (S8.0), funil de 4 degraus (S8.1) e retenção por
+coorte (S8.2). A S8 está em **18 SP** contra 13 de capacidade; a S8.2 é a história marcada
+`[CORTE]` e move para a S9 se preciso.
+
+**Em aberto, e vale mais que sprint:**
+
+- **O alerta de saúde nunca foi comprovado.** É o último item aberto da S6 e a promessa raiz do
+  projeto (§1 do spec: "tornar impossível a cegueira silenciosa"). Exige ligar o agendamento num
+  ambiente real, com webhook configurado, e derrubar uma instância de propósito. **Todo o resto da
+  camada de saúde é construção sobre uma entrega que ninguém verificou ponta a ponta.**
+- **[#157](https://github.com/ZzPowerTech/ausTvSales/issues/157) — perda de venda em silêncio.**
+  Um 429 faz o plugin marcar a venda como permanentemente falha. Descoberto na S7; é dado perdido,
+  não incômodo.
+- **Os três limiares da S6.3 seguem sem calibração** contra o baseline (chute conservador, marcado
+  como tal no `.env.example`). Enquanto isso, o alerta é ruído em potencial — que é como um canal
+  do Discord vira mudo.
+- **Probe externo de uptime.** O critério 2 da S7.1 pede endpoint "para uso externo" e o 3 exige
+  JWT — um monitor não faz OAuth. Ficou sob a sessão; a saída recomendada é heartbeat, não
+  endpoint. Decisão do dono.
+- **A S12 continua estourada em 18 SP** (38% acima da capacidade), e dividi-la em duas é, segundo o
+  plano de sprints, a única decisão de escopo que resta ao dono. Decidir antes de abrir o worktree
+  dela.
 
 Precedência: este sistema **mede**; não conserta. As correções do funil de onboarding vêm na
 frente.
