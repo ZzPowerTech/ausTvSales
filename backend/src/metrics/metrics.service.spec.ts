@@ -36,21 +36,37 @@ const ONLINE_OVERVIEW = {
   },
 };
 
+const T0 = new Date('2026-08-25T12:00:00.000Z');
+
+/** `T0` plus an offset, for moving past a TTL without touching the clock. */
+function at(msAfterT0: number): Date {
+  return new Date(T0.getTime() + msAfterT0);
+}
+
 function build(getJson: jest.Mock) {
-  const plan = { getJson } as unknown as PlanApiClient;
+  // `satisfies Pick<...>` rather than a bare cast: the service touches only
+  // these members, and pinning them means adding a dependency fails here at
+  // compile time instead of compiling into a fake that no longer resembles the
+  // real collaborator.
+  const plan = { getJson } satisfies Pick<PlanApiClient, 'getJson'>;
 
   const servers = {
     all: () => [
       { name: 'AusTv', proxy: true },
       { name: 'Survival', proxy: false },
     ],
-  } as unknown as PlanServersConfig;
+  } satisfies Pick<PlanServersConfig, 'all'>;
 
   const config = {
     get: (key: string) => (key === 'PLAN_CACHE_TTL_SERVER_SECONDS' ? 60 : 900),
-  } as unknown as ConfigService;
+  };
 
-  return new MetricsService(plan, servers, new PlanCache(), config);
+  return new MetricsService(
+    plan as unknown as PlanApiClient,
+    servers as unknown as PlanServersConfig,
+    new PlanCache(),
+    config as unknown as ConfigService,
+  );
 }
 
 describe('MetricsService', () => {
@@ -147,22 +163,68 @@ describe('MetricsService', () => {
         .mockResolvedValueOnce(SERVER_OVERVIEW)
         .mockRejectedValue(new PlanUnreachableError('http://x/v1/y'));
       const service = build(getJson);
-      await service.serverOverview('Survival');
+      await service.serverOverview('Survival', T0);
 
-      // Past the 60s TTL, so the second read refetches and fails.
-      jest.useFakeTimers().setSystemTime(Date.now() + 120_000);
-      try {
-        const { body, degraded } = await service.serverOverview('Survival');
+      // Past the 60s TTL, so the second read refetches and fails. The clock is
+      // a parameter rather than `useFakeTimers`, which also mocks `setTimeout`
+      // and would hang against the transport's own retry backoff.
+      const { body, degraded } = await service.serverOverview(
+        'Survival',
+        at(120_000),
+      );
 
-        expect(degraded).toBe(true);
-        expect(body.freshness.stale).toBe(true);
-        // The value survives — a usable old reading beats an empty page.
-        expect(body.data?.onlinePlayers).toBe(8);
-        expect(body.freshness.reason).toContain('Plan inalcancavel');
-        expect(body.freshness.ageSeconds).toBeGreaterThanOrEqual(120);
-      } finally {
-        jest.useRealTimers();
-      }
+      expect(degraded).toBe(true);
+      expect(body.freshness.stale).toBe(true);
+      // The value survives — a usable old reading beats an empty page.
+      expect(body.data?.onlinePlayers).toBe(8);
+      expect(body.freshness.ageSeconds).toBe(120);
+      // Classified, not the raw message: that one names the Plan host.
+      expect(body.freshness.reason).toBe('unreachable');
+    });
+
+    it('never publishes the Plan host or an upstream body in `reason`', async () => {
+      // The raw message is `Plan inalcancavel em http://<host>:<port>/v1/...`,
+      // and other failures in the taxonomy quote up to 200 characters of Plan's
+      // own response — typically an HTML login page when auth is misconfigured.
+      // Behind the session that is not an open disclosure, but internal topology
+      // and unfiltered upstream content have no reason to reach a browser.
+      const getJson = jest
+        .fn()
+        .mockRejectedValue(
+          new PlanUnreachableError(
+            'http://198.51.100.7:25504/v1/serverOverview',
+          ),
+        );
+
+      const { body } = await build(getJson).serverOverview('Survival');
+
+      expect(body.freshness.reason).toBe('unreachable');
+      expect(JSON.stringify(body)).not.toContain('198.51.100.7');
+      expect(JSON.stringify(body)).not.toContain('25504');
+    });
+
+    it('distinguishes a contract change from an outage', async () => {
+      // Different causes, different fixes: one is an incident on the game VPS,
+      // the other is a Plan upgrade that changed a payload we parse.
+      const getJson = jest.fn().mockResolvedValue({ unexpected: true });
+
+      const { body } = await build(getJson).serverOverview('Survival');
+
+      expect(body.freshness.reason).toBe('contract_mismatch');
+    });
+
+    it('does not invent a timestamp for a server that never peaked', async () => {
+      // `toNumber` maps Plan's sentinels to null, but a literal 0 is a finite
+      // number and would render as 1970-01-01 — an invented timestamp in a
+      // module whose premise is not inventing values.
+      const getJson = jest.fn().mockResolvedValue({
+        ...SERVER_OVERVIEW,
+        numbers: { ...SERVER_OVERVIEW.numbers, last_peak_date: 0 },
+      });
+
+      const { body } = await build(getJson).serverOverview('Survival');
+
+      expect(body.data?.lastPeakAt).toBeNull();
     });
 
     it('answers null data — never zeros — when there is nothing cached', async () => {
@@ -193,7 +255,7 @@ describe('MetricsService', () => {
 
       expect(degraded).toBe(true);
       expect(body.data).toBeNull();
-      expect(body.freshness.reason).toContain('nao reconhecida');
+      expect(body.freshness.reason).toBe('contract_mismatch');
     });
   });
 

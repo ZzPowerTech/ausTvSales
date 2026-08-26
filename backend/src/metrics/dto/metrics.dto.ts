@@ -21,6 +21,39 @@ import { ApiProperty } from '@nestjs/swagger';
  * forever.
  */
 
+/**
+ * Why a read could not be served fresh.
+ *
+ * A closed vocabulary rather than the upstream message. The raw text names the
+ * Plan host and can quote its response body back — internal topology and
+ * unfiltered upstream content, neither of which belongs in a browser even behind
+ * the session. The full message stays in the log, where whoever is debugging
+ * will look for it.
+ *
+ * The classes are separate because they demand different reactions, which is the
+ * same reason `plan-api.errors.ts` splits them: `unreachable` is an incident on
+ * the game VPS, `auth` and `not_configured` are our own misconfiguration, and
+ * `contract_mismatch` means a Plan upgrade changed a payload we parse.
+ */
+export const METRICS_FAILURE_REASONS = [
+  /** `PLAN_BASE_URL` is unset — nothing to ask. Our deploy config. */
+  'not_configured',
+  /** DNS, refused connection, TLS or timeout. Real incident. */
+  'unreachable',
+  /** Plan refused our credential (401/403). Our bug, not an outage. */
+  'auth',
+  /** Plan answered with a non-2xx we did not expect. */
+  'upstream_error',
+  /** Plan answered 2xx with something that is not the JSON we expect. */
+  'malformed',
+  /** Parsed as JSON, but no longer the shape this adapter was written against. */
+  'contract_mismatch',
+  /** Anything else. Kept so an unclassified failure is never dropped. */
+  'unknown',
+] as const;
+
+export type MetricsFailureReason = (typeof METRICS_FAILURE_REASONS)[number];
+
 /** A count and the base it was computed from. Never one without the other. */
 export class RatioDto {
   @ApiProperty({
@@ -37,7 +70,9 @@ export class RatioDto {
     example: 36,
     description:
       'Base do numerador. O contrato nunca publica razao sem ela — um ' +
-      'percentual sem base ja produziu tres conclusoes erradas neste projeto.',
+      'percentual sem base ja produziu tres conclusoes erradas neste projeto. ' +
+      'Base pequena continua sendo base: `1 de 1` e um `n` valido e nao deve ' +
+      'ser renderizado como "100%".',
   })
   n!: number | null;
 }
@@ -108,12 +143,16 @@ export class MetricsFreshnessDto {
   ageSeconds!: number | null;
 
   @ApiProperty({
-    type: String,
+    enum: METRICS_FAILURE_REASONS,
     nullable: true,
     description:
-      'Por que a busca falhou, quando falhou. Null numa resposta fresca.',
+      'Classe da falha, quando houve. Null numa resposta fresca. E um rotulo ' +
+      'fechado de proposito: a mensagem crua carrega a URL interna do Plan e, ' +
+      'em alguns casos, um trecho do corpo que ele devolveu (uma pagina de ' +
+      'login HTML, quando a auth esta mal configurada). Isso fica no log, nao ' +
+      'numa resposta HTTP.',
   })
-  reason!: string | null;
+  reason!: MetricsFailureReason | null;
 }
 
 /** Aggregate activity of one server, normalised from `/v1/onlineOverview`. */
