@@ -42,6 +42,22 @@ import {
  * no window attached to the comparison. Publishing them would be publishing a
  * number whose meaning we cannot state.
  *
+ * ## `insights` is out of scope here, and that is a decision
+ *
+ * The payload also carries an `insights` block —
+ * `first_session_length_median`, `lone_joins`, `players_first_join_avg`. None of
+ * it is mapped, because §7's entity list does not contain it and S7.2 is about
+ * the server and online views.
+ *
+ * Saying so explicitly because two of those are the most on-point onboarding
+ * numbers Plan produces, and an undocumented omission would get rediscovered as
+ * a question. **S8.1 (the four-step funnel) is where they belong**, and it is
+ * the story that can state what each one means alongside the other steps.
+ *
+ * `players_first_join_avg` is a separate matter: its definition is not stated
+ * anywhere observed, and publishing a number whose meaning cannot be written
+ * down is the rule this module otherwise follows.
+ *
  * ## Durations stay in milliseconds
  *
  * Plan reports playtime and session length in ms (`playtime_7d: 3833062041` is
@@ -140,19 +156,22 @@ function readWindow(
   numbers: Record<string, unknown>,
   window: WindowSuffix,
 ): OnlineWindow {
+  const newPlayers = toNumber(numbers[`new_players_${window}`]);
+
   return {
-    newPlayers: toNumber(numbers[`new_players_${window}`]),
+    newPlayers,
     uniquePlayers: toNumber(numbers[`unique_players_${window}`]),
     sessions: toNumber(numbers[`sessions_${window}`]),
     playtimeMs: toNumber(numbers[`playtime_${window}`]),
     sessionLengthAvgMs: toNumber(numbers[`session_length_${window}_avg`]),
     newPlayerRetention: {
       value: toNumber(numbers[`new_players_retention_${window}`]),
-      // The denominator is the arrivals of the same window — the same field the
-      // window already publishes. Reading it here rather than referencing the
-      // parsed value keeps the ratio self-contained: if arrivals go missing, the
-      // ratio reports no base instead of quietly borrowing one.
-      n: toNumber(numbers[`new_players_${window}`]),
+      // The denominator is the arrivals of the same window, reused from the
+      // field just read rather than looked up a second time. Both forms give the
+      // same answer — `toNumber` is pure — so the reason to pick one is that the
+      // service does the same thing for the 7-day ratio, and two spellings of
+      // one rule is how the rule stops being obvious.
+      n: newPlayers,
     },
   };
 }
