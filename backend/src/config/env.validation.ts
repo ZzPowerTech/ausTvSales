@@ -191,6 +191,29 @@ export class EnvironmentVariables {
   @Max(5)
   PLAN_RETRIES?: number;
 
+  // --- Cache do client de metricas (S7.2) ---
+  //
+  // TTL POR ENDPOINT, e a diferenca entre os dois e a razao de o cache existir:
+  // toda leitura sem cache vira uma requisicao HTTP para um webserver que roda
+  // dentro do processo do Minecraft, na maquina onde os jogadores estao (secao 8
+  // do spec: "query pesada afeta o jogo").
+  //
+  // `serverOverview` carrega `online_players`, que muda de minuto a minuto.
+  @IsOptional()
+  @IsInt()
+  @Min(5)
+  @Max(3_600)
+  PLAN_CACHE_TTL_SERVER_SECONDS?: number;
+
+  // `onlineOverview` sao agregados de 24h/7d/30d que mal se mexem dentro de uma
+  // hora. Refazer isso todo minuto e pagar o servidor de jogo por um numero que
+  // nao mudou.
+  @IsOptional()
+  @IsInt()
+  @Min(60)
+  @Max(86_400)
+  PLAN_CACHE_TTL_ACTIVITY_SECONDS?: number;
+
   // Names of the Plan instances the checks evaluate, comma-separated, exactly as
   // Plan spells them (`?server=` is case-sensitive). Example: `AusTv,Survival`.
   //

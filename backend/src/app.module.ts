@@ -8,6 +8,7 @@ import { DatabaseModule } from './db/database.module';
 import { HealthModule } from './health/health.module';
 import { InstrumentationModule } from './instrumentation/instrumentation.module';
 import { ItemsModule } from './items/items.module';
+import { MetricsModule } from './metrics/metrics.module';
 import { SalesModule } from './sales/sales.module';
 
 @Module({
@@ -25,6 +26,10 @@ import { SalesModule } from './sales/sales.module';
     // network measurement* is still happening. Not to be confused with
     // HealthModule above, which is this process's own liveness probe.
     InstrumentationModule,
+    // Leituras normalizadas da rede de jogo (S7.2). Distinto do
+    // InstrumentationModule: aquele pergunta "a coleta ainda acontece?" e fala
+    // com o Plan sem cache; este publica os numeros e fala com cache na frente.
+    MetricsModule,
     CategoriesModule,
     ItemsModule,
     SalesModule,
