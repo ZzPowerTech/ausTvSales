@@ -213,28 +213,117 @@ A entrega mais importante do plano. Sem ela, tudo pode parar em silêncio de nov
 
 # Sprint 7 — API: saúde exposta e núcleo de métricas
 
+> **ENTREGUE em 2026-08-26** (PRs #150, #153, #155, #156, #158). Milestone
+> `AusTV Admin S7` fechada: 13 de 13 SP, ambas as histórias, sem corte.
+>
+> `main` verde: **45 suítes, 437 testes**, build e lint limpos, e2e com Postgres real no CI.
+
 ### S7.1 — Módulo `health` no NestJS · 5 SP · `feat/api-health`
 
-1. Expõe estado de cada check com histórico e timestamp da última verificação
-2. Endpoint de status agregado para uso externo (uptime check)
-3. Sob JWT; nenhum dado de jogador exposto aqui
+1. [x] Expõe estado de cada check com histórico e timestamp da última verificação
+2. [~] Endpoint de status agregado para uso externo (uptime check) — **entregue sob a sessão**;
+   ver a tensão registrada abaixo
+3. [x] Sob JWT; nenhum dado de jogador exposto aqui
+
+> **Entregue no PR #155.** `GET /health/instrumentation` (agregado),
+> `/checks` (estado atual por check) e `/checks/:name/history`.
+>
+> #### A decisão de design, e o bug que o review pegou
+>
+> `ok` não é a resposta padrão: o agregado responde `unknown` quando nada nunca rodou e `down`
+> quando o **ciclo** não está vivo. `error` supera `breached` — "não conseguimos medir" é pior que
+> "medimos algo ruim" —, e `no_data` conta como degradado, nunca como saudável.
+>
+> A primeira versão calculava frescor pelo carimbo **mais novo** entre todos os checks, o que
+> responde "algo rodou recentemente" e não "todo mundo continua rodando". Um check que emudece
+> mantém a última linha para sempre e qualquer irmão que ainda escreve o esconde — **é o proxy
+> morto de novo, um nível acima**. Corrigido: `stale` vem do check mais velho, `staleChecks` diz
+> quais pararam, e o registro `HEALTH_CHECKS` é comparado com o banco para expor `missing` (check
+> registrado que nunca gravou linha não aparecia em contagem alguma, e ausência se lê como tudo
+> bem).
+>
+> #### Tensão entre os critérios 2 e 3 — decisão do dono pendente
+>
+> O critério 2 pede endpoint agregado "para uso externo (uptime check)"; o 3 exige JWT. **Um
+> monitor de uptime não completa OAuth do Discord.** Ficou sob a sessão, com a tensão registrada no
+> docblock do controller — endpoint público que informa se a rede de jogo está sendo medida é
+> reconhecimento de graça.
+>
+> Recomendação para quando isso for endereçado: um **heartbeat** que o agendador empurra
+> (dead-man's switch) resolve a lacuna real — "processo vivo mas o ciclo parou" — sem abrir
+> superfície de entrada nenhuma. `GET /health` já é público e cobre "processo morto".
 
 ### S7.2 — Módulo `metrics`: client do Plan, cache e visão de servidor · 8 SP · `feat/api-metrics-core`
 
-1. Visão de servidor e de online normalizadas para o contrato da §7
-2. Cache com **TTL por endpoint**, observável em log
-3. Plan fora do ar → 503 com corpo explícito e último valor cacheado marcado *stale*; **nunca zero
-   inventado**
-4. **Nenhuma referência a tabela interna do Plan** (ADR-002)
-5. Guard JWT, DTO validado, Helmet, throttling, Swagger
+1. [x] Visão de servidor e de online normalizadas para o contrato da §7
+2. [x] Cache com **TTL por endpoint**, observável em log
+3. [x] Plan fora do ar → 503 com corpo explícito e último valor cacheado marcado *stale*; **nunca
+   zero inventado**
+4. [x] **Nenhuma referência a tabela interna do Plan** (ADR-002)
+5. [x] Guard JWT, DTO validado, Helmet, throttling, Swagger
+
+> **Entregue no PR #158**, sobre a base dos PRs #150 (Helmet), #153 (Swagger) e #156 (throttler).
+>
+> #### O adapter do `/v1/onlineOverview` saiu de payload real
+>
+> Regra do projeto, e não zelo: o
+> [Javadoc do Plan](https://plan-player-analytics.github.io/Plan/api/index.html) documenta a **API
+> Java do plugin** e é silencioso sobre esses corpos. Escrever parser a partir dele seria escrever
+> a partir de imaginação — foi assim que a S6.2 nasceu sobre premissa não verificada e teve de ser
+> revertida.
+>
+> #### `/v1/serverOverview` está deprecado, e não migramos
+>
+> O console do Plan avisa em favor do `/v1/datapoint`. **O sucessor ainda não serve:** os
+> datapoints implementados (PLAYTIME, AFK_TIME, WORLD_PIE, SERVER_PIE, MOST_PLAYED_*) não dão
+> chegadas, jogadores únicos, sessões nem retenção. Detalhe e armadilhas de leitura no
+> [`HANDOFF.md`](../features/austv-admin/HANDOFF.md).
+>
+> #### Dois achados do review que valem registro
+>
+> - **O cache não prevenia o stampede que existe para prevenir.** TTL limita a *frequência*, não a
+>   *concorrência*: N leituras numa chave fria davam N chamadas a um webserver que roda dentro do
+>   processo do Minecraft. Corrigido com single-flight.
+> - **O corpo do 503 vazava topologia interna** — a URL do Plan e, em algumas falhas, até 200
+>   caracteres do corpo que ele devolveu (tipicamente uma página de login HTML). O contrato passou
+>   a publicar rótulo fechado (`unreachable`, `auth`, `contract_mismatch`…) e a mensagem completa
+>   ficou no log.
 
 ### DoD da S7
 
-- [ ] Busca por nome de tabela do Plan no diff retorna vazio (fora do módulo de coorte)
-- [ ] Teste de falha: Plan derrubado → 503/stale sem exceção não tratada
-- [ ] 401 sem token e 429 sob flood verificados por teste de integração
+- [x] Busca por nome de tabela do Plan no diff retorna vazio (fora do módulo de coorte) —
+      verificado por `grep` sobre o diff no code review
+- [x] Teste de falha: Plan derrubado → 503/stale sem exceção não tratada — os **dois** ramos:
+      `unavailable` (nada em cache) e `stale` (valor anterior servido), este último com
+      `overrideProvider(PlanApiClient)`
+- [~] 401 sem token e 429 sob flood verificados por teste de integração — **401 e o flood de 429
+      estão cobertos** (`throttling.e2e-spec.ts` esgota o perfil de dashboard e afirma o 429 na
+      requisição seguinte). Nas rotas de `metrics` o 429 é afirmado pelo **header**
+      `x-ratelimit-limit: 120`, não por flood próprio: a chave do throttler inclui o nome do
+      handler, então um segundo flood custaria ~1 min de CI para reprovar o mesmo mecanismo.
+      Decisão consciente, registrada aqui em vez de marcada como completa
 
-**[CORTE]** S7.1 pode sair se a S6.3 já entregar visibilidade suficiente no Discord.
+**[CORTE]** ~~S7.1 pode sair se a S6.3 já entregar visibilidade suficiente no Discord.~~ — **não
+foi cortada.** A sprint coube inteira, e a S7.1 é pré-requisito da S12.1.
+
+### O que a S7 acrescentou fora do plano
+
+Três PRs de infraestrutura que as duas histórias exigiam pelos critérios e que o plano não
+enumerava separadamente:
+
+| PR | o que |
+|---|---|
+| #150 | Helmet — política de CSP de **API** (`default-src 'none'`), HSTS explícito, e um `configureApp` único para que a suíte e2e deixe de testar um app diferente do que sobe |
+| #153 | Swagger atrás da sessão. `SwaggerModule.setup()` **não** cria rota do Nest, então o `APP_GUARD` não a alcança — sem a middleware dedicada, o inventário completo de rotas ficaria legível por quem alcançasse a porta |
+| #156 | Raiz do throttler extraída para módulo compartilhado + perfil de dashboard. `ThrottlerModule.forRoot()` só pode ser chamado uma vez por aplicação, e enquanto morava dentro do módulo de ingest, limitar rota de dashboard exigia importar *ingest* de uma feature sem relação |
+
+### Achados que viraram issue
+
+| issue | o que |
+|---|---|
+| [#151](https://github.com/ZzPowerTech/ausTvSales/issues/151) | O Nginx do dashboard serve o `index.html` **sem cabeçalho de segurança nenhum**. A resposta que o browser de fato renderiza não tem CSP; só `/api/*` tem |
+| [#154](https://github.com/ZzPowerTech/ausTvSales/issues/154) | DTOs anteriores à S7 saem com schema vazio no OpenAPI — custo assumido de recusar o plugin de CLI do `@nestjs/swagger` |
+| [#157](https://github.com/ZzPowerTech/ausTvSales/issues/157) | **Perda de dado.** `SaleDelivery.classify()` mapeia todo 4xx para `PERMANENT`, então um **429 descarta a venda para sempre**. E o throttler da app (10/s, sem burst) dispara *antes* do Nginx (`burst=20`, responde 503, que o plugin reenfileira em segurança). Drenar uma fila depois de uma queda pode destruir exatamente as linhas que o fallback SQLite existe para proteger |
 
 ---
 

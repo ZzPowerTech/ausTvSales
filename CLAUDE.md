@@ -97,9 +97,25 @@ Projeto separado, especificado neste repo em `.specs/features/austv-admin/`. Doc
 colidem na faixa 6. Os documentos **não** são renumerados; a separação é por milestone
 (`AusTV Admin S6` vs `ausTvSales S6`) e por label prefixada (`admin:sprint-6` vs `sales:sprint-6`).
 
-**Em aberto:** o desbalanço de capacidade — a S6 está em 22 SP e a S12 em 18, contra 13 SP/sprint
-planejados. As três opções estão no fim do plano de sprints; decidir antes de abrir o worktree da
-S6.
+**Entregues:** AusTV Admin **S6** (checks de saúde + alerta no Discord, 6 de 7 checks — o sétimo
+não tem fonte e virou a S8.0) e **S7** (módulo `health` expondo os checks, módulo `metrics` com
+client do Plan, cache de TTL por endpoint e degradação honesta). Detalhe de cada história, com o
+que ficou de fora e por quê, no plano de sprints.
+
+**Próxima: Sprint 8** — fonte de dados do tutorial (S8.0), funil de 4 degraus (S8.1) e retenção por
+coorte (S8.2). A S8 está em **18 SP** contra 13 de capacidade; a S8.2 é a história marcada
+`[CORTE]` e move para a S9 se preciso.
+
+**Em aberto, e vale mais que sprint:**
+
+- **[#157](https://github.com/ZzPowerTech/ausTvSales/issues/157) — perda de venda em silêncio.**
+  Um 429 faz o plugin marcar a venda como permanentemente falha. Descoberto na S7; é dado perdido,
+  não incômodo.
+- **Probe externo de uptime.** O critério 2 da S7.1 pede endpoint "para uso externo" e o 3 exige
+  JWT — um monitor não faz OAuth. Ficou sob a sessão; a saída recomendada é heartbeat, não
+  endpoint. Decisão do dono.
+- **Os três limiares da S6.3 seguem sem calibração** contra o baseline (chute conservador, marcado
+  como tal no `.env.example`). Enquanto isso, o alerta é ruído em potencial.
 
 Precedência: este sistema **mede**; não conserta. As correções do funil de onboarding vêm na
 frente.
