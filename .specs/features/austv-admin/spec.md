@@ -63,11 +63,17 @@ reais:
 | Frontend | `ausTvSales` = Angular 19 + Signals. Plan = React/Bootstrap/HighCharts |
 | Manutenção | ~7.090 commits, 189 releases, 12 módulos Gradle |
 
-Endpoints: `/v1/serverOverview` · `/v1/onlineOverview` · `/v1/playerbaseOverview` ·
-`/v1/performanceOverview` · `/v1/playersTable` · `/v1/sessions` · `/v1/player?player=<uuid>` ·
-`/player/<uuid>/raw` ·
-`/v1/graph?type=uniqueAndNew|activity|punchCard|worldPie|geolocation|calendar|aggregatedPing`.
-Lista atual em `/docs` do webserver.
+Endpoints, **conforme o OpenAPI lido em 2026-08-26** em `/docs` do webserver:
+
+`/v1/networkMetadata` (lista de servidores) · `/v1/retention` · `/v1/query` + `/v1/filters` ·
+`/v1/sessions` · `/v1/playersTable` · `/v1/joinAddresses` · `/v1/kills` · `/v1/player` ·
+`/v1/playersOnline` · `/v1/graph?type=…` · `/v1/pluginHistory` · `/v1/datapoint?type=…` ·
+`/v1/version` · `/v1/whoami` · `/v1/metadata` · `/v1/errors`.
+
+> ⚠️ `/v1/serverOverview` e `/v1/onlineOverview` — que a S6.3 e a S7.2 consomem — **não constam do
+> OpenAPI**, embora funcionassem em 23/08 e 25/08. `/v1/performanceOverview` e `/v1/players` constam
+> marcados `deprecated`. `/v1/playerbaseOverview` e `/player/<uuid>/raw`, que esta lista citava, não
+> aparecem. Detalhe em [`HANDOFF.md`](HANDOFF.md).
 
 ### ADR-002 — NestJS fala com `/v1/*`, nunca com as tabelas do Plan
 
@@ -76,7 +82,7 @@ documentadas e isoladas em módulo próprio**, sempre em usuário **read-only**:
 
 | # | escopo | tabelas | por quê a API não serve |
 |---|---|---|---|
-| 1 | Coorte histórica (§6.2, S8.2) | `plan_users`, `plan_user_info`, `plan_sessions` | agregação por coorte × plataforma não existe em nenhum endpoint |
+| 1 | Coorte histórica (§6.2, S8.2) | `plan_users`, `plan_user_info`, `plan_sessions` | agregação por coorte × plataforma não existe em nenhum endpoint — *(2026-08-26: `/v1/retention` é candidato **não avaliado**; mesma classe de afirmação de ausência que caiu na exceção 2. Ver [`HANDOFF.md`](HANDOFF.md))* |
 | 2 | **Inventário de instâncias e chegadas de rede (§6.1, S6.3)** — *aprovada em 2026-08-23; **premissa desmentida em 2026-08-26**, ver nota abaixo* | **`plan_servers` e `plan_users`** | ~~o Plan não expõe lista de servidores~~ — **falso**: `/v1/servers` e `/v1/networkOverview` dão 404 por serem nomes errados; o endpoint documentado é **`/v1/networkMetadata`**. A parte sobre chegadas de rede não foi reavaliada |
 
 #### Exceção 2 — inventário de instâncias (2026-08-23)
@@ -88,8 +94,9 @@ cada um roda*:
 - `plan.version_divergence` — builds diferentes entre instâncias, que corrompem schema compartilhado
   (ADR-005)
 
-**Por que a API não resolve.** Não há endpoint de catálogo. `/v1/serverOverview` responde por *um*
-servidor, endereçado por nome, e não carrega versão. Sem lista, `orphan_instance` só poderia checar
+**Por que a API não resolve.** ~~Não há endpoint de catálogo.~~ — **falso, corrigido em
+2026-08-26: existe `/v1/networkMetadata`. Ver a nota ao fim desta seção.** `/v1/serverOverview`
+responde por *um* servidor, endereçado por nome, e não carrega versão. Sem lista, `orphan_instance` só poderia checar
 servidores que alguém já configurou à mão — o que dá atestado de saúde **exatamente no caso que o
 check existe para pegar**: a instância que ninguém sabia que existia.
 
@@ -139,9 +146,15 @@ tabela de identidade — das mais estáveis do schema do Plan.
 > ela apenas perdeu o motivo alegado. O mesmo vale para a metade de `plan_users`: o
 > `/v1/playersTable` documenta `registered` por jogador, mas ninguém conferiu se serve.
 >
-> **Decisão do dono, e ela tem prazo:** enquanto a exceção estiver de pé, o `PlanDatabase` mantém
-> credencial de MySQL e uma conexão que o ADR-002 existe para evitar. Detalhe e endpoints correlatos
-> no [`HANDOFF.md`](HANDOFF.md).
+> **Sem decisão tomada.** Enquanto a exceção estiver de pé, o `PlanDatabase` mantém credencial de
+> MySQL e uma conexão que o ADR-002 existe para evitar. Contra isso pesa um fato observado em
+> 2026-08-26: quando a API passou a responder `403`, os três checks que dependem do `PlanDatabase`
+> seguiram funcionando — a exceção é hoje o que mantém metade da camada de saúde viva durante uma
+> queda da API.
+>
+> **Gatilho de reavaliação:** ler o corpo de `/v1/networkMetadata` e confirmar se traz `plan_version`
+> e recência por instância. Antes disso não há decisão a tomar. Detalhe no
+> [`HANDOFF.md`](HANDOFF.md).
 >
 > Erro de método, do mesmo tipo que este projeto já registrou quatro vezes: **concluir ausência a
 > partir de uma busca que não achou**, em vez de consultar a fonte que enumera. A fonte existia em

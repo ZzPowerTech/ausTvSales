@@ -29,7 +29,11 @@ fora de contexto.
 
 ## ⚠️ Erros já cometidos — não repetir
 
-Três afirmações foram feitas com confiança e estavam **erradas**. Todas pela mesma causa raiz.
+**Cinco** afirmações foram feitas com confiança e estavam **erradas**. Todas pela mesma causa raiz.
+As quatro primeiras estão abaixo; a quinta — *"o Plan não expõe lista de servidores"* — foi
+descoberta em 2026-08-26 e está na seção
+[A lista autoritativa de endpoints do Plan](#-a-lista-autoritativa-de-endpoints-do-plan-foi-encontrada-2026-08-26),
+porque o contexto dela é longo demais para caber aqui.
 
 **1. "O colapso de aquisição começou em dezembro/2025."** Falso. A série usada vinha do
 `Quests/playerdata` e media **quem entrou no tutorial**, não quem chegou. Em dezembro o tutorial
@@ -260,7 +264,7 @@ tutorial parou de capturar novatos em dez/2025 e a taxa caiu de ~100% para 12% a
 | `funnel.network_to_survival` | construível já | `serverOverview` de dois servidores |
 | `plan.proxy_registration_alive` | bloqueado | shape de `/v1/graph?type=uniqueAndNew` |
 | `platform.offline_account_share` | bloqueado | shape de `/v1/playersTable` |
-| `plan.orphan_instance` | ~~**sem fonte**~~ — **corrigido em 2026-08-26** | A conclusão de que "o Plan não expõe lista de servidores" era **falsa**: `/v1/servers` e `/v1/networkOverview` dão 404 porque são nomes errados. O endpoint é **`/v1/networkMetadata`**. Ver o bloco da lista autoritativa |
+| `plan.orphan_instance` | **sem fonte** *(premissa corrigida em 2026-08-26)* | A justificativa registrada — "o Plan não expõe lista de servidores" — era **falsa**: `/v1/servers` e `/v1/networkOverview` dão 404 por serem nomes errados. O candidato é **`/v1/networkMetadata`**, cuja descrição promete lista de servidores. Mas este check precisa de **dado recente por servidor**, e a descrição não promete isso; ninguém leu o corpo. Segue sem fonte verificada |
 | `plan.version_divergence` | **sem fonte** | `plan_version` só existe em `plan_servers` — mesmo bloqueio do ADR-002 |
 | `funnel.tutorial_entry_rate` | **sem fonte** | Plan não coleta nada de tutorial (bloco anterior deste documento) |
 
@@ -297,8 +301,10 @@ Confirmado por requisição: `/v1/datapoint` sem parâmetro responde
 `{"error":"type is required","status":400}`. Os valores válidos de `type` **não foram
 observados** — e não saem da documentação: o
 [Javadoc do Plan](https://plan-player-analytics.github.io/Plan/api/index.html) documenta a **API
-Java do plugin**, não os endpoints HTTP. A lista autoritativa fica no `/docs` do próprio webserver
-(`http://198.89.99.70:25504/docs`), que ninguém consultou ainda.
+Java do plugin**, não os endpoints HTTP. ~~A lista autoritativa fica no `/docs` do próprio webserver
+(`http://198.89.99.70:25504/docs`), que ninguém consultou ainda.~~ — **consultada em 2026-08-26**,
+e o resultado desmentiu duas coisas registradas neste documento. Ver a seção da lista autoritativa
+mais abaixo.
 
 **Duas armadilhas de leitura registradas:**
 
@@ -338,6 +344,11 @@ Formato relevante para quem escrever o parser:
   igual ao localhost. **ADR-001 está de pé.**
 - **Não há autenticação nos `/v1/*`.** Parâmetro faltando dá `400`; nome de servidor inválido dá
   `403`; nunca `401`. O `Authorization: Bearer` do client é palpite defensivo, não requisito.
+  > **Complicado em 2026-08-26, e por isso não protegido mais pelo "não relitigar":** o OpenAPI
+  > mostra que a autenticação é **chave de configuração** (`/v1/whoami` diz se está ligada) e que o
+  > esquema é **cookie de sessão**, não bearer. E no mesmo dia todo endpoint passou a responder
+  > `403`. O fato de 23/08 continua sendo o que se observou naquele dia; ele não descreve
+  > necessariamente o estado de hoje.
 - **`Use_X-Forwarded-For_Header: false`** — a whitelist do Plan usa o IP real do socket e **não é
   contornável por header**. Responde a pergunta 3b1 do spec.
 - **Dois servidores, sem duplicata:** `Survival` (id 3, backend) e `AusTv` (id 4, proxy), ambos em
@@ -403,19 +414,24 @@ argumento de que não havia alternativa.
 | endpoint | por que importa |
 |---|---|
 | `GET /v1/retention` | *"Get retention data for server or the network"*. A **S8.2** existe para calcular retenção por coorte, e é a **exceção 1** do ADR-002 — o único ponto autorizado a fazer SQL direto. Verificar o que este endpoint devolve antes de escrever a S8.2 |
-| `GET /v1/query` + `GET /v1/filters` | API de consulta com filtros e janela (`afterEpochMs`/`beforeEpochMs`, lista de servidores). É a ferramenta mais promissora para o funil da **S8.1**, e ninguém sabia que existia |
-| `GET /v1/joinAddresses` | endereço pelo qual o jogador entrou. Canal de aquisição, que hoje não é medido por nada |
+| `GET /v1/query` + `GET /v1/filters` | API de consulta com filtros e janela (`afterEpochMs`/`beforeEpochMs`, lista de servidores). Candidato para o degrau **rede → survival** da S8.1. **Não cobre** `tutorial_entrou` nem `tutorial_concluiu` — esses seguem bloqueados pela S8.0 — e não se sabe se resolve o denominador de rede (§2 do spec: proxy grava usuário, não sessão). Verificar o corpo antes de estimar |
+| `GET /v1/joinAddresses` | endereço de conexão usado pelo jogador. **Proxy possível** de canal de aquisição — só vale como canal se canais diferentes anunciarem hostnames diferentes. Rotular como proxy onde aparecer, pela mesma regra do critério 6 da S8.0 |
 | `GET /v1/playersTable` | já conhecido, mas o schema documenta `registered` por jogador — é a outra metade da exceção 2 (`plan_users.registered`) |
 
 ### `serverOverview` e `onlineOverview` não estão no documento
 
-Nenhum dos dois aparece no OpenAPI. Continuam **funcionando** — os payloads de 23/08 e 25/08 são
-reais —, mas estão fora da superfície documentada. É mais forte que "deprecado": não são mais parte
-do contrato publicado.
+Nenhum dos dois aparece no OpenAPI. **Funcionavam** em 23/08 e 25/08 — os payloads são reais —, mas
+não estão documentados.
 
-O `metrics` da S7.2 é construído sobre os dois. Não quebrou nada hoje, e a decisão de não migrar
-segue de pé — ver abaixo —, mas o módulo está apoiado em superfície não documentada, e isso passa a
-ser dívida conhecida em vez de suposição.
+Ausência de um documento é evidência **mais fraca** que uma declaração explícita, e pode ser lacuna
+de documentação. O que se pode dizer é que ela **soma** ao aviso de deprecação que o console emitiu
+em 25/08, e ambos apontam na mesma direção. Note também que aquele aviso nomeou apenas o
+`serverOverview`; o `onlineOverview` nunca foi marcado como deprecado por nada — os dois estão sendo
+tratados juntos com base numa única observação negativa compartilhada.
+
+A dívida não é só da S7.2. Além do módulo `metrics`, o `collection-alive.check` e o
+`network-to-survival.check` da **S6.3** também chamam `/v1/serverOverview`. É superfície não
+documentada sustentando parte da camada de saúde, e agora é dívida conhecida em vez de suposição.
 
 ### O `type` do `/v1/datapoint` **não é enumerado nem no documento autoritativo**
 
@@ -427,8 +443,12 @@ Um `string` livre com um exemplo. **A pergunta que ficou aberta na S7.2 não tem
 — a única enumeração conhecida continua sendo a do changelog, que este documento já registra como
 incompleta para listas.
 
-**A decisão de não migrar fica mais firme, não mais fraca**: migrar exigiria descobrir os `type`
-válidos por tentativa e erro contra a produção.
+**O que mudou é mais estreito do que parece:** a resposta **não está no `/docs`** — não que ela não
+exista. O Plan é open source (LGPL-3.0), e o enum de `type` quase certamente é legível no código
+fonte em minutos. Ninguém leu.
+
+A decisão de não migrar segue de pé, mas pelo motivo correto: os `type` válidos continuam
+desconhecidos, e descobri-los é trabalho que ninguém fez — não trabalho impossível.
 
 ### Autenticação é chave de configuração, e `/v1/whoami` é como se descobre
 
@@ -452,13 +472,26 @@ O documento lista endpoints que **modificam estado**:
 | `GET /v1/errors` | *"list of Plan error logs"* — conteúdo de arquivo de erro, com o que houver neles |
 
 **Não sondei nenhum deles**, e não vou: são endpoints de escrita e de autenticação numa produção
-com jogadores. O que se sabe é que em 2026-08-26, mais cedo, `GET /v1/serverOverview?server=Survival`
-devolveu dados **de um IP residencial não whitelistado, sem credencial nenhuma**.
+com jogadores.
 
-Se a mesma ausência de autenticação valer para o `saveGroupPermissions`, qualquer um que alcance a
-porta 25504 altera permissões web. A verificação é uma requisição a `/v1/whoami`, que o próprio spec
-indica como forma de saber se a autenticação está ligada. **Isso vale antes do unban all**, que é
-quando o servidor ganha atenção.
+O que se **observou**: em 2026-08-26, mais cedo, `GET /v1/serverOverview?server=Survival` devolveu
+dados a uma requisição **sem credencial nenhuma**, partindo de uma máquina residencial.
+
+O que **não se sabe, e a diferença é o argumento inteiro**: se aquele IP estava na whitelist de
+aplicação do Plan. A §10b do spec registra que essa whitelist **existe e cobre a 25504**, e ninguém
+leu o conteúdo dela. A leitura ter funcionado é, se alguma coisa, indício de que o IP **estava**
+permitido. E o 403 de horas depois tem "whitelist ajustada" entre as causas candidatas — o que
+concede que uma whitelist governa este caminho.
+
+Portanto: **se** aquele IP não estiver na whitelist — não verificado — então a superfície de leitura
+está aberta a qualquer origem, e a pergunta seguinte é se a de escrita também está. Nessa hipótese,
+qualquer um que alcance a 25504 altera permissões web.
+
+Verificação, nesta ordem: **ler a whitelist no `config.yml` do Plan**, depois `/v1/whoami`. **Antes
+do unban all**, que é quando o servidor ganha atenção.
+
+> Note que a própria tabela acima já traz evidência parcial em contrário: o `/v1/storePreferences`
+> declara `403` se não logado. Pelo menos um endpoint de escrita gateia em login.
 
 ### 🔴 Mudança de estado observada no mesmo dia
 
@@ -474,12 +507,51 @@ inclusive a URL idêntica que havia devolvido dados:
 Não sei a causa e não vou inventar uma: pode ser whitelist ajustada, autenticação ligada, bloqueio
 por volume de sondagens, ou reinício com outra config.
 
-**O que importa operacionalmente:** se a VPS do sales também estiver levando 403, os seis checks da
-S6.3 e as rotas de `metrics` da S7.2 passam a reportar degradado. Isso é o risco da §10b se
-materializando — com a diferença de que, desta vez, **o sistema diz em voz alta em vez de parar em
-silêncio**, que é exatamente o que a camada foi construída para fazer.
+Para quem for pesar a terceira hipótese: nesta sessão saíram **cerca de 15 requisições** desta
+máquina para a 25504, ao longo de algumas horas — 2 de leitura de dados, 7 sondando caminhos de
+spec, e 8 de status na última rodada. Volume baixo, mas registrado para não virar suposição.
 
-Conferir da VPS: `curl -s -o /dev/null -w "%{http_code}\n" http://198.89.99.70:25504/v1/whoami`
+**O que importa operacionalmente — e são só metade dos checks.** Sob 403 na API, degradam apenas os
+que falam HTTP com o Plan:
+
+| check | fonte | sob 403 da API |
+|---|---|---|
+| `plan.collection_alive` | `PlanApiClient` | degrada |
+| `platform.offline_account_share` | `PlanApiClient` | degrada |
+| `funnel.network_to_survival` | API **+** MySQL | degrada (metade da API) |
+| `plan.orphan_instance` | `PlanDatabase` | **segue verde** |
+| `plan.proxy_registration_alive` | `PlanDatabase` | **segue verde** |
+| `plan.version_divergence` | `PlanDatabase` | **segue verde** |
+
+Mais as rotas de `metrics` da S7.2, que degradam por inteiro.
+
+> **Isto corta contra a tese desta própria seção.** A exceção 2 do ADR-002 — a que perdeu a
+> justificativa alegada — é o que mantém três dos seis checks vivos durante uma queda da API. Fechar
+> a exceção sem substituir a fonte trocaria uma dívida de acoplamento por uma perda de cobertura
+> justamente no cenário observado hoje. É argumento a favor de manter, e está aqui porque omiti-lo
+> tornaria esta seção uma peça de acusação em vez de um registro.
+
+**E o alerta que sair vai apontar para o lugar errado.** O `PlanApiClient` mapeia **401 e 403 para o
+mesmo `PlanAuthError`** (`plan-api.client.ts`), cuja taxonomia diz *"nossa credencial está errada ou
+expirou — bug nosso, não queda"*. Ou seja: sob o 403 observado, o sistema **afirma uma causa** entre
+as quatro possíveis e manda quem investiga atrás do token — que este mesmo documento acabou de
+registrar como estando no esquema errado. Colapsar 401 e 403 vira dívida a corrigir.
+
+**Não é o risco da §10b.** Aquele é restrição de IP no nível do provedor quebrando o **ETL na
+3306**. Isto é filtro de aplicação na 25504 e não toca o caminho do ETL. São dois caminhos de dado
+diferentes, e confundi-los é como se chega à tabela errada.
+
+O que continua verdadeiro: a camada **fala** em vez de parar em silêncio — mas só pelos três checks
+que dependem da API, e com a causa errada no rótulo.
+
+Conferir da VPS, nesta ordem:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" http://198.89.99.70:25504/v1/whoami
+```
+
+E ler a whitelist de IP no `config.yml` do Plan — é o que decide se o 403 é whitelist ou
+autenticação, e ninguém leu o conteúdo dela até hoje.
 
 ---
 
