@@ -213,10 +213,11 @@ A entrega mais importante do plano. Sem ela, tudo pode parar em silêncio de nov
 
 # Sprint 7 — API: saúde exposta e núcleo de métricas
 
-> **ENTREGUE em 2026-08-26** (PRs #150, #153, #155, #156, #158). Milestone
-> `AusTV Admin S7` fechada: 13 de 13 SP, ambas as histórias, sem corte.
+> **ENTREGUE em 2026-08-26** (PRs #150, #153, #155, #156, #158): **13 de 13 SP**, ambas as
+> histórias, sem corte.
 >
-> `main` verde: **45 suítes, 437 testes**, build e lint limpos, e2e com Postgres real no CI.
+> `main` verde: **45 suítes unitárias, 437 testes**, build e lint limpos. Os e2e rodam em config
+> separada (`test/jest-e2e.json`) e não entram nessa conta — vão no CI, contra um Postgres real.
 
 ### S7.1 — Módulo `health` no NestJS · 5 SP · `feat/api-health`
 
@@ -274,9 +275,20 @@ A entrega mais importante do plano. Sem ela, tudo pode parar em silêncio de nov
 >
 > #### `/v1/serverOverview` está deprecado, e não migramos
 >
-> O console do Plan avisa em favor do `/v1/datapoint`. **O sucessor ainda não serve:** os
-> datapoints implementados (PLAYTIME, AFK_TIME, WORLD_PIE, SERVER_PIE, MOST_PLAYED_*) não dão
-> chegadas, jogadores únicos, sessões nem retenção. Detalhe e armadilhas de leitura no
+> O console do Plan avisa em favor do `/v1/datapoint`. **Segundo o changelog do Plan**, os
+> datapoints implementados são PLAYTIME, AFK_TIME, AFK_TIME_PERCENTAGE, WORLD_PIE, SERVER_PIE,
+> MOST_PLAYED_GAME_MODE e MOST_PLAYED_WORLD — nenhum dos quais dá chegadas, jogadores únicos,
+> sessões ou retenção.
+>
+> **Isso não é enumeração verificada.** Os valores válidos de `type` não foram observados, e a
+> lista autoritativa fica no `/docs` do webserver do Plan, que ninguém consultou. O próprio
+> changelog já se mostrou incompleto para esse tipo de lista: ele marca como deprecados o
+> `sessionsOverview` e o `network/sessionsOverview`, **não** os dois que usamos — o aviso de
+> deprecação do `serverOverview` veio da instância viva, não dele.
+>
+> A decisão de não migrar é conservadora e o custo de estar errado é inação, não número errado. Mas
+> ela se apoia numa fonte que a investigação provou incompleta, e isso fica registrado em vez de
+> arredondado. Detalhe e armadilhas de leitura no
 > [`HANDOFF.md`](../features/austv-admin/HANDOFF.md).
 >
 > #### Dois achados do review que valem registro
@@ -298,18 +310,19 @@ A entrega mais importante do plano. Sem ela, tudo pode parar em silêncio de nov
       `overrideProvider(PlanApiClient)`
 - [~] 401 sem token e 429 sob flood verificados por teste de integração — **401 e o flood de 429
       estão cobertos** (`throttling.e2e-spec.ts` esgota o perfil de dashboard e afirma o 429 na
-      requisição seguinte). Nas rotas de `metrics` o 429 é afirmado pelo **header**
-      `x-ratelimit-limit: 120`, não por flood próprio: a chave do throttler inclui o nome do
-      handler, então um segundo flood custaria ~1 min de CI para reprovar o mesmo mecanismo.
-      Decisão consciente, registrada aqui em vez de marcada como completa
+      requisição seguinte). Nas rotas de `metrics` não há flood próprio: o que o header
+      `x-ratelimit-limit: 120` afirma é o **acoplamento do throttler à rota e qual perfil
+      resolveu** — não o 429 em si. A chave do throttler inclui o nome do handler, então um segundo
+      flood custaria ~1 min de CI para reprovar o mesmo mecanismo. Decisão consciente, registrada
+      aqui em vez de marcada como completa
 
 **[CORTE]** ~~S7.1 pode sair se a S6.3 já entregar visibilidade suficiente no Discord.~~ — **não
 foi cortada.** A sprint coube inteira, e a S7.1 é pré-requisito da S12.1.
 
-### O que a S7 acrescentou fora do plano
+### O que a S7 exigiu e o plano não enumerava
 
-Três PRs de infraestrutura que as duas histórias exigiam pelos critérios e que o plano não
-enumerava separadamente:
+Três PRs de infraestrutura. Não são escopo extra: Helmet, throttling e Swagger estão nomeados no
+critério 5 da S7.2. Estavam fora da **enumeração** do plano, não fora do plano.
 
 | PR | o que |
 |---|---|
@@ -541,8 +554,8 @@ jogo.**
 | ~~3~~ | S6 | ~~Unificar bancos do Plan~~ — **concluída 2026-08-20**, fora do fluxo de sprint | ~~5~~ → 0 |
 | 3b | S6 | Auditar exposição do MySQL (3306) | 2 |
 | 4 | S6 | **Checks de saúde + alerta** | 8 |
-| 5 | S7 | Módulo `health` | 5 |
-| 6 | S7 | `metrics` core | 8 |
+| ~~5~~ | S7 | ~~Módulo `health`~~ — **entregue 2026-08-26** | 5 |
+| ~~6~~ | S7 | ~~`metrics` core~~ — **entregue 2026-08-26** | 8 |
 | 6b | S8 | **Fonte de dados do tutorial** — *aberta 2026-08-23* | 5 |
 | 7 | S8 | Módulo `funnel` (4 degraus) | 8 |
 | 8 | S8 | Retenção por coorte | 5 |
