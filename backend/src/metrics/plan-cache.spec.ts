@@ -25,6 +25,7 @@ describe('PlanCache', () => {
       storedAt: T0,
       ageMs: 0,
       reason: null,
+      error: null,
     });
     expect(fetch).toHaveBeenCalledTimes(1);
   });
@@ -103,7 +104,62 @@ describe('PlanCache', () => {
       storedAt: null,
       ageMs: null,
       reason: 'recusou',
+      error: expect.any(Error) as Error,
     });
+  });
+
+  it('hands the error object over so the caller can classify it', async () => {
+    // The cache knows about caching, not about Plan's error taxonomy. Teaching
+    // it would put the same knowledge in two places; handing the error over
+    // keeps the classification where the contract is decided.
+    class Peculiar extends Error {}
+    const fetch = jest.fn().mockRejectedValue(new Peculiar('especifico'));
+
+    const result = await cache.read('k', TTL, fetch, T0);
+
+    expect(result.error).toBeInstanceOf(Peculiar);
+  });
+
+  it('collapses concurrent misses into a single fetch', async () => {
+    // A TTL bounds how OFTEN Plan is asked, not how many ask at once. Five
+    // requests on a cold key would otherwise be five HTTP calls to a webserver
+    // running inside the Minecraft process — the stampede this class exists to
+    // prevent, on the axis a TTL alone does not cover.
+    let release!: (value: string) => void;
+    const fetch = jest
+      .fn()
+      .mockReturnValue(new Promise<string>((resolve) => (release = resolve)));
+
+    const reads = Promise.all(
+      Array.from({ length: 5 }, () => cache.read('k', TTL, fetch, T0)),
+    );
+    release('um');
+    const results = await reads;
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(results.map((r) => r.value)).toEqual(['um', 'um', 'um', 'um', 'um']);
+    // Every joiner reports the instant the SHARED request started, not the
+    // instant it personally got the answer.
+    expect(
+      new Set(results.map((r) => r.storedAt?.toISOString())),
+    ).toHaveProperty('size', 1);
+  });
+
+  it('lets the next caller retry after a shared fetch fails', async () => {
+    // The in-flight entry must be cleared on rejection too. Leaving it would
+    // make every later caller await an already-failed promise forever.
+    const fetch = jest
+      .fn()
+      .mockRejectedValueOnce(new Error('caiu'))
+      .mockResolvedValueOnce('depois');
+
+    const first = await cache.read('k', TTL, fetch, T0);
+    const second = await cache.read('k', TTL, fetch, T0);
+
+    expect(first.outcome).toBe('unavailable');
+    expect(second.outcome).toBe('miss');
+    expect(second.value).toBe('depois');
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 
   it('keeps an expired entry so a later outage can still fall back to it', async () => {

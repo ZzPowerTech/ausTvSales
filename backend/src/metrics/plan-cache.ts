@@ -22,13 +22,33 @@ export interface CacheResult<T> {
   storedAt: Date | null;
   /** Age of the served value in milliseconds. Null when unavailable. */
   ageMs: number | null;
-  /** Why the fetch failed, when it did. Null on `fresh` and `miss`. */
+  /**
+   * The full failure message. Log-only — see the class doc.
+   *
+   * Carries the Plan URL and, for some failures, an excerpt of Plan's own
+   * response body. Useful to whoever is debugging, and not something to hand a
+   * browser.
+   */
   reason: string | null;
+  /**
+   * The failure itself, for a caller that needs to classify it.
+   *
+   * Handed over rather than pre-classified here: this class knows about caching,
+   * not about Plan's error taxonomy, and teaching it would put the same
+   * knowledge in two places.
+   */
+  error: unknown;
 }
 
 interface Entry {
   value: unknown;
   storedAt: Date;
+}
+
+/** A fetch already in progress for a key, awaited instead of duplicated. */
+interface InFlight {
+  promise: Promise<unknown>;
+  startedAt: Date;
 }
 
 /** Safety net; the real bound is the handful of endpoints x configured servers. */
@@ -68,11 +88,34 @@ const MAX_ENTRIES = 200;
  * "worth forgetting". The stale fallback above is the reason: dropping the value
  * at TTL would turn a Plan outage into `unavailable` after one minute, when a
  * ten-minute-old reading is still the most useful thing anyone has.
+ *
+ * ## Concurrent readers share one fetch
+ *
+ * A TTL bounds how *often* Plan is asked, but on its own it does nothing about
+ * how many ask at the same instant: N requests arriving on a cold or
+ * just-expired key would each miss and each issue their own HTTP call. That is
+ * the stampede, and it lands on a webserver inside the Minecraft process — the
+ * precise thing this class exists to prevent, so bounding the rate and leaving
+ * the concurrency open would be protecting the wrong axis.
+ *
+ * So an in-flight fetch is recorded and later callers await it instead of
+ * starting a second one. They all get the same value and the same outcome; only
+ * one request leaves the process.
+ *
+ * ## The failure reason does not leave this class
+ *
+ * `CacheResult.reason` is the raw error message, which carries the Plan URL and
+ * sometimes an excerpt of Plan's own response body (an HTML login page, when
+ * auth is misconfigured). It belongs in the log, where it already goes. A caller
+ * publishing it over HTTP would be pushing internal topology and unfiltered
+ * upstream content across a trust boundary — `MetricsService` classifies it
+ * before it reaches a response.
  */
 @Injectable()
 export class PlanCache {
   private readonly logger = new Logger(PlanCache.name);
   private readonly entries = new Map<string, Entry>();
+  private readonly inFlight = new Map<string, InFlight>();
 
   /**
    * Serve `key` from cache, or call `fetch` and store what it returns.
@@ -98,19 +141,19 @@ export class PlanCache {
         storedAt: cached.storedAt,
         ageMs: age,
         reason: null,
+        error: null,
       };
     }
 
     try {
-      const value = await fetch();
-      this.store(key, value, now);
-      this.log(key, 'miss', 0, ttlMs, null);
+      const { value, startedAt } = await this.fetchOnce(key, ttlMs, fetch, now);
       return {
         outcome: 'miss',
-        value,
-        storedAt: now,
-        ageMs: 0,
+        value: value as T,
+        storedAt: startedAt,
+        ageMs: Math.max(0, now.getTime() - startedAt.getTime()),
         reason: null,
+        error: null,
       };
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -123,6 +166,7 @@ export class PlanCache {
           storedAt: cached.storedAt,
           ageMs: age,
           reason,
+          error,
         };
       }
 
@@ -133,6 +177,7 @@ export class PlanCache {
         storedAt: null,
         ageMs: null,
         reason,
+        error,
       };
     }
   }
@@ -140,14 +185,60 @@ export class PlanCache {
   /** Drop everything. Exists for tests and for a future admin action. */
   clear(): void {
     this.entries.clear();
+    this.inFlight.clear();
+  }
+
+  /**
+   * Run `fetch` for `key`, or join the call already running for it.
+   *
+   * The entry is stored here rather than by the caller so that every joiner sees
+   * the same `storedAt` — the instant the *shared* request started, not the
+   * instant each of them happened to be handed the result.
+   */
+  private async fetchOnce(
+    key: string,
+    ttlMs: number,
+    fetch: () => Promise<unknown>,
+    now: Date,
+  ): Promise<{ value: unknown; startedAt: Date }> {
+    const running = this.inFlight.get(key);
+    if (running) {
+      this.logger.debug(
+        `Plan cache coalesce: ${key} — juntando-se a uma busca ja em andamento`,
+      );
+      return {
+        value: await running.promise,
+        startedAt: running.startedAt,
+      };
+    }
+
+    const promise = fetch();
+    this.inFlight.set(key, { promise, startedAt: now });
+
+    try {
+      const value = await promise;
+      this.store(key, value, now);
+      this.log(key, 'miss', 0, ttlMs, null);
+      return { value, startedAt: now };
+    } finally {
+      // `finally`, not the success path: a rejection that left the entry behind
+      // would make every later caller await an already-failed promise forever.
+      this.inFlight.delete(key);
+    }
   }
 
   private store(key: string, value: unknown, now: Date): void {
     if (this.entries.size >= MAX_ENTRIES && !this.entries.has(key)) {
-      // Insertion order is fine as an eviction rule here: the key space is a
-      // handful of endpoints times the configured servers, so hitting this at
-      // all means something is generating keys it should not be, and dropping
-      // the oldest is a better failure than growing without bound.
+      // Eviction is by FIRST insertion, not by last use — `Map.set` on an
+      // existing key keeps its original position, so this is not an LRU and
+      // would happily evict the hottest entry. That is acceptable only because
+      // the bound is unreachable: keys are `<endpoint>:<configured server>`,
+      // and the server is always the name resolved from `PLAN_SERVERS`, never
+      // the caller's string. The key space is exactly 2 x |PLAN_SERVERS|.
+      //
+      // Reaching this at all therefore means something started generating keys
+      // per request, and the warning below is the point — the eviction is just
+      // a better failure than growing without bound.
       const oldest = this.entries.keys().next();
       if (!oldest.done) {
         this.entries.delete(oldest.value);
