@@ -97,6 +97,12 @@ documentadas e isoladas em módulo próprio**, sempre em usuário **read-only**:
 cada um roda*:
 
 - `plan.orphan_instance` — servidor registrado no Plan sem dado recente
+  > ⚠️ **A frase acima descreve a intenção, não o check construído.** O
+  > `OrphanInstanceCheck` reconcilia duas **listas** (`plan_servers` ×
+  > `PLAN_SERVERS`) e não olha recência: recência por servidor exigiria
+  > `plan_sessions`, que está **fora** desta exceção. Ver o docblock de
+  > `orphan-instance.check.ts`. Esta divergência entre a redação e o
+  > comportamento já produziu uma conclusão errada em 2026-08-26.
 - `plan.version_divergence` — builds diferentes entre instâncias, que corrompem schema compartilhado
   (ADR-005)
 
@@ -376,11 +382,17 @@ Reutiliza os componentes de gráfico da Sprint 5 do `ausTvSales`.
 
 Cada check roda periodicamente e **alerta ativamente no Discord** quando falha.
 
+> ⚠️ **Esta tabela é a intenção; o código é o contrato.** Os identificadores aqui são idênticos aos
+> nomes das classes de check, o que faz *ler esta seção parecer* ler o check — e não é. Onde a
+> implementação divergiu da redação, a divergência está anotada na própria linha. Duas já
+> divergiram, e a confusão entre as duas coisas já custou uma conclusão errada
+> (`HANDOFF.md`, erro 5 e a correção de 2026-08-26).
+
 | check | condição de alerta | desastre que teria evitado |
 |---|---|---|
 | Coleta viva por servidor | nenhuma sessão nova em 6h num servidor que deveria estar online | proxy morto de maio a agosto/2026 |
-| Registro vivo no proxy | nenhum `plan_users.registered` novo em 24h | idem |
-| Instância órfã | servidor em `plan_servers` sem dado recente | Plan em SQLite invisível |
+| Registro vivo no proxy | nenhum `plan_users.registered` novo em 24h — o check lê `PlanDatabase.networkArrivals()`, **não** `/v1/graph?type=uniqueAndNew` como o `HANDOFF.md` de 23/08 supunha | idem |
+| Instância órfã | servidor em `plan_servers` sem dado recente — ⚠️ o check **construído** reconcilia listas, não recência (ver ADR-002, exceção 2) | Plan em SQLite invisível |
 | Versões divergentes | builds diferentes entre instâncias | risco de corromper schema |
 | **Taxa de entrada no tutorial** ⚠️ | `novatos_no_tutorial / novatos_no_survival` cai abaixo de 70% por 3 dias | tutorial sem capturar por 8 meses |
 

@@ -420,7 +420,9 @@ argumento de que não havia alternativa.
 | endpoint | por que importa |
 |---|---|
 | `GET /v1/retention` | *"Get retention data for server or the network"*. A **S8.2** existe para calcular retenção por coorte, e é a **exceção 1** do ADR-002 — o único ponto autorizado a fazer SQL direto. Verificar o que este endpoint devolve antes de escrever a S8.2 |
-| `GET /v1/query` + `GET /v1/filters` | API de consulta com filtros e janela (`afterEpochMs`/`beforeEpochMs`, lista de servidores). Candidato para o degrau **rede → survival** da S8.1. **Não cobre** `tutorial_entrou` nem `tutorial_concluiu` — esses seguem bloqueados pela S8.0 — e não se sabe se resolve o denominador de rede (§2 do spec: proxy grava usuário, não sessão). Verificar o corpo antes de estimar |
+| `GET /v1/query` + `GET /v1/filters` | API de consulta com filtros e janela (`afterEpochMs`/`beforeEpochMs`, lista de servidores). Candidato para o degrau **rede → survival** da S8.1. Não cobre `tutorial_entrou` nem `tutorial_concluiu`, e isso não é leitura de documento: o Plan
+**não coleta nada de tutorial** (bloco anterior deste arquivo), então nenhum endpoint dele poderia
+cobrir. Seguem bloqueados pela S8.0 — e não se sabe se resolve o denominador de rede (§2 do spec: proxy grava usuário, não sessão). Verificar o corpo antes de estimar |
 | `GET /v1/joinAddresses` | endereço de conexão usado pelo jogador. **Proxy possível** de canal de aquisição — só vale como canal se canais diferentes anunciarem hostnames diferentes. Rotular como proxy onde aparecer, pela mesma regra do critério 6 da S8.0 |
 | `GET /v1/playersTable` | já conhecido, mas o schema documenta `registered` por jogador — é a outra metade da exceção 2 (`plan_users.registered`) |
 
@@ -546,8 +548,9 @@ Mais as rotas de `metrics` da S7.2, que degradam por inteiro.
 **E o alerta que sair vai rotular a causa errada.** O `PlanApiClient` mapeia **401 e 403 para o
 mesmo `PlanAuthError`** (`plan-api.client.ts`). A mensagem é razoável e já cita as duas pistas —
 *"Plan recusou a credencial (HTTP 403) em … — verifique PLAN_API_TOKEN **e a whitelist de IP do
-Plan**"*. O problema está um nível acima: o docblock da classe (`plan-api.errors.ts`) declara que
-esta falha significa *"nossa credencial está errada ou expirou — **bug nosso, não queda**"*.
+Plan**"*. O problema está um nível acima: o comentário de módulo de `plan-api.errors.ts` classifica esta
+falha como *"our credential is wrong or expired. Our bug, not an outage"* (tradução minha), e o
+docblock da classe repete a ideia com outras palavras.
 
 Sob um 403 de whitelist isso é um rótulo causal errado, e é o rótulo que o alerta carrega. Colapsar
 401 e 403 numa classe só vira dívida a corrigir.
