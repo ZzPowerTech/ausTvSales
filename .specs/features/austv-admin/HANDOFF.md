@@ -274,6 +274,64 @@ Exige ligar o agendamento num ambiente real com webhook configurado. Nada disso 
 **3. O critério 5** — *"alerta de taxa de entrada no tutorial testado com valor forçado"* — é
 inexequível enquanto o check não tiver fonte.
 
+### ⚠️ `/v1/serverOverview` está deprecado — e o sucessor ainda não serve (2026-08-25)
+
+Descoberto durante a S7.2, ao sondar o Plan de produção. O console do jogo respondeu:
+
+```
+[15:51:38 WARN] [plan]: Webserver: Deprecated endpoint /v1/serverOverview was called.
+Endpoint /v1/datapoint should be used instead.
+```
+
+**Não migrar ainda.** O `/v1/datapoint` existe, mas os datapoints implementados não cobrem nada
+do que este projeto consome. Do changelog do Plan:
+
+> Implemented datapoints PLAYTIME, AFK_TIME, AFK_TIME_PERCENTAGE, WORLD_PIE, SERVER_PIE,
+> MOST_PLAYED_GAME_MODE, MOST_PLAYED_WORLD
+
+Nenhum deles dá `new_players`, `unique_players`, `sessions` ou retenção — que é exatamente o que
+`serverOverview` e `onlineOverview` fornecem, e o que os checks da S6.3 e o módulo `metrics` da
+S7.2 precisam. Migrar agora seria trocar um endpoint que funciona por um que não tem os campos.
+
+Confirmado por requisição: `/v1/datapoint` sem parâmetro responde
+`{"error":"type is required","status":400}`. Os valores válidos de `type` **não foram
+observados** — e não saem da documentação: o
+[Javadoc do Plan](https://plan-player-analytics.github.io/Plan/api/index.html) documenta a **API
+Java do plugin**, não os endpoints HTTP. A lista autoritativa fica no `/docs` do próprio webserver
+(`http://198.89.99.70:25504/docs`), que ninguém consultou ainda.
+
+**Duas armadilhas de leitura registradas:**
+
+1. O changelog lista como deprecados o `/v1/sessionsOverview` e o `/v1/network/sessionsOverview`
+   — **não** os dois que usamos. O aviso do console veio de uma versão diferente da citada no PR.
+   Ou seja, a lista de deprecados do changelog **não é** a lista completa; a fonte autoritativa é o
+   aviso da instância viva.
+2. O changelog menciona permissões web `data.network`, `data.server` e `data.player` para o
+   `/v1/datapoint`. Hoje os `/v1/*` **não têm autenticação nenhuma** (verificado em 2026-08-23:
+   parâmetro faltando dá 400, servidor inválido dá 403, nunca 401). Se a migração vier acompanhada
+   dessas permissões, o `PLAN_API_TOKEN` — hoje palpite defensivo — vira requisito, e o client
+   passa a precisar de credencial que ninguém provisionou.
+
+**Decisão da S7.2:** continuar em `serverOverview`/`onlineOverview`, concentrar os caminhos num
+único ponto do `PlanApiClient` para que a migração futura seja uma linha, e reabrir quando o
+`/v1/datapoint` publicar os datapoints de chegada, sessão e retenção.
+
+### Payload de `/v1/onlineOverview` observado (2026-08-25)
+
+Colhido do Survival de produção. Não tem UUID, nickname nem IP — só contagens agregadas.
+
+Formato relevante para quem escrever o parser:
+
+- **Tipos misturados na mesma seção.** `new_players_7d` é número JSON; `new_players_retention_7d_perc`
+  é a string `"66.67%"`; `sessions_30d_trend` é o objeto `{text, direction, reversed}`.
+- **`n` está disponível ao lado de todo percentual.** `new_players_retention_7d: 24` com
+  `new_players_7d: 36` dá os 66,67%. A regra do projeto — nenhum percentual sem base — é
+  satisfeita por esta fonte sem cálculo extra.
+- Os mesmos sentinelas de "sem dado" do `serverOverview` valem aqui: `toNumber()` de
+  `plan-server-overview.ts` já os trata e **deve ser reusado**, nunca reimplementado.
+
+---
+
 ### Fatos de infraestrutura apurados em 2026-08-23 (não relitigar)
 
 - **A VPS alcança o Plan.** `curl` da VPS para `198.89.99.70:25504/v1/serverOverview` devolve `400`,

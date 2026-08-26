@@ -159,6 +159,9 @@ describe('OpenAPI docs (e2e)', () => {
       expect(
         paths['/health/instrumentation/checks/{name}/history'].get?.security,
       ).toBeUndefined();
+      // As rotas de metricas (S7.2) tambem herdam o requisito global.
+      expect(paths['/metrics/servers'].get?.security).toBeUndefined();
+      expect(paths['/metrics/servers/{server}'].get?.security).toBeUndefined();
     });
 
     it('documents the ingest routes under the API key, not the session', async () => {
