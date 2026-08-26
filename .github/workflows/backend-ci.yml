@@ -51,6 +51,14 @@ jobs:
       SESSION_JWT_SECRET: ci-session-secret-for-e2e-suite-0123456789
       # Non-secret CI value (64 hex chars) for the ingest guard boot validation.
       INGEST_API_KEYS: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+      # Nomes das instancias do Plan (S7.2). Sem eles o modulo `metrics` sobe com
+      # lista vazia e as rotas por servidor respondem 404 — o que faria o e2e
+      # testar um app que nao e o que roda em producao. `PLAN_BASE_URL` fica
+      # DELIBERADAMENTE ausente: e assim que a suite exercita o caminho
+      # degradado (Plan inalcancavel, nada em cache) sem precisar de um Plan
+      # falso.
+      PLAN_SERVERS: 'AusTv,Survival'
+      PLAN_PROXY_SERVER: 'AusTv'
 
     steps:
       - name: Checkout
