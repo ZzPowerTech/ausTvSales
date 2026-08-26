@@ -260,7 +260,7 @@ tutorial parou de capturar novatos em dez/2025 e a taxa caiu de ~100% para 12% a
 | `funnel.network_to_survival` | construível já | `serverOverview` de dois servidores |
 | `plan.proxy_registration_alive` | bloqueado | shape de `/v1/graph?type=uniqueAndNew` |
 | `platform.offline_account_share` | bloqueado | shape de `/v1/playersTable` |
-| `plan.orphan_instance` | **sem fonte** | Plan não expõe lista de servidores — `/v1/servers` e `/v1/networkOverview` dão **404**. A lista existe em `plan_servers`, mas o ADR-002 proíbe lê-la daqui |
+| `plan.orphan_instance` | ~~**sem fonte**~~ — **corrigido em 2026-08-26** | A conclusão de que "o Plan não expõe lista de servidores" era **falsa**: `/v1/servers` e `/v1/networkOverview` dão 404 porque são nomes errados. O endpoint é **`/v1/networkMetadata`**. Ver o bloco da lista autoritativa |
 | `plan.version_divergence` | **sem fonte** | `plan_version` só existe em `plan_servers` — mesmo bloqueio do ADR-002 |
 | `funnel.tutorial_entry_rate` | **sem fonte** | Plan não coleta nada de tutorial (bloco anterior deste documento) |
 
@@ -371,6 +371,115 @@ erro específico não seja repetido em código.
 proxy **não veio na unificação** — está no banco antigo. Na prática, **métrica de rede tem 3 dias de
 profundidade** (desde 2026-08-20). Para comparar antes/depois do unban isso é raso, e é melhor
 saber agora do que na hora de comparar.
+
+---
+
+## ✅ A lista autoritativa de endpoints do Plan foi encontrada (2026-08-26)
+
+O `/docs` do webserver — `http://198.89.99.70:25504/docs` — serve um **OpenAPI 3.0.1 completo**.
+Este documento dizia até hoje que ninguém o havia consultado; foi consultado, e o resultado desmente
+duas coisas que estavam registradas aqui como fato.
+
+### ❌ Erro 5 — "o Plan não expõe lista de servidores"
+
+**Falso.** Existe `GET /v1/networkMetadata` — *"Get metadata about the network such as list of
+servers"*.
+
+A investigação de 2026-08-23 tentou `/v1/servers` e `/v1/networkOverview`, levou 404 nos dois, e
+concluiu que o endpoint não existia. Os dois nomes estavam errados. A conclusão virou a
+**justificativa da exceção 2 do ADR-002** — a que autorizou ler `plan_servers` por SQL direto — e
+essa justificativa agora está sem apoio.
+
+É a mesma causa raiz dos erros 1 a 4: **concluir ausência a partir de uma busca que não achou**, em
+vez de consultar a fonte que enumera. O custo desta vez foi uma exceção a um ADR, aberta com o
+argumento de que não havia alternativa.
+
+> **O que NÃO está verificado, e não se conclui daqui:** se o `networkMetadata` traz o
+> `plan_version` por instância. O check `plan.version_divergence` precisa disso. Sem verificar o
+> corpo, a exceção 2 não pode ser fechada — só perdeu o motivo alegado.
+
+### O que mais a lista revelou
+
+| endpoint | por que importa |
+|---|---|
+| `GET /v1/retention` | *"Get retention data for server or the network"*. A **S8.2** existe para calcular retenção por coorte, e é a **exceção 1** do ADR-002 — o único ponto autorizado a fazer SQL direto. Verificar o que este endpoint devolve antes de escrever a S8.2 |
+| `GET /v1/query` + `GET /v1/filters` | API de consulta com filtros e janela (`afterEpochMs`/`beforeEpochMs`, lista de servidores). É a ferramenta mais promissora para o funil da **S8.1**, e ninguém sabia que existia |
+| `GET /v1/joinAddresses` | endereço pelo qual o jogador entrou. Canal de aquisição, que hoje não é medido por nada |
+| `GET /v1/playersTable` | já conhecido, mas o schema documenta `registered` por jogador — é a outra metade da exceção 2 (`plan_users.registered`) |
+
+### `serverOverview` e `onlineOverview` não estão no documento
+
+Nenhum dos dois aparece no OpenAPI. Continuam **funcionando** — os payloads de 23/08 e 25/08 são
+reais —, mas estão fora da superfície documentada. É mais forte que "deprecado": não são mais parte
+do contrato publicado.
+
+O `metrics` da S7.2 é construído sobre os dois. Não quebrou nada hoje, e a decisão de não migrar
+segue de pé — ver abaixo —, mas o módulo está apoiado em superfície não documentada, e isso passa a
+ser dívida conhecida em vez de suposição.
+
+### O `type` do `/v1/datapoint` **não é enumerado nem no documento autoritativo**
+
+```json
+"name": "type", "schema": { "type": "string" }, "example": { "value": "PLAYTIME" }
+```
+
+Um `string` livre com um exemplo. **A pergunta que ficou aberta na S7.2 não tem resposta no `/docs`**
+— a única enumeração conhecida continua sendo a do changelog, que este documento já registra como
+incompleta para listas.
+
+**A decisão de não migrar fica mais firme, não mais fraca**: migrar exigiria descobrir os `type`
+válidos por tentativa e erro contra a produção.
+
+### Autenticação é chave de configuração, e `/v1/whoami` é como se descobre
+
+O `info.description` do spec: *"If authentication is enabled (see response of `/v1/whoami`) logging
+in is required for endpoints (`/auth/login`). Pass 'Cookie' header in the requests after login."*
+
+Ou seja, o `PLAN_API_TOKEN` do nosso client — hoje palpite defensivo, enviado como `Bearer` — está
+no esquema errado. O Plan usa **cookie de sessão**, não bearer token. Se a autenticação for ligada,
+o client da S6.3/S7.2 precisa de `/auth/login` + cookie, não do header que ele manda hoje.
+
+### ⚠️ Superfície de escrita exposta — verificar antes da campanha
+
+O documento lista endpoints que **modificam estado**:
+
+| endpoint | o que faz |
+|---|---|
+| `POST /v1/saveGroupPermissions` | altera as permissões web de um grupo |
+| `DELETE /v1/deleteGroup` | remove um grupo de permissão |
+| `POST /v1/saveTheme` · `POST /v1/deleteTheme` | escreve e apaga tema |
+| `POST /v1/storePreferences` | preferências do usuário — este declara `403` se não logado |
+| `GET /v1/errors` | *"list of Plan error logs"* — conteúdo de arquivo de erro, com o que houver neles |
+
+**Não sondei nenhum deles**, e não vou: são endpoints de escrita e de autenticação numa produção
+com jogadores. O que se sabe é que em 2026-08-26, mais cedo, `GET /v1/serverOverview?server=Survival`
+devolveu dados **de um IP residencial não whitelistado, sem credencial nenhuma**.
+
+Se a mesma ausência de autenticação valer para o `saveGroupPermissions`, qualquer um que alcance a
+porta 25504 altera permissões web. A verificação é uma requisição a `/v1/whoami`, que o próprio spec
+indica como forma de saber se a autenticação está ligada. **Isso vale antes do unban all**, que é
+quando o servidor ganha atenção.
+
+### 🔴 Mudança de estado observada no mesmo dia
+
+Horas depois daquela leitura bem-sucedida, **todo endpoint passou a responder 403** do mesmo IP —
+inclusive a URL idêntica que havia devolvido dados:
+
+```
+403  /v1/whoami          403  /v1/serverOverview?server=Survival
+403  /v1/networkMetadata 403  /v1/onlineOverview?server=Survival
+403  /v1/retention       403  /v1/datapoint?type=PLAYTIME
+```
+
+Não sei a causa e não vou inventar uma: pode ser whitelist ajustada, autenticação ligada, bloqueio
+por volume de sondagens, ou reinício com outra config.
+
+**O que importa operacionalmente:** se a VPS do sales também estiver levando 403, os seis checks da
+S6.3 e as rotas de `metrics` da S7.2 passam a reportar degradado. Isso é o risco da §10b se
+materializando — com a diferença de que, desta vez, **o sistema diz em voz alta em vez de parar em
+silêncio**, que é exatamente o que a camada foi construída para fazer.
+
+Conferir da VPS: `curl -s -o /dev/null -w "%{http_code}\n" http://198.89.99.70:25504/v1/whoami`
 
 ---
 

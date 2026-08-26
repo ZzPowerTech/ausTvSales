@@ -77,7 +77,7 @@ documentadas e isoladas em módulo próprio**, sempre em usuário **read-only**:
 | # | escopo | tabelas | por quê a API não serve |
 |---|---|---|---|
 | 1 | Coorte histórica (§6.2, S8.2) | `plan_users`, `plan_user_info`, `plan_sessions` | agregação por coorte × plataforma não existe em nenhum endpoint |
-| 2 | **Inventário de instâncias e chegadas de rede (§6.1, S6.3)** — *aprovada em 2026-08-23, estendida no mesmo dia* | **`plan_servers` e `plan_users`** | o Plan **não expõe lista de servidores** (`/v1/servers` e `/v1/networkOverview` retornam **404**), e a contagem de chegadas **de rede** não sai de nenhum endpoint derivado de sessão — o proxy grava usuário, não sessão |
+| 2 | **Inventário de instâncias e chegadas de rede (§6.1, S6.3)** — *aprovada em 2026-08-23; **premissa desmentida em 2026-08-26**, ver nota abaixo* | **`plan_servers` e `plan_users`** | ~~o Plan não expõe lista de servidores~~ — **falso**: `/v1/servers` e `/v1/networkOverview` dão 404 por serem nomes errados; o endpoint documentado é **`/v1/networkMetadata`**. A parte sobre chegadas de rede não foi reavaliada |
 
 #### Exceção 2 — inventário de instâncias (2026-08-23)
 
@@ -124,6 +124,28 @@ tabela de identidade — das mais estáveis do schema do Plan.
 4. **Credencial em variável de ambiente**, nunca versionada.
 5. **Degradação honesta:** banco inalcançável → os dois checks reportam `error` com o motivo, nunca
    `ok` e nunca zero.
+
+> ### ⚠️ A premissa desta exceção caiu em 2026-08-26
+>
+> O `/docs` do webserver do Plan serve um OpenAPI completo, e ele lista
+> **`GET /v1/networkMetadata`** — *"metadata about the network such as list of servers"*.
+>
+> A investigação de 23/08 tentou `/v1/servers` e `/v1/networkOverview`, levou 404, e concluiu que o
+> Plan não expunha a lista. Os dois nomes estavam errados. **Esta exceção foi aberta com o argumento
+> de que não havia alternativa, e havia.**
+>
+> **O que isso não decide:** se o `networkMetadata` traz `plan_version` por instância. O check
+> `plan.version_divergence` precisa disso, e sem verificar o corpo a exceção não pode ser fechada —
+> ela apenas perdeu o motivo alegado. O mesmo vale para a metade de `plan_users`: o
+> `/v1/playersTable` documenta `registered` por jogador, mas ninguém conferiu se serve.
+>
+> **Decisão do dono, e ela tem prazo:** enquanto a exceção estiver de pé, o `PlanDatabase` mantém
+> credencial de MySQL e uma conexão que o ADR-002 existe para evitar. Detalhe e endpoints correlatos
+> no [`HANDOFF.md`](HANDOFF.md).
+>
+> Erro de método, do mesmo tipo que este projeto já registrou quatro vezes: **concluir ausência a
+> partir de uma busca que não achou**, em vez de consultar a fonte que enumera. A fonte existia em
+> `/docs` o tempo todo.
 
 **Custo aceito.** `plan_servers` e `plan_users` são schema interno e podem mudar entre versões do
 Plan. É acoplamento real, e a mitigação é o tamanho do alvo: duas tabelas, seis colunas no total
