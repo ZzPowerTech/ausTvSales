@@ -521,8 +521,8 @@ residencial — e esse 403 tem **quatro causas candidatas**, das quais só uma �
 Se for ban por volume ou autenticação recém-ligada, nenhuma whitelist restritiva foi demonstrada.
 
 **Portanto a pergunta de segurança continua aberta.** A superfície de escrita nunca foi sondada — o
-teste foi um GET num endpoint de leitura — e a §10b pede **duas camadas mais autenticação**, das
-quais ninguém leu nenhuma. O bloco acima fica de pé, riscado em nada.
+teste foi um GET num endpoint de leitura — e das três camadas do placar abaixo **só a autenticação
+foi lida**. O bloco acima fica de pé, riscado em nada.
 
 ### 🔴 Medido em 2026-08-26: a autenticação do Plan está desligada
 
@@ -554,10 +554,11 @@ O princípio está na §11 item 3b1 do spec — *"filtro de aplicação nunca su
 | whitelist de aplicação | existe; recusou ao menos um IP | conteúdo **nunca lido** |
 | autenticação | **desligada** | 2026-08-26, medido |
 
-A whitelist é o único controle **conhecido** nesta porta. Não é o mesmo que "o único que existe": a
-linha do firewall tem cinco dias e esta seção inteira trata de uma mudança de estado que ninguém
-explicou — "firewall/whitelist ajustada" é uma das candidatas em aberto. Afirmar ausência de
-controle de rede hoje seria decidir essa candidata sem evidência.
+A whitelist é o único controle **conhecido de acesso à porta** — gate por endpoint é questão
+separada, e o `storePreferences` acima mostra que ao menos um existe. E "conhecido" não é o mesmo
+que "o único que existe": a linha do firewall tem cinco dias, e esta seção inteira trata de uma
+mudança de estado que ninguém explicou — "firewall/whitelist ajustada" é uma das candidatas em
+aberto. Afirmar ausência de controle de rede hoje seria decidir essa candidata sem evidência.
 
 **Efeito colateral útil:** com auth desligada, "autenticação recém-ligada" sai das quatro candidatas
 para o 403 da máquina residencial. Um 403 no `/v1/whoami`, que não recebe parâmetro, com auth off,
