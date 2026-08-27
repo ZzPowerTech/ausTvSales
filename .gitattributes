@@ -9,3 +9,6 @@ gradlew text eol=lf
 *.jar binary
 *.png binary
 *.ico binary
+
+# Markdown sempre LF na working tree (evita ruido de EOL entre Windows e CI)
+*.md text eol=lf
