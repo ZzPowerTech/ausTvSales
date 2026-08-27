@@ -499,6 +499,27 @@ duas hipóteses, não de uma.
 Verificação, nesta ordem: **ler a whitelist no `config.yml` do Plan**, depois `/v1/whoami`. **Antes
 do unban all**, que é quando o servidor ganha atenção.
 
+### Conferência parcial no mesmo dia — a VPS está permitida, e só isso
+
+`curl` da **VPS** para `/v1/whoami` devolve **200**; da máquina residencial, **403 em todos os
+endpoints**.
+
+**O que isso prova:** a VPS está permitida na 25504, ao menos naquele endpoint.
+
+**O que isso NÃO prova, e a distinção é o argumento:** um 200 vindo de um IP permitido não diz nada
+sobre *qualquer outro* IP estar bloqueado. A única evidência de que alguém é recusado é o 403 da
+residencial — e esse 403 tem **quatro causas candidatas**, das quais só uma é whitelist restritiva.
+Se for ban por volume ou autenticação recém-ligada, nenhuma whitelist restritiva foi demonstrada.
+
+**Portanto a pergunta de segurança continua aberta.** A superfície de escrita nunca foi sondada — o
+teste foi um GET num endpoint de leitura — e a §10b pede **duas camadas mais autenticação**, das
+quais ninguém leu nenhuma. O bloco acima fica de pé, riscado em nada.
+
+**A verificação que decide continua sendo a mesma, e continua não feita: ler a whitelist no
+`config.yml` do Plan.** É o que separa "whitelist restritiva funcionando" de "ban por volume", e é
+o que diz quem mais está na lista. **Antes do unban all**, que é quando o servidor ganha atenção —
+prazo que não mudou por causa de um 200.
+
 > Note que a própria tabela acima já traz evidência parcial em contrário: o `/v1/storePreferences`
 > declara `403` se não logado. Pelo menos um endpoint de escrita gateia em login.
 
@@ -562,14 +583,36 @@ diferentes, e confundi-los é como se chega à tabela errada.
 O que continua verdadeiro: a camada **fala** em vez de parar em silêncio — mas só pelos três checks
 que dependem da API, e com a causa errada no rótulo.
 
-Conferir da VPS, nesta ordem:
+### Conferência parcial no mesmo dia — o 403 não atinge o caminho do sistema
 
-```bash
-curl -s -o /dev/null -w "%{http_code}\n" http://198.89.99.70:25504/v1/whoami
+```
+VPS          -> /v1/whoami          200
+residencial  -> todos os endpoints  403
 ```
 
-E ler a whitelist de IP no `config.yml` do Plan — é o que decide se o 403 é whitelist ou
-autenticação, e ninguém leu o conteúdo dela até hoje.
+> **O quanto esse 200 prova, antes da conclusão.** Ele veio do `/v1/whoami` — que, pelo próprio
+> OpenAPI, é o endpoint cuja função é reportar estado de autenticação, e não um dos que os checks
+> consomem. Nenhum check foi executado. Três dos seis nem passam pela 25504: leem MySQL na 3306, que
+> este teste não tocou. E a última observação de VPS → `/v1/serverOverview` é de **2026-08-23**,
+> anterior à mudança de estado que esta seção documenta.
+
+**O que se conclui:** a VPS alcança a 25504. O 403 observado não atinge o caminho do sistema.
+
+**O que é inferência, não execução:** que os checks da S6.3 e as rotas de `metrics` respondam. É
+altamente provável e ninguém rodou. Um `curl` da VPS para `/v1/serverOverview?server=Survival`
+fecharia a metade que depende da API.
+
+**E a causa do 403 continua indeterminada.** "A whitelist recusando uma origem estranha" é uma das
+quatro candidatas listadas acima, não a conclusão — e as 17 requisições registradas nesta sessão
+tornam "bloqueio por volume" tão plausível quanto ela.
+
+A tabela de degradação por check continua válida como **descrição do que aconteceria** se a VPS
+perdesse acesso. Descreve uma hipótese, não o estado.
+
+O que **continua sem ser lido**: o conteúdo da whitelist e o corpo do `/v1/whoami`. Que o caminho do
+dashboard funcione é questão de **disponibilidade**; se a autenticação está ligada e quem mais está
+na lista é questão de **exposição**, e o prazo dela segue sendo o unban all — não o fato de o
+dashboard ler dados.
 
 ---
 
