@@ -350,11 +350,20 @@ Formato relevante para quem escrever o parser:
   igual ao localhost. **ADR-001 está de pé.**
 - **Não há autenticação nos `/v1/*`.** Parâmetro faltando dá `400`; nome de servidor inválido dá
   `403`; nunca `401`. O `Authorization: Bearer` do client é palpite defensivo, não requisito.
-  > **Complicado em 2026-08-26, e por isso não protegido mais pelo "não relitigar":** o OpenAPI
-  > mostra que a autenticação é **chave de configuração** (`/v1/whoami` diz se está ligada) e que o
-  > esquema é **cookie de sessão**, não bearer. E no mesmo dia todo endpoint passou a responder
-  > `403`. O fato de 23/08 continua sendo o que se observou naquele dia; ele não descreve
-  > necessariamente o estado de hoje.
+  > **Complicado em 2026-08-26:** o OpenAPI mostra que a autenticação é **chave de configuração**
+  > (`/v1/whoami` diz se está ligada) e que o esquema é **cookie de sessão**, não bearer. E no mesmo
+  > dia todo endpoint passou a responder `403` para uma origem. O fato de 23/08 descrevia 23/08.
+  >
+  > **CONFIRMADO horas depois, por leitura direta:** `/v1/whoami` da VPS devolve
+  > `{"authRequired":false,…}` (corpo truncado no terminal; só este campo foi lido). A autenticação
+  > **está desligada**.
+  >
+  > A conclusão de 23/08 estava certa; **o raciocínio dela, não**. "Nunca `401`" não implica
+  > ausência de autenticação — uma auth por cookie recusa com `403`, que é o que este mesmo Plan
+  > devolve. Estava certo por sorte, e agora está certo por medida.
+  >
+  > Consequência prática: o `Authorization: Bearer` do nosso client é config morta contra o estado
+  > atual, e estaria no esquema errado de qualquer forma.
 - **`Use_X-Forwarded-For_Header: false`** — a whitelist do Plan usa o IP real do socket e **não é
   contornável por header**. Responde a pergunta 3b1 do spec.
 - **Dois servidores, sem duplicata:** `Survival` (id 3, backend) e `AusTv` (id 4, proxy), ambos em
@@ -515,13 +524,53 @@ Se for ban por volume ou autenticação recém-ligada, nenhuma whitelist restrit
 teste foi um GET num endpoint de leitura — e a §10b pede **duas camadas mais autenticação**, das
 quais ninguém leu nenhuma. O bloco acima fica de pé, riscado em nada.
 
-**A verificação que decide continua sendo a mesma, e continua não feita: ler a whitelist no
-`config.yml` do Plan.** É o que separa "whitelist restritiva funcionando" de "ban por volume", e é
-o que diz quem mais está na lista. **Antes do unban all**, que é quando o servidor ganha atenção —
-prazo que não mudou por causa de um 200.
+### 🔴 Medido em 2026-08-26: a autenticação do Plan está desligada
 
-> Note que a própria tabela acima já traz evidência parcial em contrário: o `/v1/storePreferences`
-> declara `403` se não logado. Pelo menos um endpoint de escrita gateia em login.
+`/v1/whoami` da VPS devolve `{"authRequired":false,…}` — corpo truncado no terminal; **só este campo
+foi lido**. Os demais, `loggedIn` inclusive, não foram vistos, e é justamente `loggedIn` que diria a
+que principal um chamador sem credencial é resolvido com a auth off.
+
+**O que isso estabelece, e onde para.** `authRequired` é chave global, então o gate de autenticação
+não existe para **leitura** — observado duas vezes, da VPS e (mais cedo) da residencial.
+
+Para **escrita**, estabelece apenas que *esse* gate está aberto. Nenhum endpoint de escrita foi
+sondado, e a tabela de superfície de escrita logo acima traz evidência em contrário: o
+`POST /v1/storePreferences` **declara `403` se não logado**, ou seja, ao menos um write tem gate
+próprio, independente da chave global. O Plan resolve escrita por grupos de permissão web, e o que
+um chamador anônimo herda com auth off é desconhecido.
+
+**Portanto, o pior caso, rotulado como pior caso:** *se* os endpoints de escrita não tiverem gate
+próprio, quem estiver na whitelist reescreve os grupos de permissão do Plan
+(`POST /v1/saveGroupPermissions`) sem credencial nenhuma. Não sondado, e o `storePreferences` é
+razão concreta para duvidar que valha para todos.
+
+### O placar das camadas, com as datas que cada linha tem
+
+O princípio está na §11 item 3b1 do spec — *"filtro de aplicação nunca substitui filtro de rede"*:
+
+| camada | estado | quando foi visto |
+|---|---|---|
+| firewall de rede | `ufw` inativo | **2026-08-21**, e **não reverificado** desde a mudança de estado de 26/08 |
+| whitelist de aplicação | existe; recusou ao menos um IP | conteúdo **nunca lido** |
+| autenticação | **desligada** | 2026-08-26, medido |
+
+A whitelist é o único controle **conhecido** nesta porta. Não é o mesmo que "o único que existe": a
+linha do firewall tem cinco dias e esta seção inteira trata de uma mudança de estado que ninguém
+explicou — "firewall/whitelist ajustada" é uma das candidatas em aberto. Afirmar ausência de
+controle de rede hoje seria decidir essa candidata sem evidência.
+
+**Efeito colateral útil:** com auth desligada, "autenticação recém-ligada" sai das quatro candidatas
+para o 403 da máquina residencial. Um 403 no `/v1/whoami`, que não recebe parâmetro, com auth off,
+tem na whitelist a explicação de longe mais provável. Isso é atualização de probabilidade, não prova
+— um mecanismo de ban por volume produziria o mesmo sintoma, e as 17 requisições registradas mantêm
+essa candidata viva.
+
+**A verificação que decide continua a mesma, e agora vale mais: ler a whitelist no `config.yml` do
+Plan.** Antes ela diria *se* havia problema. Agora ela é a lista de quem alcança uma porta sem
+autenticação. **Antes do unban all**, que é quando o servidor ganha atenção.
+
+E junto dela, duas que ficaram baratas: reverificar o `ufw`, e sondar **um** endpoint de escrita a
+partir da VPS para saber se o gate próprio do `storePreferences` é regra ou exceção.
 
 ### 🔴 Mudança de estado observada no mesmo dia
 
@@ -598,9 +647,19 @@ residencial  -> todos os endpoints  403
 
 **O que se conclui:** a VPS alcança a 25504. O 403 observado não atinge o caminho do sistema.
 
-**O que é inferência, não execução:** que os checks da S6.3 e as rotas de `metrics` respondam. É
-altamente provável e ninguém rodou. Um `curl` da VPS para `/v1/serverOverview?server=Survival`
-fecharia a metade que depende da API.
+**O que é inferência, não execução:** que os checks da S6.3 e as rotas de `metrics` respondam.
+Ninguém rodou nenhum dos dois.
+
+> **Parte disso fechou no mesmo dia.** `curl` da VPS para `/v1/serverOverview?server=Survival`
+> devolve **200**. Isso cobre o endpoint que três dos seis checks consomem e **metade** das rotas
+> de `metrics` — o `MetricsService` também chama `/v1/onlineOverview`, que não foi sondado.
+>
+> E cobre para `server=Survival`. O `network-to-survival.check` compara chegadas do proxy contra as
+> do backend, então ao menos uma chamada leva outro `server` — e nome de servidor que o Plan não
+> reconhece é exatamente o que ele responde com `403`.
+>
+> Continua verdade que nenhum check foi executado. O que deixou de ser dúvida é se **uma** das
+> fontes está alcançável. Os outros três checks leem MySQL na 3306, fora do alcance deste teste.
 
 **E a causa do 403 continua indeterminada.** "A whitelist recusando uma origem estranha" é uma das
 quatro candidatas listadas acima, não a conclusão — e as 17 requisições registradas nesta sessão

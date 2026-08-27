@@ -115,6 +115,11 @@ coorte (S8.2). A S8 está em **18 SP** contra 13 de capacidade; a S8.2 é a hist
   projeto (§1 do spec: "tornar impossível a cegueira silenciosa"). Exige ligar o agendamento num
   ambiente real, com webhook configurado, e derrubar uma instância de propósito. **Todo o resto da
   camada de saúde é construção sobre uma entrega que ninguém verificou ponta a ponta.**
+- **O webserver do Plan não tem autenticação** (`authRequired: false`, medido 2026-08-26). A
+  whitelist de IP é o único controle **conhecido** na porta 25504 e **ninguém leu o conteúdo dela**;
+  o `ufw` estava inativo em 2026-08-21 e não foi reverificado. Se os endpoints de escrita não
+  tiverem gate próprio — não sondado —, quem estiver na whitelist reescreve permissões do Plan sem
+  credencial. **Ler o `config.yml` antes do unban all.** Detalhe no `HANDOFF.md`.
 - **[#157](https://github.com/ZzPowerTech/ausTvSales/issues/157) — perda de venda em silêncio.**
   Um 429 faz o plugin marcar a venda como permanentemente falha. Descoberto na S7; é dado perdido,
   não incômodo.
