@@ -72,9 +72,11 @@ export class MetricsController {
   @ApiOperation({
     summary: 'Instancias do Plan que esta API le',
     description:
-      'Configuracao, nao descoberta: o Plan nao expoe catalogo de servidores ' +
-      '(`/v1/servers` e `/v1/networkOverview` respondem 404). Um servidor ' +
-      'ausente daqui e erro de deploy, nao lacuna silenciosa.',
+      'A lista DECLARADA — o que o deploy diz que deveria existir —, nunca uma ' +
+      'descoberta do que o Plan de fato roda. Um servidor ausente daqui e erro ' +
+      'de deploy e fica invisivel para os checks que iteram a lista; e o check ' +
+      '`plan.orphan_instance` que cobre esse caso, reconciliando esta lista com ' +
+      'a observada no banco do Plan.',
   })
   @ApiOkResponse({ type: ConfiguredServersSchema })
   @Header('Cache-Control', 'no-store')

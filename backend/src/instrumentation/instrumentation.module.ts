@@ -23,9 +23,16 @@ import { VersionDivergenceCheck } from './version-divergence.check';
  * answers "is the *measurement* of the game network still happening?" — the
  * question nobody was asking while the proxy sat dead for three months.
  *
- * Complete as of story S6.3: persistence, alert policy, Discord alerter, Plan
- * transport, the two adapters, the runner, the scheduler, and **six of the seven
- * checks** of spec §6.1.
+ * **Code-complete** as of story S6.3: persistence, alert policy, Discord
+ * alerter, Plan transport, the two adapters, the runner, the scheduler, and
+ * **six of the seven checks** of spec §6.1.
+ *
+ * Code-complete is the whole claim, and the distinction is the one this epic is
+ * about. Criterion 4 of S6.3 — *"verified by taking an instance down on
+ * purpose"* — has **never been done**: nobody has run this layer with the
+ * schedule enabled and a webhook configured and watched an alert arrive. Every
+ * piece below is assembled and unit-tested; none of it has been observed
+ * end-to-end. See `.specs/features/austv-admin/S6-VERIFICACAO.md`.
  *
  * The seventh, `funnel.tutorial_entry_rate`, is absent because Plan **collects
  * nothing about the tutorial** — the numbers in `HANDOFF.md` came from reading

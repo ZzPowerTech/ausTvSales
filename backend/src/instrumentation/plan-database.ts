@@ -126,7 +126,8 @@ export class PlanDatabase implements OnModuleInit, OnModuleDestroy {
     if (!this.configured) {
       this.logger.warn(
         'PLAN_DB_HOST nao configurado — os checks que dependem do banco do Plan ' +
-          '(orphan_instance, version_divergence, proxy_registration_alive) vao ' +
+          '(orphan_instance, version_divergence, proxy_registration_alive e o ' +
+          'denominador de network_to_survival) vao ' +
           'reportar `error`, nunca `ok`.',
       );
       return;

@@ -217,9 +217,10 @@ export class EnvironmentVariables {
   // Names of the Plan instances the checks evaluate, comma-separated, exactly as
   // Plan spells them (`?server=` is case-sensitive). Example: `AusTv,Survival`.
   //
-  // Configuration rather than discovery because Plan exposes no server-list
-  // endpoint — `/v1/servers` and `/v1/networkOverview` both 404 — and ADR-002
-  // forbids reading `plan_servers` from here.
+  // The DECLARED inventory — what the deploy says should exist — never a
+  // discovery of what Plan actually runs. A server missing from here is
+  // invisible to every check that iterates the list; `plan.orphan_instance`
+  // covers that case by reconciling this list against the observed one.
   @IsOptional()
   @Matches(/^\s*[^\s,]+\s*(,\s*[^\s,]+\s*)*$/, {
     message: 'PLAN_SERVERS must be a comma-separated list of Plan server names',
@@ -255,9 +256,13 @@ export class EnvironmentVariables {
 
   // --- MySQL do Plan, somente leitura (ADR-002 excecao 2, S6.3) ---
   //
-  // Usado por UM modulo isolado (PlanDatabase) e por UMA tabela (`plan_servers`),
-  // porque o Plan nao expoe endpoint de lista de servidores. Qualquer outra
-  // tabela exige nova excecao numerada no spec.
+  // Usado por UM modulo isolado (PlanDatabase) e por DUAS tabelas
+  // (`plan_servers` e `plan_users`). Qualquer outra exige nova excecao numerada
+  // no spec.
+  //
+  // A justificativa alegada desta excecao caiu em 2026-08-26 — o endpoint de
+  // lista existe e e `/v1/networkMetadata`. Ela continua de pe porque ninguem
+  // leu o corpo dele; ver o docblock de `plan-database.ts`.
   //
   // O usuario tem de ser read-only e dedicado — nunca o usuario dos plugins.
 
