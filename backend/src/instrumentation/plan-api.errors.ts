@@ -21,13 +21,18 @@
  * expired. Our bug, not an outage." Against this Plan instance that label is
  * wrong often enough to be dangerous, and the alert carried it:
  *
- * - `/v1/whoami` on the production instance answers `{"authRequired":false}`
- *   (measured 2026-08-26). With authentication off there is no credential to be
- *   wrong, so a 403 cannot mean what the label said.
- * - Plan answers **403 for a server name it does not recognise** — a caller
- *   mistake, not an access problem at all.
- * - Plan's own IP whitelist rejects with 403. On 2026-08-26 every endpoint began
- *   answering 403 to one origin, cause never established.
+ * Two of those are measured, and the third is not — the distinction matters in a
+ * comment whose whole subject is not asserting causes:
+ *
+ * - **Measured.** `/v1/whoami` on the production instance answers
+ *   `{"authRequired":false}` (2026-08-26). With authentication off there is no
+ *   credential to be wrong, so a 403 cannot mean what the label said.
+ * - **Measured.** Plan answers 403, not 404, for a server name it does not
+ *   recognise — a caller mistake, not an access problem at all.
+ * - **Candidate, never established.** An IP whitelist rejection. On 2026-08-26
+ *   every endpoint began answering 403 to one origin and the cause was never
+ *   determined; a restrictive whitelist is one of several hypotheses, and
+ *   nobody has read the whitelist in Plan's `config.yml`.
  *
  * So a 403 has at least three plausible causes and this layer cannot tell them
  * apart from the response alone. The honest contract is to name the observation
@@ -124,9 +129,10 @@ export class PlanAuthError extends PlanApiError {
  *
  * 1. **The server name is not one Plan knows.** Plan answers 403, not 404, for
  *    an unrecognised `?server=`. This is a caller bug and the cheapest to check.
- * 2. **Plan's application-level IP whitelist rejected the origin.** On
- *    2026-08-26 every endpoint began answering 403 to one machine; the cause was
- *    never established.
+ * 2. **An application-level IP whitelist rejection.** A hypothesis, not an
+ *    observation: on 2026-08-26 every endpoint began answering 403 to one
+ *    machine and the cause was never established. Reading the whitelist in
+ *    Plan's `config.yml` is what would settle it, and nobody has.
  * 3. **A web-permission group denies this principal.** Only possible where
  *    authentication is on, and on this instance `/v1/whoami` reports
  *    `authRequired: false` (measured 2026-08-26).

@@ -101,7 +101,7 @@ export class PlanApiClient implements OnModuleInit {
    * deliberate: it makes the missing validation a compile-time obligation at
    * every call site instead of an invisible cast.
    *
-   * @throws {PlanApiError} one of the four subclasses; never returns a
+   * @throws {PlanApiError} one of its subclasses; never returns a
    *   fabricated empty value, because "no data" and "could not ask" must stay
    *   distinguishable all the way to the Discord message.
    */

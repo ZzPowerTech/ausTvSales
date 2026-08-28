@@ -257,8 +257,24 @@ describe('PlanApiClient', () => {
       expect(message).toContain('nome de servidor');
       expect(message).toContain('whitelist');
       expect(message).toContain('permissao web');
-      // The regression this guards: the old message read "recusou a credencial".
-      expect(message).not.toContain('credencial');
+      // The regression this guards: the old message read "recusou a
+      // credencial". Matching on the whole family of credential words rather
+      // than that one string, so an equivalent rewrite ("token recusado") is
+      // caught too.
+      expect(message).not.toMatch(/credencia|token|senha|password/i);
+    });
+
+    it('states the 401 cause, because on a 401 the protocol says it', () => {
+      const message = new PlanAuthError('http://plan:25504/v1/x').message;
+
+      // The asymmetry is the design: a 401 is the server declaring it wants a
+      // login, so naming our credential is a reading of the response, not a
+      // guess. The message also points at the right mechanism — Plan
+      // authenticates with a session cookie from /auth/login, not with the
+      // bearer this client sends (read from the instance's OpenAPI, 2026-08-26).
+      expect(message).toContain('401');
+      expect(message).toContain('cookie de sessao');
+      expect(message).toContain('/auth/login');
     });
 
     it('maps a 404 to PlanHttpError without retrying', async () => {

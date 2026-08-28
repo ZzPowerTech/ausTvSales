@@ -69,7 +69,8 @@ export interface MetricsRead<T> {
  * `?server=` is forwarded to Plan, so accepting an arbitrary string would let a
  * caller probe the Plan instance for server names through this API. It also
  * would not work: Plan answers `403` for a name it does not know, which would
- * surface here as a confusing upstream error rather than an honest "that is not
+ * surface here as `forbidden` — a label that names three candidate causes and
+ * sends the reader looking at the whitelist, rather than the honest "that is not
  * one of ours". Unknown names are a 404 before any request leaves the process.
  *
  * ## A parse failure is a fetch failure
@@ -219,7 +220,8 @@ export class MetricsService {
    *
    * Returns the **configured** spelling rather than what the caller sent, because
    * Plan's `?server=` is case sensitive: forwarding `survival` where the instance
-   * is `Survival` earns a 403 from Plan that would look like an outage here.
+   * is `Survival` earns a 403 from Plan, which leaves here as `forbidden` — a
+   * label whose candidate causes are all about access, none of them a typo.
    */
   private requireConfigured(name: string): string {
     const match = this.servers
@@ -285,9 +287,8 @@ function classify(error: unknown): MetricsFailureReason | null {
   if (error instanceof PlanAuthError) {
     return 'auth';
   }
-  // Before `PlanHttpError` and separate from `auth`: a 403 here is most often a
-  // server name Plan does not recognise or its IP whitelist, neither of which is
-  // a credential problem. See `PlanForbiddenError`.
+  // Separate from `auth`: a 403 here is not a credential being wrong — see the
+  // candidate causes enumerated in `PlanForbiddenError`.
   if (error instanceof PlanForbiddenError) {
     return 'forbidden';
   }

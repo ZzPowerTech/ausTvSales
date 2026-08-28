@@ -2,6 +2,7 @@ import { NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PlanApiClient } from '../instrumentation/plan-api.client';
 import {
+  PlanAuthError,
   PlanForbiddenError,
   PlanUnreachableError,
 } from '../instrumentation/plan-api.errors';
@@ -221,9 +222,26 @@ describe('MetricsService', () => {
       const { body } = await build(getJson).serverOverview('Survival');
 
       expect(body.freshness.reason).toBe('forbidden');
-      // Still a closed label: the enumeration of candidates lives in the log,
-      // not in a body that names the Plan host back to a browser.
+      // Still a closed label: the enumeration of candidates stays in the
+      // message, which reaches the log and the Discord embed but never this
+      // body, where it would name the Plan host back to a browser.
       expect(JSON.stringify(body)).not.toContain('198.51.100.7');
+    });
+
+    it('still reports a 401 as `auth`, which is the half that did not move', async () => {
+      // The other side of the split. Without this, a future refactor could
+      // collapse the two back into one label and only the 403 test would fail —
+      // which would look like the 403 case regressing rather than the
+      // distinction disappearing.
+      const getJson = jest
+        .fn()
+        .mockRejectedValue(
+          new PlanAuthError('http://198.51.100.7:25504/v1/serverOverview'),
+        );
+
+      const { body } = await build(getJson).serverOverview('Survival');
+
+      expect(body.freshness.reason).toBe('auth');
     });
 
     it('distinguishes a contract change from an outage', async () => {
