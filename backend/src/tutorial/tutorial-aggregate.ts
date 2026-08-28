@@ -1,0 +1,153 @@
+import { platformOf, type Platform } from '../instrumentation/platform';
+import type { TutorialCatalogue } from './tutorial-catalogue';
+import { toSaoPauloDay } from './tutorial-day';
+import type { PlayerdataProgress } from './tutorial-playerdata';
+
+/**
+ * Turning parsed playerdata into the daily funnel rows (story S8.0).
+ *
+ * Kept as pure functions with no filesystem and no database, so the rules that
+ * decide *what counts as entering the tutorial* are testable on their own. Those
+ * rules are the whole product of this story — the I/O around them is plumbing.
+ */
+
+/** One `(day, platform)` bucket of the tutorial funnel. */
+export interface TutorialDayRow {
+  day: string;
+  platform: Platform;
+  entered: number;
+  completed: number;
+}
+
+/** What one player's file contributed, before aggregation. */
+export interface PlayerContribution {
+  platform: Platform;
+  /** Day the player first touched any tutorial quest. Null when undated. */
+  enteredOn: string | null;
+  /** Day the player completed the final quest. Null when they did not. */
+  completedOn: string | null;
+  /** True when the player touched at least one tutorial quest, dated or not. */
+  touchedTutorial: boolean;
+}
+
+/**
+ * Read one player's contribution to the funnel.
+ *
+ * ## Entry is the earliest `started-date`, across all tutorial quests
+ *
+ * Not `01tutorial` specifically. Hardcoding the first step would miss anyone who
+ * reached the tutorial through a branch, and the catalogue already tells us
+ * which quests are tutorial ones. In the 2026-08-19 baseline the two counts
+ * coincide — 10.834 touched `01tutorial` and 10.834 files had any tutorial quest
+ * at all — so this is the more robust spelling of the same number, not a
+ * different one.
+ *
+ * ## An undated entry still counts as an entry
+ *
+ * `touchedTutorial` is true whenever a tutorial quest key exists, even with no
+ * usable `started-date`. The day-series drops that player for want of a day, but
+ * the total does not pretend they never entered. Conflating "we do not know
+ * when" with "it did not happen" is the failure this epic exists to remove, and
+ * the two are reported separately for exactly that reason.
+ *
+ * @param uuid player uuid, taken from the file name. Platform comes from it
+ *   alone (ADR-003) and the uuid itself is then discarded — spec §8 keeps player
+ *   identity out of this database.
+ */
+export function readContribution(
+  uuid: string,
+  progress: PlayerdataProgress,
+  catalogue: TutorialCatalogue,
+): PlayerContribution {
+  const platform = platformOf(uuid);
+
+  let earliestStart: number | null = null;
+  let finalCompletedAt: number | null = null;
+  let touchedTutorial = false;
+
+  for (const quest of progress.quests) {
+    if (!catalogue.has(quest.questId)) {
+      // Daily quests, seasonal events and everything else in the same file.
+      continue;
+    }
+
+    touchedTutorial = true;
+
+    if (
+      quest.startedAt !== null &&
+      (earliestStart === null || quest.startedAt < earliestStart)
+    ) {
+      earliestStart = quest.startedAt;
+    }
+
+    if (quest.questId === catalogue.finalQuestId && quest.completed) {
+      // `completedAt` may be null on a completed quest — older Quests versions
+      // did not always write the date. The completion is still real, so the
+      // player counts in the total; only the dated series loses the row.
+      finalCompletedAt = quest.completedAt;
+    }
+  }
+
+  return {
+    platform,
+    enteredOn: toSaoPauloDay(earliestStart),
+    completedOn: toSaoPauloDay(finalCompletedAt),
+    touchedTutorial,
+  };
+}
+
+/**
+ * Fold player contributions into `(day, platform)` rows.
+ *
+ * Days with neither an entry nor a completion produce **no row**, and that is
+ * not the same as a zero — see the `tutorial_daily` doc in the schema. Whether a
+ * gap means "nobody entered" or "we did not measure" is answered by the sync
+ * record, never by this table alone.
+ */
+export function aggregate(
+  contributions: Iterable<PlayerContribution>,
+): TutorialDayRow[] {
+  const buckets = new Map<string, TutorialDayRow>();
+
+  const bucketFor = (day: string, platform: Platform): TutorialDayRow => {
+    const key = `${day}|${platform}`;
+    let row = buckets.get(key);
+    if (row === undefined) {
+      row = { day, platform, entered: 0, completed: 0 };
+      buckets.set(key, row);
+    }
+    return row;
+  };
+
+  for (const contribution of contributions) {
+    if (contribution.enteredOn !== null) {
+      bucketFor(contribution.enteredOn, contribution.platform).entered += 1;
+    }
+    if (contribution.completedOn !== null) {
+      bucketFor(contribution.completedOn, contribution.platform).completed += 1;
+    }
+  }
+
+  // Sorted so the write order is deterministic, which makes a diff between two
+  // runs of the ETL readable and keeps the insert order stable in tests.
+  return [...buckets.values()].sort(
+    (a, b) =>
+      a.day.localeCompare(b.day) || a.platform.localeCompare(b.platform),
+  );
+}
+
+/**
+ * Player uuid from a playerdata file name, or null when it is not one.
+ *
+ * The Quests plugin names each file after the player's uuid. Anything else in
+ * that directory — a backup, an editor swap file, a `README` — is skipped rather
+ * than parsed, because `platformOf` would bucket its name as `unknown` and
+ * quietly inflate a platform that means "we could not tell".
+ */
+export function uuidFromFileName(fileName: string): string | null {
+  const match =
+    /^([0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})\.yml$/.exec(
+      fileName,
+    );
+  return match === null ? null : match[1].toLowerCase();
+}

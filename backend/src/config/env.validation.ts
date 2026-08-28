@@ -346,6 +346,60 @@ export class EnvironmentVariables {
   @Min(1)
   FUNNEL_MIN_SAMPLE?: number;
 
+  // --- Tutorial data source (AusTV Admin S8.0, ADR-0004) ---
+
+  // Directory holding the Quests plugin's per-player progress files
+  // (`Quests/playerdata/<uuid>.yml`). Plan collects nothing about the tutorial,
+  // so this is the only source for two of the four funnel steps of spec §6.2 and
+  // for the seventh check of §6.1.
+  //
+  // The files live on the game machine; how they become readable from this VPS
+  // (rsync, read-only mount) is an operations decision that ADR-0004 recommends
+  // but does not settle. Unset is legitimate: the sync then records an `error`
+  // run, writes nothing, and the check reports `no_data` — never a zero, which
+  // would be indistinguishable from the outage it is looking for.
+  @IsOptional()
+  @MinLength(1, {
+    message: 'TUTORIAL_PLAYERDATA_DIR must not be empty when set',
+  })
+  TUTORIAL_PLAYERDATA_DIR?: string;
+
+  // Directory of the tutorial quest definitions (`Quests/quests/tutorial`). Its
+  // file names ARE the list of quest ids that count as tutorial steps — read
+  // rather than hardcoded, because the tutorial has already grown `-2`/`-3`
+  // branches that a frozen list would stop counting in silence.
+  @IsOptional()
+  @MinLength(1, { message: 'TUTORIAL_QUESTS_DIR must not be empty when set' })
+  TUTORIAL_QUESTS_DIR?: string;
+
+  // Quest id that marks the tutorial as finished. `33tutorial` in the 2026-08-19
+  // baseline, where it had 148 completions — the number `HANDOFF.md` reports.
+  // Configurable because the tutorial's shape is a business fact that changes,
+  // and the id in force is stored with every run so the count stays auditable.
+  @IsOptional()
+  @MinLength(1, {
+    message: 'TUTORIAL_FINAL_QUEST_ID must not be empty when set',
+  })
+  TUTORIAL_FINAL_QUEST_ID?: string;
+
+  // Master switch for the nightly rebuild. Off by default so no environment
+  // starts walking the game machine's files by accident. When off, the boot
+  // warns: a job that silently does not run leaves a series that looks current
+  // and is frozen — the same false confidence ADR-006 exists to destroy.
+  @IsOptional()
+  @IsBoolean()
+  TUTORIAL_SYNC_ENABLED?: boolean;
+
+  // When the rebuild runs, as a cron expression in America/Sao_Paulo. Criterion
+  // 2 of S8.0 says "fora do pico", and off-peak is a statement about the clock —
+  // which is why this is a cron and not an interval like the health checks.
+  // A malformed expression leaves the job unscheduled and says so; it never
+  // falls back to the default hour, because running at an hour nobody chose is
+  // how a 20.000-file walk lands in peak.
+  @IsOptional()
+  @MinLength(1, { message: 'TUTORIAL_SYNC_CRON must not be empty when set' })
+  TUTORIAL_SYNC_CRON?: string;
+
   // Express `trust proxy` setting, applied in main.ts so `req.ip` reflects the
   // real client from the Nginx-supplied X-Forwarded-For (and a header forged by a
   // direct client is ignored). A number = trust that many hops; otherwise a

@@ -2,11 +2,13 @@ import { sql } from 'drizzle-orm';
 import {
   boolean,
   check,
+  date,
   index,
   integer,
   jsonb,
   numeric,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -147,6 +149,149 @@ export const healthChecks = pgTable(
     check(
       'health_checks_status_valid',
       sql`${table.status} IN ('ok', 'breached', 'no_data', 'error')`,
+    ),
+  ],
+);
+
+/**
+ * Daily tutorial funnel, rebuilt from `Quests/playerdata` (story S8.0, ADR-0004).
+ *
+ * Two of the four funnel steps of spec §6.2 live here — `tutorial_entrou` and
+ * `tutorial_concluiu` — because Plan collects nothing about the tutorial and no
+ * API or database anywhere holds this. The source is the Quests plugin's own
+ * per-player files on the game machine.
+ *
+ * ## Why the grain is `(date, platform)` and never a player
+ *
+ * The funnel asks "how many entered on day D, by platform". Storing a row per
+ * player would put the game's player identities in this database for a question
+ * that is answered by counting, and spec §8 keeps personal data out. The uuid is
+ * read to derive `platform` (ADR-003) and then discarded.
+ *
+ * ## The table is REPLACED on every sync, not appended to
+ *
+ * The source is **current state, not an event log** — `playerdata` holds each
+ * player's progress as it stands today. So every sync recomputes the whole
+ * series from scratch, and re-running is the normal operation rather than a
+ * recovery path. That is what makes the ETL idempotent (criterion 2 of S8.0).
+ *
+ * It also means the past can change: a deleted `playerdata` erases the day that
+ * player entered, and a quest reset moves their `started-date`. The series is a
+ * **reconstruction of the past from the present**, which is sound for detecting
+ * that the entry rate collapsed and unsound for anything accounting-shaped.
+ * Recorded in ADR-0004 rather than discovered later.
+ *
+ * ## Absence of a row is not automatically zero
+ *
+ * A date with no row means "nobody entered that day" **only if a successful sync
+ * covers it**. Whether one does is answered by {@link tutorialSyncs}, which is
+ * why that table exists and why readers must consult it before rendering a gap
+ * as a zero — the confusion this whole epic exists to remove.
+ */
+export const tutorialDaily = pgTable(
+  'tutorial_daily',
+  {
+    /** Calendar day in America/Sao_Paulo. Bucketed at write time. */
+    day: date('day').notNull(),
+    /** `bedrock` | `java_offline` | `java_premium` | `unknown` (ADR-003). */
+    platform: text('platform').notNull(),
+    /** Players whose earliest tutorial `started-date` fell on this day. */
+    entered: integer('entered').notNull(),
+    /** Players who completed the configured final quest on this day. */
+    completed: integer('completed').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.day, table.platform] }),
+    // Reads are always "the series between two dates", optionally filtered by
+    // platform — the primary key already leads with `day`, so this index exists
+    // only for the platform-first read the S8.1 segmentation performs.
+    index('tutorial_daily_platform_day_idx').on(table.platform, table.day),
+    check('tutorial_daily_entered_non_negative', sql`${table.entered} >= 0`),
+    check(
+      'tutorial_daily_completed_non_negative',
+      sql`${table.completed} >= 0`,
+    ),
+  ],
+);
+
+/**
+ * Provenance of each ETL run (story S8.0).
+ *
+ * Append-only, for the same reason `health_checks` is: the question "was this
+ * number ever actually measured, and when?" has to be answerable. Without it,
+ * an empty {@link tutorialDaily} is indistinguishable from a sync that has never
+ * run — and reading the second as the first is how a collection gap becomes a
+ * reported zero.
+ *
+ * `finalQuestId` is stored per run and not only in configuration because the
+ * completion count is meaningless without knowing which quest was counted, and
+ * that id is expected to change when the tutorial does (ADR-0004).
+ */
+export const tutorialSyncs = pgTable(
+  'tutorial_syncs',
+  {
+    id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+    ranAt: timestamp('ran_at', { withTimezone: true }).notNull().defaultNow(),
+    /** `ok` — the series was rebuilt. `error` — nothing was written. */
+    status: text('status').notNull().$type<'ok' | 'error'>(),
+    /** Playerdata files read. Null on a run that never got that far. */
+    filesScanned: integer('files_scanned'),
+    /**
+     * Files that failed to parse.
+     *
+     * Kept separate from `filesScanned` rather than folded into it: a run that
+     * read 19.700 files and failed on 9.000 of them produced a number, and
+     * whoever reads that number needs to know it covers half the corpus.
+     */
+    filesFailed: integer('files_failed'),
+    /**
+     * Players who touched at least one tutorial quest, dated or not.
+     *
+     * Stored because it is the **output-side** number the next run compares
+     * against. A run that reads every file successfully and finds zero tutorial
+     * players is what a renamed quest id looks like, and it is indistinguishable
+     * from a real collapse unless the previous run's value is on record.
+     */
+    playersInTutorial: integer('players_in_tutorial'),
+    /**
+     * `(day, platform)` rows the run produced.
+     *
+     * On an `ok` row, what was written. On an `error` row, what the run *would*
+     * have written before a floor rule stopped it — so the record says how close
+     * it came, not merely that it stopped.
+     *
+     * Read by the next run: a collapse against this value is how partial loss of
+     * dates is caught, and zero is refused outright. Both rules live in
+     * `TutorialSyncService.floorRefusal`.
+     */
+    daysWritten: integer('days_written'),
+    /** Tutorial quests found in the catalogue directory. */
+    questsInCatalogue: integer('quests_in_catalogue'),
+    /** Which quest was counted as completion on this run. */
+    finalQuestId: text('final_quest_id'),
+    /**
+     * Why an `error` run failed, in Portuguese. Never a stack trace.
+     *
+     * ⚠️ **Contains server-side absolute paths** — the failure messages name the
+     * directory that could not be read, which is the single most useful thing
+     * for whoever is debugging a mount. That is fine where it lives today (the
+     * log and this table, neither reachable from a route) and **is not fine on a
+     * response body**: spec §8 keeps internal topology out of the browser, the
+     * same rule that made the S7.2 metrics contract publish a closed label
+     * instead of the upstream message.
+     *
+     * The S8.1 read model consumes this store. When it surfaces sync provenance
+     * — and it should, because "when was this last measured" is the question the
+     * whole table exists for — it must publish the **status and the timestamp**,
+     * not this field.
+     */
+    detail: text('detail'),
+  },
+  (table) => [
+    index('tutorial_syncs_ran_at_idx').on(table.ranAt.desc()),
+    check(
+      'tutorial_syncs_status_valid',
+      sql`${table.status} IN ('ok', 'error')`,
     ),
   ],
 );
