@@ -499,14 +499,122 @@ existe para impedir.
 3. Único ponto do sistema autorizado a fazer SQL direto (ADR-002), em usuário read-only, isolado
    num módulo
 
+> ### 🛑 NÃO INICIADA — três pré-requisitos abertos, e escrever assim mesmo repetiria a S6.2
+>
+> Avaliada em **2026-08-28**, depois de S8.0 e S8.1 entregues. Recomendação: **mover para a S9**,
+> que é exatamente a válvula de escape que o próprio plano nomeia para esta história (`[CORTE]` da
+> S8, e o desbalanço de 18 SP contra 13 de capacidade **em que a sprint estava antes do corte**).
+>
+> #### 1. `/v1/retention` nunca foi avaliado — e o spec já avisa que este é o mesmo erro
+>
+> A exceção 1 do ADR-002 justifica o SQL direto dizendo que *"agregação por coorte × plataforma não
+> existe em nenhum endpoint"*. O próprio spec anotou em 2026-08-26:
+>
+> > `/v1/retention` é candidato **não avaliado**; mesma classe de afirmação de ausência que caiu na
+> > exceção 2.
+>
+> A exceção 2 foi aberta com o argumento de que o Plan não expunha lista de servidores. Era falso —
+> o endpoint existia com outro nome, e ninguém tinha olhado. **Abrir a exceção 1 sem ler o
+> `/v1/retention` seria cometer o mesmo erro pela segunda vez, no mesmo ADR.**
+>
+> #### 2. O schema de `plan_sessions` nunca foi observado
+>
+> Retenção D1/D7/D30 precisa saber se o jogador teve sessão N dias depois de chegar, e isso mora em
+> `plan_sessions`. Não há **nenhuma** coluna dessa tabela registrada em lugar nenhum do repo — o
+> `HANDOFF.md` só menciona que ela foi consultada por engano numa investigação, sem guardar o
+> formato.
+>
+> Escrever SQL contra schema não observado é literalmente o que fez a **S6.2** ser escrita, estimada,
+> revisada, mergeada e revertida — e é a regra sob a qual todos os adapters da S7.2 e o parser da
+> S8.0 foram construídos.
+>
+> #### 3. `plan_users` não tem coortes antigas para reter
+>
+> Descoberto ao construir a S8.1: o histórico do proxy **não veio na unificação de 2026-08-20**
+> (`HANDOFF.md`, "Restrição nova para o baseline da campanha"). Coorte mensal exige meses de
+> chegadas, e a tabela tem dias. Uma retenção D30 precisa de uma coorte com 30 dias de idade, que só
+> existirá a partir de **2026-09-19**.
+>
+> #### O que destrava, em ordem de custo
+>
+> | # | passo | custo | o que resolve |
+> |---|---|---|---|
+> | 1 | `curl` no `/v1/retention` da VPS e registrar o corpo | minutos, com acesso | pode **eliminar** a exceção 1 inteira |
+> | 2 | `DESCRIBE plan_sessions` e registrar o schema | minutos, com acesso | destrava o pré-requisito 2 |
+> | 3 | esperar a primeira coorte de 30 dias | até 2026-09-19 | destrava o pré-requisito 3 |
+>
+> Os dois primeiros são trabalho de minutos **para quem tem acesso à produção**, e nenhum é
+> trabalho de sessão. Nada aqui é impossível; o que seria errado é escrever o módulo antes deles.
+>
+> #### "Mas a S8.1 entregou com um degrau sem fonte. Por que a S8.2 não?"
+>
+> É a primeira pergunta de qualquer leitor — a S8.1 é a história imediatamente anterior, no mesmo
+> documento — e ela merece resposta em vez de silêncio. Três diferenças, e a terceira decide:
+>
+> 1. **Proporção.** Na S8.1, **três de quatro** degraus tinham fonte: o módulo saiu com conteúdo
+>    real e um degrau declarado vazio. Na S8.2, **D1, D7 e D30 dependem os três de
+>    `plan_sessions`**. O esqueleto sairia 100% `null` — não é o padrão da S8.1, é um contrato sem
+>    nada dentro.
+> 2. **Direção da declaração.** A S8.1 declarou o `survival` vazio justamente para **não** alargar
+>    a exceção 1 puxando `plan_user_info`. Aqui, declarar vazio não evita nada.
+> 3. **A exceção viria junto, e é ela que pode não ser necessária.** Entregar a S8.2 de verdade
+>    exige exercer a exceção 1: usuário MySQL novo, credencial nova, conexão nova. Um esqueleto que
+>    já traga essa arquitetura **commita a exceção antes de alguém ter feito o `curl` que pode
+>    eliminá-la inteira**. Um esqueleto que não traga não entrega nenhum dos três critérios de
+>    aceite — o critério 3 é literalmente *"único ponto do sistema autorizado a fazer SQL direto,
+>    isolado num módulo"*.
+>
+> **A fatia que existiria, e foi considerada:** o **tamanho de coorte** (`n` por mês × plataforma)
+> sai de `plan_users.registered` + `uuid`, que a exceção **2** já abriu — sem tocar a exceção 1.
+> Endereçaria em parte os critérios 1 e 2. Mas com profundidade de rede desde 2026-08-20 renderia um
+> bucket parcial e **nenhuma retenção**, que é o produto da história. Adiada com isso à vista.
+>
+> E a alternativa "consumir `/v1/retention` em vez de SQL" está fechada pelo mesmo motivo que a S8.1
+> recusou o `/v1/graph`: o payload nunca foi observado. Fazer aqui o que se recusou lá, com o
+> argumento invertido, seria a incoerência de verdade.
+
 ### DoD da S8
 
-- [ ] Funil reproduz os números conhecidos: ~54% rede→survival, ~100% de entrada no tutorial antes
-      de dez/2025
-- [ ] Nenhum endpoint retorna percentual sem `n`
-- [ ] Usuário read-only comprovadamente sem permissão de escrita
+- [ ] ~~Funil reproduz os números conhecidos: ~54% rede→survival, ~100% de entrada no tutorial antes
+      de dez/2025~~ — **inalcançável nas duas metades, e as duas caem pela mesma raiz**: o degrau
+      `survival` não tem série diária.
 
-**[CORTE]** S8.2.
+      A segunda metade merece a conta explícita, porque é fácil errar o denominador — e a primeira
+      versão desta linha errou. O `~100%` sai de **tutorial ÷ survival**, não de tutorial ÷ rede.
+      Na tabela de números verificados do `HANDOFF.md`, nov/2025: `694 / 682 = 101,8%` ✅, enquanto
+      `694 / 1403 = 49,5%`, que não é "~100%".
+
+      Consequência prática: esta metade **não** destrava quando o `plan_users` acumular
+      profundidade em 2026-09-19. Ela depende do degrau `survival`, que é o bloqueio mais duro e
+      sem dono — o payload de `/v1/graph?type=uniqueAndNew` nunca foi observado.
+
+      A perda do histórico do proxy é um **segundo** bloqueio, independente, e só sobre a primeira
+      metade. Detalhe no bloco da S8.1
+- [x] **Nenhum endpoint retorna percentual sem `n`** — verdadeiro hoje em toda a superfície. No
+      funil é **imposto pelo tipo**: em `Conversion`, a variante medida carrega os dois e
+      `{ percent: 50, n: null }` não compila. Fecha o achado que a auditoria da S6 deixou em aberto.
+
+      **Onde ainda é convenção:** os checks de saúde montam `{ observed, threshold, n }` como objeto
+      literal (`HealthCheckDetail` tem os três opcionais), então nada impede um check futuro de
+      omitir a base. Nenhum omite hoje, e o contrato `HealthCheck` documenta a regra — mas a
+      garantia de máquina cobre o funil, não a camada de saúde. A união do funil é o molde para
+      quando alguém fechar aquela também
+- [ ] Usuário read-only comprovadamente sem permissão de escrita — pertence à S8.2, não iniciada
+
+### Fechamento da S8 — 2026-08-28
+
+| história | estado |
+|---|---|
+| **S8.0** — Fonte de dados do tutorial | ✅ **entregue** (PRs #168, #169). Fecha também o 7º check da §6.1 e o critério 5 da S6.3 |
+| **S8.1** — Módulo `funnel` | ✅ **entregue** (PR #170), com o degrau `survival` declarado sem fonte e o motivo no payload |
+| **S8.2** — Retenção por coorte | 🛑 **não iniciada** — três pré-requisitos abertos, ver o bloco dela |
+
+**Recomendação: mover a S8.2 para a S9**, que é a válvula de escape que o próprio plano nomeia
+(`[CORTE]` da S8). Isso põe a S8 em 13 SP contra 13 de capacidade e resolve o estouro registrado no
+desbalanço, sem inventar velocidade: os 5 SP da S8.2 não foram executados, foram **adiados por
+falta de pré-requisito** — a mesma distinção que o `HANDOFF.md` pede que se faça ao medir a S6.
+
+**[CORTE]** S8.2 — exercido.
 
 ---
 
@@ -687,12 +795,15 @@ Com a capacidade planejada de 13 SP/sprint, **restou uma sprint estourando**:
 |---|---|---|
 | **S6** | ~~22~~ → ~~17~~ → **12** | **resolvido.** S6.1 cancelada (−5) e S6.2 concluída fora do fluxo (−5). Dentro da capacidade |
 | S7 · S9 · S10 · S11 | 13 cada | dentro |
-| **S8** | ~~13~~ → **18** | **novo estouro (2026-08-23):** a S8.0 (5 SP) entrou com a fonte do tutorial |
+| **S8** | ~~13~~ → ~~18~~ → **13** | **resolvido em 2026-08-28.** A S8.0 (5 SP) entrou com a fonte do tutorial e virou estouro; o `[CORTE]` foi exercido e a **S8.2** (5 SP) moveu para a S9 |
 | **S12** | **18** | 38% acima. Três histórias grandes |
 
-**Dois estouros agora, não um.** A S8 pode ser aliviada movendo a **S8.2** (retenção por coorte,
-5 SP, já marcada `[CORTE]`) para a S9 — a S8.0 é pré-requisito da S8.1 e não pode sair. Decisão do
-dono, junto com a da S12.
+**Um estouro agora, não dois.** A S8 fechou movendo a **S8.2** para a S9 — a S8.0 era pré-requisito
+da S8.1 e não podia sair. E o corte não foi por capacidade: a S8.2 tem três pré-requisitos abertos,
+o primeiro deles ler o `/v1/retention` antes de abrir a exceção 1 do ADR-002. Ver o bloco da
+história.
+
+**Resta a S12**, e dividi-la em duas segue sendo a única decisão de escopo do dono.
 
 **A S6 é sprint de prazo, não de capacidade.** O limite dela é a data do unban all, não a
 velocidade — e a questão de capacidade dela **fechou sozinha**. Opções:
