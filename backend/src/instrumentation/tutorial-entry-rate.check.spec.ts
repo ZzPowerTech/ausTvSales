@@ -168,6 +168,23 @@ describe('TutorialEntryRateCheck', () => {
       expect(observation.status).toBe('ok');
     });
 
+    it('refuses when the clocks disagree, instead of trusting a negative age', async () => {
+      // `ranAt` is stamped by Postgres and compared against this process's
+      // clock, and `CLAUDE.md` puts the database on a shared instance. A future
+      // `ranAt` makes the age negative, which passes every `>` test and switches
+      // the freshness gate off completely — the check would then publish a ratio
+      // from an arbitrarily stale source.
+      const [observation] = await build(
+        planWith(overview(100)),
+        storeWith({ entered: 50, syncAgeMs: -5 * MS_PER_DAY }),
+      ).run();
+
+      expect(observation.status).toBe('error');
+      expect(observation.status).not.toBe('breached');
+      expect(observation.detail.summary).toContain('FUTURO');
+      expect(observation.detail.summary).toContain('NTP');
+    });
+
     it('honours a configured tolerance', async () => {
       const [observation] = await build(
         planWith(overview(100)),

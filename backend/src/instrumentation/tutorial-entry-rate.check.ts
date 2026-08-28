@@ -183,6 +183,13 @@ export class TutorialEntryRateCheck implements HealthCheck {
     // `WINDOW_DAYS - 1` because both ends are inclusive: today minus six, through
     // today, is seven calendar days. Subtracting the full seven would count
     // eight and inflate the numerator against a seven-day denominator.
+    //
+    // ⚠️ Dormant edge, recorded rather than fixed: this subtracts *milliseconds*
+    // and then converts to a calendar day, so a DST transition inside the window
+    // shifts the boundary and the span becomes 8. Brazil has had no DST since
+    // 2019 and the tzdb agrees, so it cannot fire today — but it would return
+    // with DST, and the fix is to derive `fromDay` from the local date rather
+    // than from an epoch offset.
     const fromDay = toSaoPauloDay(now - (WINDOW_DAYS - 1) * MS_PER_DAY);
     const toDay = toSaoPauloDay(now);
     if (fromDay === null || toDay === null) {
@@ -251,6 +258,26 @@ export class TutorialEntryRateCheck implements HealthCheck {
     }
 
     const ageMs = Date.now() - last.ranAt.getTime();
+
+    if (ageMs < 0) {
+      // `ranAt` is stamped by Postgres (`defaultNow()`) and compared against
+      // this process's clock. `CLAUDE.md` puts the database on a shared
+      // instance, so they are not guaranteed to be the same host.
+      //
+      // A future `ranAt` makes `ageMs` negative, which passes every `>` test
+      // below and **switches the freshness gate off entirely** — the check then
+      // publishes a ratio from an arbitrarily stale source. Refusing is the only
+      // safe reading: a clock we cannot trust is a freshness answer we do not
+      // have. The project already treats NTP skew as blocking for
+      // `purchased_at`; this is the same exposure.
+      return {
+        problem:
+          `o ultimo sync do tutorial esta ${Math.round(-ageMs / 1000)}s no FUTURO ` +
+          '— os relogios do Postgres e desta aplicacao divergem, entao a idade da ' +
+          'fonte nao pode ser conferida. Confira o NTP das duas maquinas.',
+      };
+    }
+
     if (ageMs > this.maxSyncAgeMs) {
       const ageHours = Math.floor(ageMs / MS_PER_HOUR);
       const toleranceHours = Math.floor(this.maxSyncAgeMs / MS_PER_HOUR);

@@ -27,6 +27,36 @@ function chain(result: unknown) {
   };
 }
 
+/**
+ * Flatten a Drizzle predicate into the operators and bound values it carries.
+ *
+ * `JSON.stringify` cannot be used — a column holds a back-reference to its
+ * table, so the graph is circular. Walking `queryChunks` reaches the two things
+ * an assertion needs (the SQL fragments and the parameter values) without
+ * touching the columns at all.
+ */
+function flattenSql(node: unknown): string {
+  const parts: string[] = [];
+  const visit = (value: unknown): void => {
+    if (value === null || value === undefined) return;
+    if (typeof value === 'string' || typeof value === 'number') {
+      parts.push(String(value));
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (typeof value !== 'object') return;
+    const record = value as Record<string, unknown>;
+    // `queryChunks` for an SQL node, `value` for a StringChunk or a Param.
+    if ('queryChunks' in record) visit(record.queryChunks);
+    else if ('value' in record) visit(record.value);
+  };
+  visit(node);
+  return parts.join(' ');
+}
+
 const SYNC = {
   filesScanned: 19_700,
   filesFailed: 0,
@@ -203,6 +233,25 @@ describe('TutorialStore', () => {
   });
 
   describe('enteredBetween', () => {
+    it('bounds the query at BOTH ends', async () => {
+      // Without this, the fix that closed the eight-days-against-seven defect
+      // can be reverted with the whole suite green: the check's own test asserts
+      // on the arguments it *passes*, not on what the store does with them.
+      // Deleting the `lte` here left 347 tests passing.
+      const link = chain([{ total: '0' }]);
+      db.select.mockReturnValue(link.proxy);
+
+      await store.enteredBetween('2026-03-01', '2026-03-07');
+
+      expect(link.calls.where).toHaveBeenCalledTimes(1);
+
+      const predicate = flattenSql(link.calls.where.mock.calls[0][0]);
+      expect(predicate).toContain('>=');
+      expect(predicate).toContain('<=');
+      expect(predicate).toContain('2026-03-01');
+      expect(predicate).toContain('2026-03-07');
+    });
+
     it('reads the summed total, which pg returns as a string', async () => {
       // `sum()` comes back as a string for bigint results. Number() on it is the
       // whole point of the coalesce in the query.
