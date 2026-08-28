@@ -79,11 +79,18 @@ export interface FunnelSourceState {
   /** Closed label. Set exactly when `ok` is false. Never an upstream message. */
   failure?: FunnelSourceFailure;
   /**
-   * First day this source can speak for, `YYYY-MM-DD`, or null when unbounded.
+   * First day this source can speak for, `YYYY-MM-DD`.
+   *
+   * **`null` means it covers nothing**, not that it covers everything — the
+   * table is empty, so every bucket is `null`. The opposite reading would be the
+   * more natural one for the word "unbounded", which is exactly why it is spelt
+   * out here.
    *
    * `plan_users` lost the proxy's history in the 2026-08-20 unification, so it
    * is only a few days deep. Buckets before this are `null` with a reason, never
-   * a measured zero — see `PlanDatabase.earliestArrivalAt`.
+   * a measured zero — see `PlanDatabase.earliestArrivalAt`. In monthly
+   * granularity a **partially** covered month counts as uncovered: a month total
+   * cannot be assembled from part of a month.
    */
   coversFrom?: string | null;
 }
@@ -274,23 +281,26 @@ export class FunnelService {
         coversFrom === null
           ? null
           : granularity === FunnelGranularity.Monthly
-            ? toMonth(coversFrom)
+            ? firstFullyCoveredMonth(coversFrom)
             : coversFrom;
 
       return {
         countFor: (key) => {
-          const counted = byBucket.get(key);
-          if (counted !== undefined) {
-            return counted;
+          // Coverage is checked FIRST, before any count is returned — and the
+          // order is the fix, not a detail. Returning a counted bucket early
+          // meant a partially covered month still published its partial total
+          // as if it were a month, which is a smaller denominator against a
+          // whole-month numerator: the 4500% conversion, on the one bucket in
+          // `/funnel/monthly`'s default window that has a number at all.
+          //
+          // The proxy's history stayed in the old database at the 2026-08-20
+          // unification, so `plan_users` is only days deep and this is the
+          // common case, not the edge.
+          if (coversFromKey === null || key < coversFromKey) {
+            return null;
           }
-          // Empty bucket. Whether that is a measured zero or a hole depends on
-          // whether the table reaches back this far — and it usually does not:
-          // the proxy's history stayed in the old database at the 2026-08-20
-          // unification, so `plan_users` is only days deep.
-          if (coversFromKey !== null && key >= coversFromKey) {
-            return 0;
-          }
-          return null;
+          // Covered. An absent bucket is now a genuine measured zero.
+          return byBucket.get(key) ?? 0;
         },
         state: {
           name: 'plan_users',
@@ -470,6 +480,32 @@ interface NetworkCounts {
    */
   countFor(bucketKey: string): number | null;
   state: FunnelSourceState;
+}
+
+/**
+ * First month the source can speak for **in full**, given the day it starts.
+ *
+ * ## The half-fix this exists to close
+ *
+ * Comparing month keys directly (`'2026-08' >= toMonth('2026-08-20')`) treats a
+ * month as covered when the source only knows the last twelve of its thirty-one
+ * days. That produced the very thing the coverage floor was added to prevent,
+ * one granularity over: a partial denominator against a whole-month numerator,
+ * rendering conversions like **4500%** — and it landed on the *only* bucket with
+ * a number in `/funnel/monthly`'s default window.
+ *
+ * A monthly total cannot be assembled from partial coverage, so a month whose
+ * first day the source does not have is **not covered**: the answer is `null`
+ * with a reason, not a smaller number that looks like a collapse.
+ */
+function firstFullyCoveredMonth(coversFrom: string): string {
+  if (coversFrom.endsWith('-01')) {
+    return toMonth(coversFrom);
+  }
+  const [year, month] = toMonth(coversFrom).split('-').map(Number);
+  return month === 12
+    ? `${year + 1}-01`
+    : `${year}-${String(month + 1).padStart(2, '0')}`;
 }
 
 /** Offsets are fixed at -03:00 — see the note on `atMidday`. */

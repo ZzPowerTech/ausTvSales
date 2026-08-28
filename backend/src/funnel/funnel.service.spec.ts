@@ -473,6 +473,83 @@ describe('FunnelService', () => {
       ).toBe('2026-08-20');
     });
 
+    it('treats a PARTIALLY covered month as uncovered', async () => {
+      // The half-fix that the first round left behind. Comparing month keys
+      // directly made `'2026-08' >= '2026-08'` true, so a source that knows only
+      // 20–31 August reported the whole month as covered — a partial denominator
+      // against a whole-month numerator. In the default monthly window that
+      // landed on the ONLY bucket with a number, and produced conversions like
+      // 4500%.
+      const service = new FunnelService(
+        planDbWith({
+          earliestAt: Date.parse('2026-08-20T00:00:00-03:00'),
+          arrivals: [
+            {
+              uuid: PREMIUM,
+              registeredAt: Date.parse('2026-08-25T12:00:00-03:00'),
+            },
+          ],
+        }),
+        tutorialWith({
+          rows: [
+            {
+              day: '2026-08-05',
+              platform: 'bedrock',
+              entered: 45,
+              completed: 0,
+            },
+          ],
+        }),
+      );
+
+      const series = await service.series(
+        FunnelGranularity.Monthly,
+        '2026-07-01',
+        '2026-09-30',
+      );
+
+      const [july, august, september] = series.buckets;
+      expect(july.bucket).toBe('2026-07');
+      expect(countOf(july, FunnelStep.Network)?.value).toBeNull();
+      // August is only covered from the 20th, so it cannot be totalled.
+      expect(august.bucket).toBe('2026-08');
+      expect(countOf(august, FunnelStep.Network)?.value).toBeNull();
+      // September is the first month the source knows in full.
+      expect(september.bucket).toBe('2026-09');
+      expect(countOf(september, FunnelStep.Network)?.value).toBe(0);
+    });
+
+    it('counts a month fully when coverage starts on its first day', async () => {
+      const service = new FunnelService(
+        planDbWith({ earliestAt: Date.parse('2026-08-01T00:00:00-03:00') }),
+        tutorialWith({}),
+      );
+
+      const series = await service.series(
+        FunnelGranularity.Monthly,
+        '2026-08-01',
+        '2026-08-31',
+      );
+
+      expect(countOf(series.buckets[0], FunnelStep.Network)?.value).toBe(0);
+    });
+
+    it('rolls a december boundary into the next year', async () => {
+      const service = new FunnelService(
+        planDbWith({ earliestAt: Date.parse('2026-12-15T00:00:00-03:00') }),
+        tutorialWith({}),
+      );
+
+      const series = await service.series(
+        FunnelGranularity.Monthly,
+        '2026-12-01',
+        '2027-01-31',
+      );
+
+      expect(countOf(series.buckets[0], FunnelStep.Network)?.value).toBeNull();
+      expect(countOf(series.buckets[1], FunnelStep.Network)?.value).toBe(0);
+    });
+
     it('treats an empty table as covering nothing, not everything', async () => {
       const service = new FunnelService(
         planDbWith({ earliestAt: null }),

@@ -123,6 +123,11 @@ describe('Funnel (e2e)', () => {
       it.each([
         ['from=nao-e-data', 'from'],
         ['to=2026-13-45x', 'to'],
+        // Shape-valid but not a real date — the regex accepts it, so the route
+        // has to. Left through, it reaches the driver as NaN and comes back
+        // labelled as a source outage.
+        ['from=2026-01-45', 'from'],
+        ['to=2026-13-01', 'to'],
         ['platform=inventada', 'platform'],
       ])('answers 400 for %s', async (query) => {
         await request(app.getHttpServer())

@@ -89,6 +89,21 @@ export class FunnelController {
         granularity === FunnelGranularity.Monthly ? 365 : DEFAULT_WINDOW_DAYS,
       );
 
+    // `DATE_PATTERN` checks the *shape*, so `2026-01-45` and `2026-13-01` get
+    // through it. Left unchecked they reach `Date.parse` as `NaN`, flow into the
+    // driver, and come back as a query error — which the service would then
+    // label `query_failed` and publish as a source outage. A client typo would
+    // read as the game database being down, in a system whose whole premise is
+    // that a failure signal means something.
+    for (const [field, value] of [
+      ['from', from],
+      ['to', to],
+    ] as const) {
+      if (Number.isNaN(Date.parse(`${value}T12:00:00-03:00`))) {
+        throw new BadRequestException(`${field} is not a real calendar date`);
+      }
+    }
+
     // Checked here rather than in the DTO because it is a relation between two
     // fields, and class-validator would report it against one of them — which
     // reads as "your `from` is malformed" when both are perfectly well formed.
