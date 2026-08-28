@@ -60,10 +60,11 @@ export interface TutorialSyncResult {
  * exactly the shape of the disaster the seventh check exists to detect. A
  * monitoring system that can fabricate its own alarm is worse than none.
  *
- * "Too degenerate" is four specific rules, not a vibe, and two of them measure
- * the scan's **output** rather than its input — because the accidents that keep
- * `filesScanned` high (a Quests format change, a renamed quest id) are exactly
- * the ones an input-only floor waves through. See
+ * "Too degenerate" is six specific rules, not a vibe — three absolute and three
+ * relative to the previous successful run. Half of them measure the scan's
+ * **output** rather than its input, because the accidents that keep
+ * `filesScanned` high (a Quests format change, a vanished `started-date`, a
+ * renamed quest id) are exactly the ones an input-only floor waves through. See
  * {@link TutorialSyncService.floorRefusal}.
  *
  * ## Never on the request path
@@ -235,12 +236,21 @@ export class TutorialSyncService implements OnModuleInit {
     // write must never write. `replaceAll` deletes first, so "nothing to write"
     // and "erase everything" are the same operation.
     if (scan.daysWritten === 0) {
-      return (
-        `Nenhuma linha dia x plataforma a escrever, apesar de ${scan.filesScanned} ` +
-        `arquivos legiveis e ${scan.playersInTutorial} jogador(es) no tutorial — ` +
-        'e o que um `started-date` que parou de ser gravado parece: as quests ' +
-        'casam, os jogadores contam, e nenhuma data sobrevive. Nada foi escrito.'
-      );
+      const base =
+        `Nenhuma linha dia x plataforma a escrever, com ${scan.filesScanned} ` +
+        `arquivo(s) legivel(is) e ${scan.playersInTutorial} jogador(es) no tutorial`;
+      // The cause depends on which half is zero, and this rule fires before the
+      // relative ones get to distinguish them. Saying "the quests match and the
+      // players count" while printing `0 jogador(es)` would assert a cause the
+      // rule did not establish.
+      const cause =
+        scan.playersInTutorial > 0
+          ? ' — e o que um `started-date` que parou de ser gravado parece: as ' +
+            'quests casam, os jogadores contam, e nenhuma data sobrevive.'
+          : ' — nenhuma quest do catalogo casou com nenhum arquivo, que e o que ' +
+            'um id de quest renomeado parece. Confira TUTORIAL_QUESTS_DIR e os ' +
+            'ids do tutorial.';
+      return `${base}${cause} Nada foi escrito.`;
     }
 
     // --- Relative rules: need a previous successful run to compare against ---

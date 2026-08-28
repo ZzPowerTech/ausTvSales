@@ -38,6 +38,7 @@ class StoreSpy {
   previousSync: {
     filesScanned: number | null;
     playersInTutorial?: number | null;
+    daysWritten?: number | null;
   } | null = null;
   /** Set to make the provenance read fail, exercising the degraded path. */
   lastSyncThrows = false;
@@ -649,6 +650,66 @@ describe('TutorialSyncService', () => {
 
           expect(result.status).toBe('ok');
           expect(store.replaced).toHaveLength(1);
+        },
+      );
+    });
+
+    it('refuses a collapse in days covered, with files and players intact', async () => {
+      // Partial loss of dates: the corpus is whole, the players are all there,
+      // and the series shrinks. Nothing on the input side moves, and neither do
+      // the other two relative rules — this is the only guard that sees it.
+      //
+      // The two players below land on the same day, so the run produces one row
+      // against a previous 300.
+      await withFixture(
+        {
+          players: {
+            [`${PREMIUM}.yml`]: playerdata({
+              '01tutorial': { started: MARCH_10 },
+            }),
+            [`${BEDROCK}.yml`]: playerdata({
+              '01tutorial': { started: MARCH_10 },
+            }),
+          },
+        },
+        async ({ store, service }) => {
+          store.previousSync = {
+            filesScanned: 2,
+            playersInTutorial: 2,
+            daysWritten: 300,
+          };
+
+          const result = await service.sync();
+
+          expect(result.status).toBe('error');
+          expect(store.replaced).toEqual([]);
+          expect(store.failures[0].detail).toContain('300');
+          // The number of days covered only grows while the source is intact, so
+          // a drop is lost dates, not lost players.
+          expect(store.failures[0].daysWritten).toBe(2);
+        },
+      );
+    });
+
+    it('names the right cause when nothing matched the catalogue at all', async () => {
+      // The empty-result rule fires before the relative ones can tell the two
+      // causes apart, so the message must not assert the one it did not
+      // establish: saying "the quests match and the players count" while
+      // printing `0 jogador(es)` would be a guess wearing a diagnosis.
+      await withFixture(
+        {
+          players: {
+            [`${PREMIUM}.yml`]: playerdata({
+              diario_escavacao: { started: MARCH_10 },
+            }),
+          },
+        },
+        async ({ store, service }) => {
+          const result = await service.sync();
+
+          expect(result.status).toBe('error');
+          expect(store.failures[0].detail).toContain('renomeado');
+          expect(store.failures[0].detail).not.toContain('started-date');
         },
       );
     });
