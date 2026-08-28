@@ -276,7 +276,12 @@ export class FunnelService {
         byBucket.set(key, (byBucket.get(key) ?? 0) + 1);
       }
 
-      const coversFrom = earliest === null ? null : toSaoPauloDay(earliest);
+      // The first **whole** day, then the first whole month derived from it.
+      // Both grains read `MIN(registered)` the same way — as the point the old
+      // database was truncated at, which is what `earliestArrivalAt` documents —
+      // so neither publishes a partial bucket as a total.
+      const coversFrom =
+        earliest === null ? null : firstFullyCoveredDay(earliest);
       const coversFromKey =
         coversFrom === null
           ? null
@@ -483,20 +488,44 @@ interface NetworkCounts {
 }
 
 /**
- * First month the source can speak for **in full**, given the day it starts.
+ * First **whole** day the source can speak for, given the instant it starts.
  *
- * ## The half-fix this exists to close
+ * ## Why `MIN(registered)` is a truncation point, not a first event
  *
- * Comparing month keys directly (`'2026-08' >= toMonth('2026-08-20')`) treats a
- * month as covered when the source only knows the last twelve of its thirty-one
- * days. That produced the very thing the coverage floor was added to prevent,
- * one granularity over: a partial denominator against a whole-month numerator,
- * rendering conversions like **4500%** — and it landed on the *only* bucket with
- * a number in `/funnel/monthly`'s default window.
+ * The two readings lead to opposite code, and mixing them is how this shipped
+ * broken twice. `PlanDatabase.earliestArrivalAt` settles it: the proxy's records
+ * *did not come across* in the 2026-08-20 unification, so the oldest row is
+ * where the old database was cut off — **not** the moment the first player ever
+ * arrived. Everything before it existed and is missing.
+ *
+ * So if the cut lands at 15:00, that day is nine hours of a twenty-four hour
+ * bucket, and counting it whole is a partial denominator against a whole-day
+ * numerator. That is the same defect as the monthly one below — it produced the
+ * identical **4500%** reading, one grain down — and it survived the first fix
+ * because the fix was applied only to months.
+ */
+function firstFullyCoveredDay(earliest: number): string | null {
+  const day = toSaoPauloDay(earliest);
+  if (day === null) {
+    return null;
+  }
+  // Midnight São Paulo of that day. If the cut is later, the day is partial.
+  return earliest <= Date.parse(startOfDay(day))
+    ? day
+    : toSaoPauloDay(earliest + MS_PER_DAY);
+}
+
+/**
+ * First month the source can speak for **in full**, given the first whole day.
  *
  * A monthly total cannot be assembled from partial coverage, so a month whose
  * first day the source does not have is **not covered**: the answer is `null`
  * with a reason, not a smaller number that looks like a collapse.
+ *
+ * Comparing month keys directly (`'2026-08' >= toMonth('2026-08-20')`) treated a
+ * month as covered when the source only knew twelve of its thirty-one days, and
+ * rendered conversions like **4500%** on the *only* bucket with a number in
+ * `/funnel/monthly`'s default window.
  */
 function firstFullyCoveredMonth(coversFrom: string): string {
   if (coversFrom.endsWith('-01')) {

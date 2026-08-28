@@ -456,7 +456,10 @@ describe('FunnelService', () => {
       expect(countOf(series.buckets[3], FunnelStep.Network)?.value).toBe(1);
     });
 
-    it('publishes where the coverage starts', async () => {
+    it('publishes where the coverage starts, rounded up to a whole day', async () => {
+      // The cut lands mid-afternoon on the 20th, so the first day the source can
+      // speak for *in full* is the 21st. Publishing the 20th would invite a
+      // consumer to trust a nine-hour bucket as a day.
       const service = new FunnelService(
         planDbWith({ earliestAt: Date.parse('2026-08-20T15:00:00-03:00') }),
         tutorialWith({}),
@@ -470,7 +473,72 @@ describe('FunnelService', () => {
 
       expect(
         series.sources.find((s) => s.name === 'plan_users')?.coversFrom,
-      ).toBe('2026-08-20');
+      ).toBe('2026-08-21');
+    });
+
+    it('treats a PARTIALLY covered DAY as uncovered', async () => {
+      // The same defect one grain down, and it survived the monthly fix because
+      // the fix was applied only to months. `MIN(registered)` is where the old
+      // database was cut off, not when the first player arrived — so a cut at
+      // 15:00 leaves nine hours of a twenty-four hour bucket. Counting it whole
+      // gives a partial denominator against a whole-day numerator, and produced
+      // the identical 4500% reading.
+      const service = new FunnelService(
+        planDbWith({
+          earliestAt: Date.parse('2026-08-20T15:00:00-03:00'),
+          arrivals: [
+            {
+              uuid: PREMIUM,
+              registeredAt: Date.parse('2026-08-20T16:00:00-03:00'),
+            },
+          ],
+        }),
+        tutorialWith({
+          rows: [
+            {
+              day: '2026-08-20',
+              platform: 'bedrock',
+              entered: 45,
+              completed: 0,
+            },
+          ],
+        }),
+      );
+
+      const series = await service.series(
+        FunnelGranularity.Daily,
+        '2026-08-19',
+        '2026-08-21',
+      );
+
+      expect(countOf(series.buckets[0], FunnelStep.Network)?.value).toBeNull();
+      // The boundary day itself: partial, so not a total.
+      expect(countOf(series.buckets[1], FunnelStep.Network)?.value).toBeNull();
+      // And the 4500% cannot be built from it.
+      for (const conversion of series.buckets[1].conversions) {
+        expect(conversion.percent).not.toBe(4500);
+      }
+      // The first whole day is counted.
+      expect(countOf(series.buckets[2], FunnelStep.Network)?.value).toBe(0);
+      expect(
+        series.sources.find((s) => s.name === 'plan_users')?.coversFrom,
+      ).toBe('2026-08-21');
+    });
+
+    it('counts the boundary day when coverage starts at midnight', async () => {
+      // Nothing is missing from that day, so nothing is withheld.
+      const service = new FunnelService(
+        planDbWith({ earliestAt: Date.parse('2026-08-20T00:00:00-03:00') }),
+        tutorialWith({}),
+      );
+
+      const series = await service.series(
+        FunnelGranularity.Daily,
+        '2026-08-20',
+        '2026-08-20',
+      );
+
+      expect(countOf(series.buckets[0], FunnelStep.Network)?.value).toBe(0);
     });
 
     it('treats a PARTIALLY covered month as uncovered', async () => {

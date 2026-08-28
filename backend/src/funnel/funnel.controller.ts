@@ -9,6 +9,7 @@ import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { DashboardThrottle } from '../config/throttling';
 import { FunnelQueryDto } from './dto/funnel-query.dto';
 import { FunnelService, type FunnelSeries } from './funnel.service';
+import { toSaoPauloDay } from '../tutorial/tutorial-day';
 import { FunnelGranularity } from './funnel.types';
 
 /** Default window when the caller gives none: the last 30 days. */
@@ -89,17 +90,23 @@ export class FunnelController {
         granularity === FunnelGranularity.Monthly ? 365 : DEFAULT_WINDOW_DAYS,
       );
 
-    // `DATE_PATTERN` checks the *shape*, so `2026-01-45` and `2026-13-01` get
-    // through it. Left unchecked they reach `Date.parse` as `NaN`, flow into the
-    // driver, and come back as a query error — which the service would then
-    // label `query_failed` and publish as a source outage. A client typo would
-    // read as the game database being down, in a system whose whole premise is
-    // that a failure signal means something.
+    // `DATE_PATTERN` checks the *shape*, so `2026-01-45` and `2026-02-30` get
+    // through it. Two different bad outcomes follow, and both are closed here:
+    //
+    // - `2026-01-45` parses to `NaN`, reaches the driver, and comes back a query
+    //   error — which the service labels `query_failed` and publishes as a source
+    //   outage. A client typo would read as the game database being down, in a
+    //   system whose whole premise is that a failure signal means something.
+    // - `2026-02-30` **parses fine**, silently rolling to 2026-03-02. The window
+    //   shifts, `truncated` stays false, and a date that does not exist is echoed
+    //   back in the envelope. Seven of these exist per year.
+    //
+    // The round-trip catches both: a real date renders back as itself.
     for (const [field, value] of [
       ['from', from],
       ['to', to],
     ] as const) {
-      if (Number.isNaN(Date.parse(`${value}T12:00:00-03:00`))) {
+      if (toSaoPauloDay(Date.parse(atMidday(value))) !== value) {
         throw new BadRequestException(`${field} is not a real calendar date`);
       }
     }
@@ -115,22 +122,17 @@ export class FunnelController {
   }
 }
 
+/** Midday anchor — same fixed offset as the service; see its note there. */
+function atMidday(day: string): string {
+  return `${day}T12:00:00-03:00`;
+}
+
 /** Today in America/Sao_Paulo, as `YYYY-MM-DD`. */
 function today(): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Sao_Paulo',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
+  return toSaoPauloDay(Date.now()) ?? '1970-01-01';
 }
 
 function daysBefore(day: string, days: number): string {
-  const anchor = Date.parse(`${day}T12:00:00-03:00`) - days * MS_PER_DAY;
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Sao_Paulo',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date(anchor));
+  const anchor = Date.parse(atMidday(day)) - days * MS_PER_DAY;
+  return toSaoPauloDay(anchor) ?? day;
 }
