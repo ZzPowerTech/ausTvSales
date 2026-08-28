@@ -9,6 +9,7 @@ import { HealthModule } from './health/health.module';
 import { InstrumentationModule } from './instrumentation/instrumentation.module';
 import { ItemsModule } from './items/items.module';
 import { MetricsModule } from './metrics/metrics.module';
+import { TutorialModule } from './tutorial/tutorial.module';
 import { SalesModule } from './sales/sales.module';
 
 @Module({
@@ -30,6 +31,10 @@ import { SalesModule } from './sales/sales.module';
     // InstrumentationModule: aquele pergunta "a coleta ainda acontece?" e fala
     // com o Plan sem cache; este publica os numeros e fala com cache na frente.
     MetricsModule,
+    // Fonte do funil do tutorial (S8.0, ADR-0004). O Plan nao coleta nada do
+    // tutorial, entao este modulo le os arquivos do proprio plugin Quests e e a
+    // unica origem de dois dos quatro degraus do funil da secao 6.2.
+    TutorialModule,
     CategoriesModule,
     ItemsModule,
     SalesModule,

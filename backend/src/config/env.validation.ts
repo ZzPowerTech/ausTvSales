@@ -346,6 +346,42 @@ export class EnvironmentVariables {
   @Min(1)
   FUNNEL_MIN_SAMPLE?: number;
 
+  // --- Tutorial data source (AusTV Admin S8.0, ADR-0004) ---
+
+  // Directory holding the Quests plugin's per-player progress files
+  // (`Quests/playerdata/<uuid>.yml`). Plan collects nothing about the tutorial,
+  // so this is the only source for two of the four funnel steps of spec §6.2 and
+  // for the seventh check of §6.1.
+  //
+  // The files live on the game machine; how they become readable from this VPS
+  // (rsync, read-only mount) is an operations decision that ADR-0004 recommends
+  // but does not settle. Unset is legitimate: the sync then records an `error`
+  // run, writes nothing, and the check reports `no_data` — never a zero, which
+  // would be indistinguishable from the outage it is looking for.
+  @IsOptional()
+  @MinLength(1, {
+    message: 'TUTORIAL_PLAYERDATA_DIR must not be empty when set',
+  })
+  TUTORIAL_PLAYERDATA_DIR?: string;
+
+  // Directory of the tutorial quest definitions (`Quests/quests/tutorial`). Its
+  // file names ARE the list of quest ids that count as tutorial steps — read
+  // rather than hardcoded, because the tutorial has already grown `-2`/`-3`
+  // branches that a frozen list would stop counting in silence.
+  @IsOptional()
+  @MinLength(1, { message: 'TUTORIAL_QUESTS_DIR must not be empty when set' })
+  TUTORIAL_QUESTS_DIR?: string;
+
+  // Quest id that marks the tutorial as finished. `33tutorial` in the 2026-08-19
+  // baseline, where it had 148 completions — the number `HANDOFF.md` reports.
+  // Configurable because the tutorial's shape is a business fact that changes,
+  // and the id in force is stored with every run so the count stays auditable.
+  @IsOptional()
+  @MinLength(1, {
+    message: 'TUTORIAL_FINAL_QUEST_ID must not be empty when set',
+  })
+  TUTORIAL_FINAL_QUEST_ID?: string;
+
   // Express `trust proxy` setting, applied in main.ts so `req.ip` reflects the
   // real client from the Nginx-supplied X-Forwarded-For (and a header forged by a
   // direct client is ignored). A number = trust that many hops; otherwise a
