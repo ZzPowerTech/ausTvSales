@@ -34,14 +34,21 @@ import { ApiProperty } from '@nestjs/swagger';
  * same reason `plan-api.errors.ts` splits them: `unreachable` is an incident on
  * the game VPS, `auth` and `not_configured` are our own misconfiguration, and
  * `contract_mismatch` means a Plan upgrade changed a payload we parse.
+ *
+ * `forbidden` is the one that names no cause on purpose — see
+ * `PlanForbiddenError`. A 403 from this Plan can be an unknown server name, its
+ * IP whitelist, or a permission group, and the reader has to be told which
+ * candidates to rule out rather than sent to one of them.
  */
 export const METRICS_FAILURE_REASONS = [
   /** `PLAN_BASE_URL` is unset — nothing to ask. Our deploy config. */
   'not_configured',
   /** DNS, refused connection, TLS or timeout. Real incident. */
   'unreachable',
-  /** Plan refused our credential (401/403). Our bug, not an outage. */
+  /** Plan answered 401: it wants a login. Our credential, our bug. */
   'auth',
+  /** Plan answered 403: it refused, and the cause is not determined here. */
+  'forbidden',
   /** Plan answered with a non-2xx we did not expect. */
   'upstream_error',
   /** Plan answered 2xx with something that is not the JSON we expect. */

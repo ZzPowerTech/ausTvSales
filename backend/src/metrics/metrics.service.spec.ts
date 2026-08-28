@@ -1,7 +1,11 @@
 import { NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PlanApiClient } from '../instrumentation/plan-api.client';
-import { PlanUnreachableError } from '../instrumentation/plan-api.errors';
+import {
+  PlanAuthError,
+  PlanForbiddenError,
+  PlanUnreachableError,
+} from '../instrumentation/plan-api.errors';
 import { PlanServersConfig } from '../instrumentation/plan-servers.config';
 import { MetricsService } from './metrics.service';
 import { PlanCache } from './plan-cache';
@@ -201,6 +205,43 @@ describe('MetricsService', () => {
       expect(body.freshness.reason).toBe('unreachable');
       expect(JSON.stringify(body)).not.toContain('198.51.100.7');
       expect(JSON.stringify(body)).not.toContain('25504');
+    });
+
+    it('reports a 403 as `forbidden`, never as `auth`', async () => {
+      // The consumer-visible half of the 401/403 split. `auth` tells whoever
+      // reads it to go look at the credential; against this Plan a 403 is far
+      // more likely to be the IP whitelist or a server name it does not know,
+      // and `/v1/whoami` reports `authRequired: false`, so there is no
+      // credential to be wrong in the first place.
+      const getJson = jest
+        .fn()
+        .mockRejectedValue(
+          new PlanForbiddenError('http://198.51.100.7:25504/v1/serverOverview'),
+        );
+
+      const { body } = await build(getJson).serverOverview('Survival');
+
+      expect(body.freshness.reason).toBe('forbidden');
+      // Still a closed label: the enumeration of candidates stays in the
+      // message, which reaches the log and the Discord embed but never this
+      // body, where it would name the Plan host back to a browser.
+      expect(JSON.stringify(body)).not.toContain('198.51.100.7');
+    });
+
+    it('still reports a 401 as `auth`, which is the half that did not move', async () => {
+      // The other side of the split. Without this, a future refactor could
+      // collapse the two back into one label and only the 403 test would fail —
+      // which would look like the 403 case regressing rather than the
+      // distinction disappearing.
+      const getJson = jest
+        .fn()
+        .mockRejectedValue(
+          new PlanAuthError('http://198.51.100.7:25504/v1/serverOverview'),
+        );
+
+      const { body } = await build(getJson).serverOverview('Survival');
+
+      expect(body.freshness.reason).toBe('auth');
     });
 
     it('distinguishes a contract change from an outage', async () => {

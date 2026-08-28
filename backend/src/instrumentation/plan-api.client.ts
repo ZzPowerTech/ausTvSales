@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import {
   PlanApiError,
   PlanAuthError,
+  PlanForbiddenError,
   PlanHttpError,
   PlanMalformedResponseError,
   PlanNotConfiguredError,
@@ -100,7 +101,7 @@ export class PlanApiClient implements OnModuleInit {
    * deliberate: it makes the missing validation a compile-time obligation at
    * every call site instead of an invisible cast.
    *
-   * @throws {PlanApiError} one of the four subclasses; never returns a
+   * @throws {PlanApiError} one of its subclasses; never returns a
    *   fabricated empty value, because "no data" and "could not ask" must stay
    *   distinguishable all the way to the Discord message.
    */
@@ -163,8 +164,15 @@ export class PlanApiClient implements OnModuleInit {
       throw new PlanUnreachableError(url, cause);
     }
 
-    if (response.status === 401 || response.status === 403) {
-      throw new PlanAuthError(url, response.status);
+    // Two statuses, two classes, because they carry different information. A
+    // 401 is Plan naming its own requirement; a 403 is Plan refusing without
+    // saying why, and this layer must not fill in the why.
+    if (response.status === 401) {
+      throw new PlanAuthError(url);
+    }
+
+    if (response.status === 403) {
+      throw new PlanForbiddenError(url);
     }
 
     if (!response.ok) {
