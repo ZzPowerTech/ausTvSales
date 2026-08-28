@@ -169,28 +169,48 @@ export class TutorialSyncService implements OnModuleInit {
    * indistinguishable from the eight-month outage the seventh check exists to
    * catch. The layer would fabricate its own alarm, or bury a real one.
    *
-   * Three separate accidents lead there, and the first version of this guard
-   * only caught the first:
+   * ## The accidents, and where each one is caught
    *
    * | accident | what it looks like | caught by |
    * |---|---|---|
-   * | `rsync` has not run; empty mount | 0 files | rule 1 |
-   * | `rsync` caught mid-flight | few files | rule 2 |
-   * | **Quests changed its file format** | many files, all unparseable | **rule 3** |
-   * | **A tutorial quest was renamed** | many files, zero tutorial players | **rule 4** |
+   * | `rsync` has not run; empty mount | 0 files | absolute 1 |
+   * | Quests changed its file format | many files, all unparseable | absolute 2 |
+   * | `started-date` stopped being written | files fine, players fine, **no dates** | absolute 3 |
+   * | `rsync` caught mid-flight | fewer files | relative 1 |
+   * | a tutorial quest was renamed | files fine, **players collapsed** | relative 2 |
+   * | dates partially lost | files and players fine, **days collapsed** | relative 3 |
    *
-   * Rules 3 and 4 are the ones that measure the scan's **output** rather than
-   * its input, and they matter because `filesScanned` stays high in both. The
-   * ceiling guard (`MAX_FILES`) had no counterpart on the floor, and the floor
-   * is the direction that erases data.
+   * Three of the six keep `filesScanned` high, which is why an input-only floor
+   * is not enough — the first version of this guard measured only the input and
+   * waved every one of those through.
    *
-   * ## Why rule 4 needs the previous run
+   * ## Absolute rule 3 is the one that makes the set safe
    *
-   * "Zero tutorial players" is legitimate on a brand-new server and catastrophic
-   * on this one. Only the previous successful run distinguishes them, which is
-   * why `players_in_tutorial` is persisted rather than merely logged.
+   * `replaceAll` deletes before it rewrites, so "nothing to write" and "erase
+   * everything" are the same operation. Refusing every empty result closes that
+   * door once, regardless of which accident produced it.
+   *
+   * It also refuses on a genuinely empty first run — deliberately. The observable
+   * state is identical either way (the table is empty), so the only difference is
+   * whether `tutorial_syncs` claims a successful measurement of zero or reports
+   * that it found nothing. On this server, where the baseline counted 10.834
+   * players in the tutorial, the second is the true statement.
+   *
+   * ## Why the absolute rules gate the first run too
+   *
+   * The first successful run **becomes the baseline** every later run is
+   * measured against. A degenerate one would write `ok` with zeroes, and the
+   * relative rules — all of which need a previous non-zero — would be disarmed
+   * permanently. The degenerate state would become a stable attractor that
+   * nothing recovers from.
+   *
+   * That is also why the relative rules are ratios rather than equality tests: a
+   * rename that leaves `01tutorial` in place takes 10.834 players to 1, and
+   * `!== 0` calls that healthy.
    */
   private async floorRefusal(scan: ScanSummary): Promise<string | null> {
+    // --- Absolute rules: true regardless of history ---
+
     if (scan.filesScanned === 0) {
       return (
         'Nenhum arquivo de playerdata encontrado — o diretorio existe mas esta ' +
@@ -210,25 +230,44 @@ export class TutorialSyncService implements OnModuleInit {
       );
     }
 
+    // The rule that makes the others redundant in the worst case, and the one
+    // that was missing: whatever the inputs looked like, a run with nothing to
+    // write must never write. `replaceAll` deletes first, so "nothing to write"
+    // and "erase everything" are the same operation.
+    if (scan.daysWritten === 0) {
+      return (
+        `Nenhuma linha dia x plataforma a escrever, apesar de ${scan.filesScanned} ` +
+        `arquivos legiveis e ${scan.playersInTutorial} jogador(es) no tutorial — ` +
+        'e o que um `started-date` que parou de ser gravado parece: as quests ' +
+        'casam, os jogadores contam, e nenhuma data sobrevive. Nada foi escrito.'
+      );
+    }
+
+    // --- Relative rules: need a previous successful run to compare against ---
+
     let last: Awaited<ReturnType<TutorialStore['lastSuccessfulSync']>>;
     try {
       last = await this.store.lastSuccessfulSync();
     } catch (error) {
-      // The relative floors are a safety net, not a gate. The two absolute rules
-      // above have already done the important half, and refusing the whole run
-      // because the provenance table is unreadable trades one failure for
-      // another.
-      this.logger.warn(
-        `Nao foi possivel ler o ultimo sync bem-sucedido para conferir o piso: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+      // Refuse rather than proceed. The write that follows is destructive, and
+      // "we could not check" is not "the check passed" — the whole vocabulary of
+      // this project turns on that difference. Not writing loses a night of
+      // freshness; writing unchecked can lose the series. The asymmetry decides.
+      const reason = error instanceof Error ? error.message : String(error);
+      return (
+        `Nao foi possivel ler o ultimo sync bem-sucedido para conferir os pisos ` +
+        `(${reason}) — a gravacao apaga a serie antes de reescrever, entao ela nao ` +
+        'acontece sem validacao. Nada foi escrito.'
       );
-      return null;
     }
 
     if (last === null) {
-      // First ever run: nothing to compare against, and refusing it would mean
-      // the series could never be populated in the first place.
+      // First ever run. Nothing to compare against — and by this point the three
+      // absolute rules have already established that the scan read files, parsed
+      // most of them, and produced rows. That is the bar for becoming the
+      // baseline every later run is measured against, which is why the absolute
+      // rules cannot be skipped here: a degenerate first run would write `ok`
+      // with zeroes and permanently disarm the relative rules below.
       return null;
     }
 
@@ -246,14 +285,33 @@ export class TutorialSyncService implements OnModuleInit {
       }
     }
 
+    // A ratio, not `=== 0`. A rename that leaves `01tutorial` behind and changes
+    // the rest takes 10.834 players down to 1 — a 99,99% collapse that an
+    // equality test waves through as "not zero".
     const previousPlayers = last.playersInTutorial ?? 0;
-    if (previousPlayers > 0 && scan.playersInTutorial === 0) {
-      return (
-        `Nenhum jogador no tutorial entre ${scan.filesScanned} arquivos legiveis, ` +
-        `contra ${previousPlayers} no ultimo sync bem-sucedido — isto e o que um id ` +
-        'de quest renomeado parece (o catalogo carregou, mas nenhuma chave casa). ' +
-        'Nada foi escrito; a serie anterior continua de pe.'
-      );
+    if (previousPlayers > 0) {
+      const floor = Math.floor(previousPlayers * MIN_SCAN_FRACTION_OF_LAST);
+      if (scan.playersInTutorial < floor) {
+        return (
+          `Apenas ${scan.playersInTutorial} jogador(es) no tutorial contra ` +
+          `${previousPlayers} no ultimo sync bem-sucedido (piso ${floor}), com a ` +
+          'contagem de arquivos intacta — e o que um id de quest renomeado parece: ' +
+          'o catalogo carrega e as chaves deixam de casar. Nada foi escrito.'
+        );
+      }
+    }
+
+    const previousDays = last.daysWritten ?? 0;
+    if (previousDays > 0) {
+      const floor = Math.floor(previousDays * MIN_SCAN_FRACTION_OF_LAST);
+      if (scan.daysWritten < floor) {
+        return (
+          `Apenas ${scan.daysWritten} linhas dia x plataforma contra ${previousDays} ` +
+          `no ultimo sync bem-sucedido (piso ${floor}) — o numero de dias cobertos ` +
+          'so cresce enquanto a fonte esta intacta, entao uma queda e perda de ' +
+          'datas, nao de jogadores. Nada foi escrito.'
+        );
+      }
     }
 
     return null;
@@ -361,6 +419,7 @@ export class TutorialSyncService implements OnModuleInit {
       filesScanned,
       filesFailed,
       playersInTutorial,
+      daysWritten: rows.length,
     });
     if (refusal !== null) {
       this.logger.error(refusal);
@@ -439,6 +498,8 @@ interface ScanSummary {
   filesScanned: number;
   filesFailed: number;
   playersInTutorial: number;
+  /** Rows the run would write. Zero is a refusal, never a result. */
+  daysWritten: number;
 }
 
 function emptyFailure(detail: string): TutorialSyncResult {

@@ -271,21 +271,35 @@ describe('TutorialSyncService', () => {
     });
 
     it('counts an undated entrant without giving them a day', async () => {
+      // Paired with a dated player so the run has something to write. On its
+      // own, an all-undated corpus is refused outright — that case has its own
+      // test, because it is what a vanished `started-date` looks like.
       await withFixture(
         {
           players: {
             [`${PREMIUM}.yml`]:
               'quest-progress:\n  01tutorial:\n    completed: false\n',
+            [`${BEDROCK}.yml`]: playerdata({
+              '01tutorial': { started: MARCH_10 },
+            }),
           },
         },
         async ({ store, service }) => {
           const result = await service.sync();
 
-          expect(result.playersInTutorial).toBe(1);
+          expect(result.playersInTutorial).toBe(2);
+          // "We do not know when" is not "it did not happen": the undated player
+          // has no day to be filed under, and the totals say so rather than
+          // pretending they never entered.
           expect(result.playersUndated).toBe(1);
-          // No day to file them under, so no row — and the totals say so rather
-          // than pretending the player never entered.
-          expect(store.replaced[0].rows).toEqual([]);
+          expect(store.replaced[0].rows).toEqual([
+            {
+              day: '2026-03-10',
+              platform: 'bedrock',
+              entered: 1,
+              completed: 0,
+            },
+          ]);
         },
       );
     });
@@ -297,14 +311,19 @@ describe('TutorialSyncService', () => {
             [`${PREMIUM}.yml`]: playerdata({
               diario_escavacao: { started: MARCH_10, done: MARCH_10 },
             }),
+            [`${BEDROCK}.yml`]: playerdata({
+              '01tutorial': { started: MARCH_10 },
+            }),
           },
         },
         async ({ store, service }) => {
           const result = await service.sync();
 
-          expect(result.filesScanned).toBe(1);
-          expect(result.playersInTutorial).toBe(0);
-          expect(store.replaced[0].rows).toEqual([]);
+          expect(result.filesScanned).toBe(2);
+          // The daily quest player is read and discarded: counting them would
+          // report the whole player base as tutorial entrants.
+          expect(result.playersInTutorial).toBe(1);
+          expect(store.replaced[0].rows).toHaveLength(1);
         },
       );
     });
@@ -473,14 +492,53 @@ describe('TutorialSyncService', () => {
           expect(result.status).toBe('error');
           expect(result.playersInTutorial).toBe(0);
           expect(store.replaced).toEqual([]);
-          expect(store.failures[0].detail).toContain('10834');
+          // Caught by the absolute "nothing to write" rule before the relative
+          // player-count one even gets a chance — which is the point of having an
+          // absolute rule: it does not depend on there being a previous run.
+          expect(store.failures[0].daysWritten).toBe(0);
         },
       );
     });
 
-    it('allows zero tutorial players when there were none before either', async () => {
-      // A brand-new server, or one whose tutorial nobody has reached yet. The
-      // rule needs a previous non-zero to have anything to compare against.
+    it('writes nothing when every date is missing, however healthy the rest looks', async () => {
+      // The accident no input-side rule can see: `started-date` stops being
+      // written. Files parse, tutorial quests match, `playersInTutorial` stays
+      // high — and every date is null, so there is nothing to write. Since
+      // `replaceAll` deletes before it rewrites, "nothing to write" and "erase
+      // everything" are the same operation.
+      await withFixture(
+        {
+          players: {
+            [`${PREMIUM}.yml`]:
+              'quest-progress:\n  01tutorial:\n    completed: false\n',
+            [`${BEDROCK}.yml`]:
+              'quest-progress:\n  01tutorial:\n    completed: false\n',
+          },
+        },
+        async ({ store, service }) => {
+          store.previousSync = { filesScanned: 2, playersInTutorial: 2 };
+
+          const result = await service.sync();
+
+          expect(result.status).toBe('error');
+          expect(result.playersInTutorial).toBe(2);
+          expect(result.playersUndated).toBe(2);
+          expect(store.replaced).toEqual([]);
+          expect(store.failures[0].detail).toContain('started-date');
+        },
+      );
+    });
+
+    it('refuses a degenerate FIRST run instead of making it the baseline', async () => {
+      // The first successful run becomes the ruler every later run is measured
+      // against. A degenerate one writes `ok` with zeroes, which disarms every
+      // relative rule permanently — the broken state becomes a stable attractor
+      // that nothing recovers from.
+      //
+      // Refusing costs nothing here: the series is already empty, so the
+      // observable state is identical. The difference is whether `tutorial_syncs`
+      // claims a successful measurement of zero or reports finding nothing. On
+      // this server, where the baseline counted 10.834, the second is true.
       await withFixture(
         {
           players: {
@@ -490,12 +548,40 @@ describe('TutorialSyncService', () => {
           },
         },
         async ({ store, service }) => {
-          store.previousSync = { filesScanned: 1, playersInTutorial: 0 };
+          store.previousSync = null;
 
           const result = await service.sync();
 
-          expect(result.status).toBe('ok');
-          expect(store.replaced).toHaveLength(1);
+          expect(result.status).toBe('error');
+          expect(store.replaced).toEqual([]);
+        },
+      );
+    });
+
+    it('refuses a partial collapse in tutorial players, not only a total one', async () => {
+      // A rename that leaves `01tutorial` in place and changes the rest takes
+      // 10.834 players down to 1. An equality test (`=== 0`) calls that healthy;
+      // the rule is a ratio for exactly this case.
+      await withFixture(
+        {
+          players: {
+            [`${PREMIUM}.yml`]: playerdata({
+              '01tutorial': { started: MARCH_10 },
+            }),
+            [`${BEDROCK}.yml`]: playerdata({
+              diario_escavacao: { started: MARCH_10 },
+            }),
+          },
+        },
+        async ({ store, service }) => {
+          store.previousSync = { filesScanned: 2, playersInTutorial: 10_834 };
+
+          const result = await service.sync();
+
+          expect(result.status).toBe('error');
+          expect(result.playersInTutorial).toBe(1);
+          expect(store.replaced).toEqual([]);
+          expect(store.failures[0].detail).toContain('10834');
         },
       );
     });
@@ -567,10 +653,11 @@ describe('TutorialSyncService', () => {
       );
     });
 
-    it('does not fail the run when the provenance read itself fails', async () => {
-      // The relative floor is a safety net, not a gate. The absolute floor has
-      // already done the important half; refusing the whole run because the
-      // provenance table is unreadable would trade one failure for another.
+    it('refuses to overwrite when it cannot read the provenance to check', async () => {
+      // "We could not check" is not "the check passed" — the whole vocabulary of
+      // this project turns on that difference. The write that follows deletes
+      // the series before rewriting it, so proceeding unvalidated risks the
+      // data; refusing costs a night of freshness. The asymmetry decides.
       await withFixture(
         {
           players: {
@@ -584,8 +671,9 @@ describe('TutorialSyncService', () => {
 
           const result = await service.sync();
 
-          expect(result.status).toBe('ok');
-          expect(store.replaced).toHaveLength(1);
+          expect(result.status).toBe('error');
+          expect(store.replaced).toEqual([]);
+          expect(store.failures[0].detail).toContain('banco fora do ar');
         },
       );
     });

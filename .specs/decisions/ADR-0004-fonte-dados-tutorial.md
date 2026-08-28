@@ -181,24 +181,37 @@ A gravação **substitui a série inteira** dentro de uma transação, e não fa
 Substituir é o que torna a reconstrução fiel à fonte.
 
 **Substituir tem um risco que o `upsert` não tem:** *qualquer* execução que chegue ao fim sem nada a
-escrever apaga a série e grava `ok`. Quatro acidentes levam lá, e os dois últimos mantêm
-`filesScanned` alto — por isso um piso que olhe só a entrada não os pega:
+escrever apaga a série e grava `ok`. Seis acidentes levam lá, e **três deles mantêm `filesScanned`
+alto** — por isso um piso que olhe só a entrada não serve.
 
 | acidente | como aparece | regra que recusa |
 |---|---|---|
-| `rsync` não rodou; montagem vazia | 0 arquivos | 1 — zero nunca é varredura válida |
-| `rsync` pego no meio | poucos arquivos | 2 — abaixo de metade do último sync bom |
-| **Quests mudou o formato do arquivo** | muitos arquivos, todos ilegíveis | 3 — taxa de falha ≥ 50% |
-| **um id de quest foi renomeado** | muitos arquivos, zero jogadores no tutorial | 4 — zero contra um anterior > 0 |
+| `rsync` não rodou; montagem vazia | 0 arquivos | **absoluta 1** |
+| Quests mudou o formato do arquivo | muitos arquivos, todos ilegíveis | **absoluta 2** |
+| `started-date` parou de ser gravado | arquivos e jogadores intactos, **nenhuma data** | **absoluta 3** |
+| `rsync` pego no meio | menos arquivos | relativa 1 |
+| um id de quest foi renomeado | arquivos intactos, **jogadores despencam** | relativa 2 |
+| perda parcial de datas | arquivos e jogadores intactos, **dias despencam** | relativa 3 |
 
-Um diretório **vazio mas existente** não faz o `opendir` falhar, e é o caso mais provável na prática.
-As regras 3 e 4 medem a **saída** da varredura, e existem porque a primeira versão deste ETL só
-media a entrada — e passava batido justamente nos dois acidentes que não reduzem a contagem de
-arquivos.
+**A regra absoluta 3 — "nenhuma linha a escrever" — é a que torna o conjunto seguro.** Como o
+`replaceAll` apaga antes de reescrever, "nada a escrever" e "apagar tudo" são a mesma operação;
+recusar todo resultado vazio fecha essa porta de uma vez, qualquer que tenha sido o acidente.
 
-A regra 4 precisa do valor da execução anterior, e é por isso que `players_in_tutorial` é
-**persistido** em `tutorial_syncs`, não apenas logado: "zero jogadores no tutorial" é legítimo num
-servidor novo e catastrófico neste.
+Ela também recusa um primeiro run genuinamente vazio, **de propósito**. O estado observável é o
+mesmo dos dois jeitos (a tabela fica vazia), então a única diferença é se o `tutorial_syncs` afirma
+ter medido zero com sucesso ou registra que não encontrou nada. Neste servidor, cujo baseline contou
+**10.834** jogadores no tutorial, a segunda é a afirmação verdadeira.
+
+**Por que as regras absolutas valem também no primeiro run.** O primeiro run bem-sucedido *vira a
+régua* contra a qual todos os seguintes são medidos. Um primeiro run degenerado gravaria `ok` com
+zeros e desarmaria permanentemente as três regras relativas — todas precisam de um valor anterior
+maior que zero. O estado quebrado viraria um atrator estável do qual nada se recupera.
+
+As relativas são **razões, não testes de igualdade**, pelo mesmo motivo: um rename que preserve
+`01tutorial` e mude o resto leva 10.834 jogadores a 1, e `!== 0` chama isso de saudável.
+
+É por isso que `players_in_tutorial` e `days_written` são **colunas** em `tutorial_syncs`, não
+apenas linhas de log: as regras relativas leem os dois.
 
 ### 4. Fora do pico
 

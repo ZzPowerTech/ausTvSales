@@ -253,7 +253,17 @@ export const tutorialSyncs = pgTable(
      * from a real collapse unless the previous run's value is on record.
      */
     playersInTutorial: integer('players_in_tutorial'),
-    /** `(day, platform)` rows written. Zero is a refusal signal, not a result. */
+    /**
+     * `(day, platform)` rows the run produced.
+     *
+     * On an `ok` row, what was written. On an `error` row, what the run *would*
+     * have written before a floor rule stopped it — so the record says how close
+     * it came, not merely that it stopped.
+     *
+     * Read by the next run: a collapse against this value is how partial loss of
+     * dates is caught, and zero is refused outright. Both rules live in
+     * `TutorialSyncService.floorRefusal`.
+     */
     daysWritten: integer('days_written'),
     /** Tutorial quests found in the catalogue directory. */
     questsInCatalogue: integer('quests_in_catalogue'),

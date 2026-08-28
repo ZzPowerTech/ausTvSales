@@ -131,16 +131,36 @@ describe('TutorialStore', () => {
       expect(tx.insert).toHaveBeenCalledTimes(1);
     });
 
-    it('chunks large inserts so the bound-parameter cap is unreachable', async () => {
-      // Postgres caps a statement at 65535 bound parameters and each row binds
-      // four. Chunking at 5.000 keeps every statement an order of magnitude clear.
+    it('chunks large inserts without losing or duplicating a row', async () => {
+      // Asserting on the payloads, not on the call count. Counting calls proves
+      // only that *some* chunking happened: `slice(i, i + CHUNK - 1)` silently
+      // drops two rows out of 12.001 and still produces four inserts.
+      const batches: TutorialDayRow[][] = [];
       tx.delete.mockReturnValue(chain(undefined).proxy);
-      tx.insert.mockReturnValue(chain(undefined).proxy);
+      tx.insert.mockImplementation(() => {
+        const link = chain(undefined);
+        link.calls.values = jest.fn((value: unknown) => {
+          if (Array.isArray(value)) {
+            batches.push(value as TutorialDayRow[]);
+          }
+          return link.proxy;
+        }) as StubMock;
+        return link.proxy;
+      });
 
-      await store.replaceAll(rows(12_001), SYNC);
+      const input = rows(12_001);
+      await store.replaceAll(input, SYNC);
 
-      // 3 chunks (5000 + 5000 + 2001) plus the provenance row.
-      expect(tx.insert).toHaveBeenCalledTimes(4);
+      const written = batches.flat();
+      // Every row, exactly once, in order.
+      expect(written).toEqual(input);
+      // Postgres caps a statement at 65535 bound parameters and each row binds
+      // four, so no batch may approach ~16k rows.
+      expect(Math.max(...batches.map((b) => b.length))).toBeLessThanOrEqual(
+        5_000,
+      );
+      // And the chunking is real rather than one statement per row.
+      expect(batches).toHaveLength(3);
     });
   });
 
