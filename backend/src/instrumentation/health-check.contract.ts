@@ -49,7 +49,7 @@ export interface HealthCheck {
    *
    * Should not throw — return an `error` observation instead, so the reason
    * reaches Discord. The runner catches anyway, because an uncaught check must
-   * never take down the whole cycle and silence the other six.
+   * never take down the whole cycle and silence the others.
    */
   run(): Promise<HealthCheckObservation[]>;
 }

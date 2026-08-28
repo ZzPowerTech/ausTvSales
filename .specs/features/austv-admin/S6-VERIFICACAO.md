@@ -6,6 +6,11 @@
 >
 > Escopo: as quatro histórias da milestone `AusTV Admin S6` (#106, #107, #108, #109) e a DoD da
 > sprint no [plano](../../sprints/austv-admin-sprints.md).
+>
+> **Atualização de 2026-08-28.** A S8.0 fechou dois critérios da S6.3 — o 7º check e o alerta com
+> valor forçado. As linhas afetadas estão marcadas *in loco*; o resto do documento continua sendo o
+> retrato de 27/08 e é lido como tal. **O critério 4 — derrubar uma instância de propósito — segue
+> aberto**, e é o achado central deste documento, não uma pendência de contagem.
 
 ## Resumo em uma tabela
 
@@ -14,7 +19,7 @@
 | S6.0 — Baseline pré-campanha (#106) | 2026-08-23 | ✅ **entregue**, com uma perda declarada |
 | S6.2 — Unificar bancos (#108) | 2026-08-23 | ✅ **concluída fora do fluxo** pelo dono em 2026-08-20 |
 | S6.2b — Auditar exposição de rede (#107) | 2026-08-23 | ⚠️ **instrumento entregue, medição nunca registrada** |
-| S6.3 — Checks de saúde + alerta (#109) | 2026-08-23 | ⚠️ **6 de 7 checks entregues; o alerta nunca foi comprovado** |
+| S6.3 — Checks de saúde + alerta (#109) | 2026-08-23 | ⚠️ **6 de 7 checks entregues** (7 desde 28/08, ver atualização); **o alerta nunca foi comprovado** |
 
 **Nenhuma história foi entregue de forma incorreta.** Duas foram fechadas com critérios de aceite
 sem evidência — e as duas falham pelo **mesmo motivo estrutural**, que é o achado central desta
@@ -132,16 +137,25 @@ aplicação nunca substitui filtro de rede*):
 
 | critério | evidência no repositório | veredito |
 |---|---|---|
-| Os 7 checks implementados e agendados | 6 classes de check registradas no token `HEALTH_CHECKS` de `instrumentation.module.ts`; `HealthCheckScheduler` com intervalo, opt-in e carência no boot | ✅ **para 6**, escopo reduzido por decisão do dono (opção 3) |
+| Os 7 checks implementados e agendados | 6 classes registradas no token `HEALTH_CHECKS` na data desta auditoria; a **sétima entrou em 2026-08-28** pela S8.0. `HealthCheckScheduler` com intervalo, opt-in e carência no boot | ✅ **fechado**, 6 aqui e 7 desde 28/08 |
 | Falha dispara alerta ativo no Discord | `DiscordAlerter` + `HealthCheckRunner` anunciam `breached` e `error` | ✅ no código |
 | Estado persistido em `health_check`, com histórico | tabela `health_checks` **append-only** (migration `0002`), uma linha por execução, índice `(check_name, checked_at desc)` | ✅ |
 | **Verificado derrubando uma instância de propósito** | — | ❌ **nunca feito** |
-| Alerta de tutorial testado com valor forçado | — | ➡️ **movido para a S8.0**, decisão registrada |
+| Alerta de tutorial testado com valor forçado | `tutorial-entry-rate.alert.spec.ts`, desde 2026-08-28 | ✅ **fechado na S8.0** — força 12 de 100 e assere sobre o payload do webhook |
 | Alerta repetido é agrupado, não vira flood | `alert-policy` com `HEALTH_ALERT_REALERT_HOURS` (24h) | ✅ no código |
 
-Os seis checks presentes: `plan.collection_alive`, `plan.proxy_registration_alive`,
-`plan.orphan_instance`, `plan.version_divergence`, `funnel.network_to_survival`,
-`platform.offline_account_share`.
+Os seis checks presentes **na data desta auditoria**: `plan.collection_alive`,
+`plan.proxy_registration_alive`, `plan.orphan_instance`, `plan.version_divergence`,
+`funnel.network_to_survival`, `platform.offline_account_share`.
+
+> **Atualizado em 2026-08-28 — são sete.** A S8.0 construiu a fonte do tutorial
+> ([ADR-0004](../../decisions/ADR-0004-fonte-dados-tutorial.md)) e
+> `funnel.tutorial_entry_rate` entrou no registro. O critério 1 da S6.3 fechou retroativamente, e o
+> critério 5 (*alerta testado com valor forçado*) também.
+>
+> **O critério 4 continua aberto, e nada nesta atualização o toca.** É a distinção que este
+> documento inteiro existe para fazer: sete checks construídos e testados em unidade não são sete
+> checks vistos chegando num canal. Nenhum destes alertas foi observado ponta a ponta.
 
 ### Qualidade acima do critério, que vale registrar
 

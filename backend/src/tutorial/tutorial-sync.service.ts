@@ -111,7 +111,8 @@ export class TutorialSyncService implements OnModuleInit {
       this.logger.warn(
         'TUTORIAL_PLAYERDATA_DIR/TUTORIAL_QUESTS_DIR nao configurados — o funil ' +
           'do tutorial fica sem fonte e o check funnel.tutorial_entry_rate vai ' +
-          'reportar `no_data`, nunca `ok`.',
+          'reportar `error`, nunca `ok`. `error` e nao `no_data` porque so ele ' +
+          'notifica: uma fonte ausente tem de chegar ao canal.',
       );
       return;
     }

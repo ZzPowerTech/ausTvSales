@@ -106,7 +106,7 @@ export class HealthCheckRunner {
       previous.map((record) => [record.checkName, record.status]),
     );
 
-    // 2. Run the checks. One failing check must never silence the other six.
+    // 2. Run the checks. One failing check must never silence the others.
     const observations = await this.runChecks();
 
     if (observations.length === 0) {

@@ -238,6 +238,14 @@ tutorial parou de capturar novatos em dez/2025 e a taxa caiu de ~100% para 12% a
 
 > **Atualizado em 2026-08-23:** os seis checks com fonte estão **implementados e mergeados**. O
 > sétimo virou a S8.0.
+>
+> **Atualizado em 2026-08-28: o sétimo entrou.** A S8.0 construiu a fonte
+> ([ADR-0004](../../decisions/ADR-0004-fonte-dados-tutorial.md): ETL noturno lendo
+> `Quests/playerdata`), e `funnel.tutorial_entry_rate` está no registro. O parágrafo acima — "segue
+> **sem alerta automático**" — **deixou de valer** para o desastre de 8 meses.
+>
+> O que **continua** valendo, e é outra coisa: nenhum destes sete alertas foi visto chegando num
+> canal real. O critério 4 da S6.3 segue aberto.
 
 ## Estado da S6.3 em 2026-08-23 — o que está pronto e o que trava
 
