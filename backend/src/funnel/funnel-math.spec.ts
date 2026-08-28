@@ -23,6 +23,23 @@ function conversionOf(
   return found;
 }
 
+/**
+ * Reason on the unmeasured variant, or `undefined` on the measured one.
+ *
+ * The union makes `unavailableReason` reachable only after narrowing — which is
+ * the point of it — so the tests narrow here once instead of at every assertion.
+ */
+function reasonOf(
+  value: { percent: number | null } | { value: number | null },
+): string | undefined {
+  const measured =
+    'percent' in value ? value.percent !== null : value.value !== null;
+  if (measured) {
+    return undefined;
+  }
+  return (value as unknown as { unavailableReason: string }).unavailableReason;
+}
+
 describe('buildBucket', () => {
   describe('no percentage ever leaves without its base', () => {
     it('publishes percent and n together', () => {
@@ -53,7 +70,7 @@ describe('buildBucket', () => {
       );
       expect(conversion.percent).toBeNull();
       expect(conversion.n).toBeNull();
-      expect(conversion.unavailableReason).toBeDefined();
+      expect(reasonOf(conversion)).toBeDefined();
     });
 
     it('keeps the base when only the numerator is missing', () => {
@@ -94,7 +111,7 @@ describe('buildBucket', () => {
       );
       expect(tutorial?.value).toBeNull();
       expect(tutorial?.value).not.toBe(0);
-      expect(tutorial?.unavailableReason).toBeDefined();
+      expect(reasonOf(tutorial!)).toBeDefined();
     });
 
     it('keeps a real zero as a zero', () => {
@@ -108,7 +125,7 @@ describe('buildBucket', () => {
         (c) => c.step === FunnelStep.TutorialEntered,
       );
       expect(tutorial?.value).toBe(0);
-      expect(tutorial?.unavailableReason).toBeUndefined();
+      expect(reasonOf(tutorial!)).toBeUndefined();
       // And a measured zero over a real base is a real 0%.
       expect(
         conversionOf(bucket, FunnelStep.Network, FunnelStep.TutorialEntered)
@@ -133,7 +150,7 @@ describe('buildBucket', () => {
       expect(conversion.percent).toBeNull();
       // The base still travels: zero arrivals IS the measurement.
       expect(conversion.n).toBe(0);
-      expect(conversion.unavailableReason).toContain('base zero');
+      expect(reasonOf(conversion)).toContain('base zero');
     });
   });
 
@@ -145,12 +162,10 @@ describe('buildBucket', () => {
         (c) => c.step === FunnelStep.Survival,
       );
       expect(survival?.value).toBeNull();
-      expect(survival?.unavailableReason).toContain('graph');
-      expect(survival?.unavailableReason).toContain('plan_user_info');
+      expect(reasonOf(survival!)).toContain('graph');
+      expect(reasonOf(survival!)).toContain('plan_user_info');
       // And points at where the signal DOES exist today.
-      expect(survival?.unavailableReason).toContain(
-        'funnel.network_to_survival',
-      );
+      expect(reasonOf(survival!)).toContain('funnel.network_to_survival');
     });
 
     it('still publishes rede -> tutorial_entrou across the gap', () => {
@@ -179,16 +194,21 @@ describe('buildBucket', () => {
       for (const conversion of bucket.conversions) {
         // Each one either has both halves or explains itself. Never silent.
         const explained =
-          conversion.percent !== null ||
-          conversion.unavailableReason !== undefined;
+          conversion.percent !== null || reasonOf(conversion) !== undefined;
         expect(explained).toBe(true);
       }
     });
   });
 
-  it('reproduces the known ~12% tutorial entry rate of april/2026', () => {
-    // The DoD asks the funnel to reproduce known figures. This is the one the
-    // investigation established: entry had fallen to 12% by april.
+  it('turns the april/2026 pair into the ~12% the investigation reported', () => {
+    // Named for what it is. The DoD asks the funnel to *reproduce* known
+    // figures, and this does not do that — it feeds two numbers in by hand and
+    // checks the division. Reproducing would mean running against the real
+    // sources, and the network side cannot: `plan_users` lost the proxy's
+    // history in the 2026-08-20 unification, so april/2026 has no denominator.
+    //
+    // What it does pin is that 360 arrivals and 43 entries render as 11,9% and
+    // not as something else — which is the arithmetic the report depends on.
     const bucket = buildBucket(
       '2026-04',
       counts({ network: 360, tutorialEntered: 43 }),

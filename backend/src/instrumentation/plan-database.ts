@@ -68,6 +68,10 @@ interface RawArrivalRow extends RowDataPacket {
   registered: number | string | null;
 }
 
+interface RawEarliestRow extends RowDataPacket {
+  earliest: number | string | null;
+}
+
 /**
  * Read-only access to `plan_servers` and `plan_users` — **documented exception 2
  * to ADR-002**, approved by the owner on 2026-08-23 and extended the same day.
@@ -295,6 +299,40 @@ export class PlanDatabase implements OnModuleInit, OnModuleDestroy {
    * @throws when the database is unreachable. Never an empty array on failure —
    *   "nobody arrived" and "we could not ask" must stay distinguishable.
    */
+  /**
+   * Earliest `registered` in `plan_users`, epoch ms. Null when the table is empty.
+   *
+   * ## The number this exists to stop being invented
+   *
+   * `plan_users` does **not** hold the network's whole history. The proxy's
+   * records did not come across in the 2026-08-20 unification — they are in the
+   * old database — so in practice the network metric is only a few days deep
+   * (`HANDOFF.md`, "Restrição nova para o baseline da campanha").
+   *
+   * A query for March 2026 therefore **succeeds and returns nothing**, and a
+   * caller that reads "the source answered, so an empty bucket is a measured
+   * zero" would publish `rede: 0` for a month when thousands of people
+   * connected. Beside a tutorial step whose ETL reads plugin files going back to
+   * 2025, that renders a funnel where more people enter the tutorial than reach
+   * the network.
+   *
+   * This is the exact defect the epic exists to prevent, so the coverage floor
+   * is a first-class question the funnel must ask before trusting a zero.
+   */
+  async earliestArrivalAt(): Promise<number | null> {
+    if (!this.pool) {
+      throw new Error(
+        'PLAN_DB_HOST nao configurado — sem conexao com o banco do Plan',
+      );
+    }
+
+    const [rows] = await this.pool.query<RawEarliestRow[]>(
+      'SELECT MIN(registered) AS earliest FROM plan_users',
+    );
+
+    return toNumber(rows[0]?.earliest);
+  }
+
   async networkArrivalsBetween(
     from: number,
     to: number,

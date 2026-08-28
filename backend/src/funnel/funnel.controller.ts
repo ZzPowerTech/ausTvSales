@@ -67,8 +67,9 @@ export class FunnelController {
   @ApiOperation({
     summary: 'Funil de 4 degraus, por mes',
     description:
-      'Mesma serie agregada por mes. A janela maxima e a mesma — 366 dias — ' +
-      'entao um pedido longo devolve ate 13 meses.',
+      'Mesma serie agregada por mes. A janela maxima e a mesma **em dias** ' +
+      '(366), entao um pedido longo devolve no maximo 13 meses e a resposta ' +
+      'marca `truncated: true`.',
   })
   @ApiOkResponse({ description: 'Serie mensal do funil.' })
   @Header('Cache-Control', 'no-store')

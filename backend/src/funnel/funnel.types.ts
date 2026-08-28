@@ -68,47 +68,66 @@ export const SURVIVAL_STEP_UNAVAILABLE =
 /**
  * A count that may be absent, and says which.
  *
- * `null` is **not zero**. The distinction is the reason this epic exists: a
- * collection gap read as zero is what made the tutorial's eight-month outage
- * invisible. A shape that cannot express "we did not measure" would force every
- * consumer to guess.
+ * A **discriminated union**, not an object with optional fields. `null` is not
+ * zero, and the shape makes "absent without a reason" impossible to construct:
+ * a consumer that reads `value === null` is guaranteed a `unavailableReason` to
+ * show. A collection gap read as zero is what made the tutorial's eight-month
+ * outage invisible.
  */
-export interface StepCount {
-  step: FunnelStep;
-  /** Null when this step had no source for the bucket. Never a stand-in zero. */
-  value: number | null;
-  /**
-   * Why `value` is null. Absent when there is a value.
-   *
-   * Carried per step rather than per response because the steps fail
-   * independently: the network step can be unreachable while the tutorial steps
-   * are fine, and a single response-level flag would hide which is which.
-   */
-  unavailableReason?: string;
-}
+export type StepCount =
+  | { step: FunnelStep; value: number }
+  | {
+      step: FunnelStep;
+      value: null;
+      /**
+       * Why this step has no number for this bucket.
+       *
+       * Carried per step rather than per response because the steps fail
+       * independently: the network step can be unreachable while the tutorial
+       * steps are fine, and a response-level flag would hide which is which.
+       */
+      unavailableReason: string;
+    };
 
 /**
  * A ratio and the base it was computed from — never one without the other.
  *
- * The project rule, and it is not ceremony: the investigation published "queda
- * de 96%" and "48 chegadas/mês", and both were percentages over a contaminated
- * base that nobody could check because the base was not printed. A percentage
- * without `n` is an assertion with no way to be wrong.
+ * ## Why this is a union and not two nullable fields
  *
- * Both fields are nullable **together**: a conversion needs both sides, and a
- * shape where `value` could be set while `n` was null would reintroduce exactly
- * the thing the rule forbids.
+ * The project rule is not ceremony: the investigation published "queda de 96%"
+ * and "48 chegadas/mês", both percentages over a contaminated base that nobody
+ * could check because the base was never printed. A percentage without `n` is an
+ * assertion with no way to be wrong.
+ *
+ * `.specs/features/austv-admin/S6-VERIFICACAO.md` found that this rule lived
+ * only in a docblock — `n?: number`, optional — and asked for *"um tipo que
+ * torne o par inseparável, em vez de dois campos opcionais lado a lado"*. Two
+ * nullable fields side by side would still let `{ percent: 50, n: null }`
+ * compile, which is exactly the thing forbidden.
+ *
+ * So: **a measured conversion carries both, and only the unmeasured variant may
+ * omit the percentage.** `{ percent: number; n: null }` does not typecheck.
+ *
+ * The reverse is deliberately allowed — `percent: null` with an `n` — because a
+ * denominator without a numerator is still a real measurement, and withholding
+ * it would lose information for no reason.
  */
-export interface Conversion {
-  from: FunnelStep;
-  to: FunnelStep;
-  /** Percentage, one decimal. Null when either side is missing. */
-  percent: number | null;
-  /** The denominator. Null exactly when `percent` is. */
-  n: number | null;
-  /** Set when `percent` is null. */
-  unavailableReason?: string;
-}
+export type Conversion =
+  | {
+      from: FunnelStep;
+      to: FunnelStep;
+      /** Percentage, one decimal. Always accompanied by its base. */
+      percent: number;
+      n: number;
+    }
+  | {
+      from: FunnelStep;
+      to: FunnelStep;
+      percent: null;
+      /** The base, when it was measured. Null when even that is missing. */
+      n: number | null;
+      unavailableReason: string;
+    };
 
 /** One bucket of the funnel — a day or a month, optionally one platform. */
 export interface FunnelBucket {

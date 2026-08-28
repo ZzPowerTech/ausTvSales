@@ -460,18 +460,37 @@ existe para impedir.
 > Fechar isto é observar o corpo do `/v1/graph` numa instância viva — trabalho de minutos com acesso,
 > impossível sem ele.
 >
-> #### Sobre o critério 5, e por que não virou job
+> #### Sobre o critério 5: metade entregue, metade não
 >
 > O critério pressupõe agregação pesada. Medida, não é: `plan_users` tinha **5.566 linhas no total**
-> em 2026-08-23, e toda leitura aqui é ainda janelada em cima disso. Um ETL noturno para alguns
-> milhares de linhas seria cerimônia — e acrescentaria uma defasagem própria a um número que hoje é
-> vivo.
+> em 2026-08-23, e toda leitura é ainda janelada em cima disso. Um ETL noturno para alguns milhares
+> de linhas seria cerimônia — e acrescentaria uma defasagem própria a um número que hoje é vivo.
 >
-> O que o critério protege de fato — *nunca fazer a máquina do jogo pagar por um refresh de
-> dashboard, e manter a última resposta boa quando uma fonte falha* — é entregue pelo caminho de
-> leitura: a janela é limitada a 366 buckets, e uma fonte que falha degrada para `ok: false` com o
-> motivo enquanto a outra metade continua respondendo. Se `plan_users` crescer ordens de grandeza,
-> é este parágrafo que deixa de valer, e o ETL é a resposta então.
+> Das duas metades do critério:
+>
+> - **"fora do pico"** → ✅ o que ele protege é entregue de outro jeito: a janela é limitada a 366
+>   **dias** e o corte acontece **antes** de qualquer fonte ser consultada, então nenhum pedido
+>   consegue alargar a varredura na máquina do jogo.
+> - **"falha mantém último resultado válido, datado"** → ❌ **não entregue.** Uma fonte que falha
+>   devolve `null` com rótulo fechado, não o último valor bom. Isso é degradação honesta, que é
+>   outra coisa. A capacidade existe no repo — `PlanCache` (`outcome: 'stale'` + a idade real),
+>   construída na S7.2 exatamente para isto — e ligar o funil nela é o próximo passo óbvio.
+
+> #### E o item 1 do DoD da S8 não é verificável hoje, nas **duas** metades
+>
+> *"Funil reproduz os números conhecidos: ~54% rede→survival, ~100% de entrada no tutorial antes de
+> dez/2025."*
+>
+> - **~54% rede→survival** — o degrau `survival` não tem série diária (bloco acima).
+> - **~100% antes de dez/2025** — igualmente impossível, e por um motivo diferente: `plan_users`
+>   **perdeu o histórico do proxy** na unificação de 2026-08-20 (`HANDOFF.md`, "Restrição nova para
+>   o baseline da campanha"). Não há denominador de rede anterior a essa data, então a taxa de
+>   dez/2025 não tem como ser calculada a partir desta fonte.
+>
+> O funil **não finge** conseguir: buckets anteriores à cobertura de `plan_users` saem com `rede:
+> null` e motivo, nunca com um zero medido. Sem essa guarda, o período default mensal publicaria
+> doze meses de `rede: 0` ao lado de números reais de tutorial — um funil onde mais gente entra no
+> tutorial do que conecta na rede.
 
 ### S8.2 — Retenção D1/D7/D30 por coorte e plataforma · 5 SP · `feat/api-cohort-retention`
 

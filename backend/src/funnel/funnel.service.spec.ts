@@ -18,20 +18,46 @@ interface PlanOptions {
   arrivals?: { uuid: string; registeredAt: number }[];
   configured?: boolean;
   throws?: boolean;
+  /**
+   * `MIN(registered)`. Defaults to well before the fixtures so the common tests
+   * exercise the covered path; set it explicitly to test the coverage floor.
+   */
+  earliestAt?: number | null;
+  /** Captures the window the service actually asked the database for. */
+  spy?: jest.Mock;
 }
+
+const LONG_AGO = Date.parse('2020-01-01T00:00:00-03:00');
 
 function planDbWith({
   arrivals = [],
   configured = true,
   throws = false,
+  earliestAt = LONG_AGO,
+  spy,
 }: PlanOptions): PlanDatabase {
-  return {
-    configured,
-    networkArrivalsBetween: jest.fn(() =>
+  const between =
+    spy ??
+    jest.fn(() =>
       throws
         ? Promise.reject(new Error('mysql fora do ar'))
         : Promise.resolve(arrivals),
+    );
+  if (spy) {
+    spy.mockImplementation(() =>
+      throws
+        ? Promise.reject(new Error('mysql fora do ar'))
+        : Promise.resolve(arrivals),
+    );
+  }
+  return {
+    configured,
+    earliestArrivalAt: jest.fn(() =>
+      throws
+        ? Promise.reject(new Error('mysql fora do ar'))
+        : Promise.resolve(earliestAt),
     ),
+    networkArrivalsBetween: between,
   } as unknown as PlanDatabase;
 }
 
@@ -193,7 +219,7 @@ describe('FunnelService', () => {
       expect(countOf(series.buckets[0], FunnelStep.Network)?.value).toBeNull();
       const state = series.sources.find((s) => s.name === 'plan_users');
       expect(state?.ok).toBe(false);
-      expect(state?.detail).toContain('mysql fora do ar');
+      expect(state?.failure).toBe('query_failed');
     });
 
     it('reports null when the Plan database is not configured', async () => {
@@ -209,9 +235,9 @@ describe('FunnelService', () => {
       );
 
       expect(countOf(series.buckets[0], FunnelStep.Network)?.value).toBeNull();
-      expect(
-        series.sources.find((s) => s.name === 'plan_users')?.detail,
-      ).toContain('PLAN_DB_HOST');
+      expect(series.sources.find((s) => s.name === 'plan_users')?.failure).toBe(
+        'not_configured',
+      );
     });
   });
 
@@ -288,7 +314,7 @@ describe('FunnelService', () => {
       ).toBeNull();
       const state = series.sources.find((s) => s.name === 'tutorial_daily');
       expect(state?.ok).toBe(false);
-      expect(state?.detail).toContain('NAO e o mesmo que ninguem ter entrado');
+      expect(state?.failure).toBe('never_synced');
     });
   });
 
@@ -343,15 +369,145 @@ describe('FunnelService', () => {
     });
   });
 
-  it('caps the range so one request cannot stream years out of the game MySQL', async () => {
-    const service = new FunnelService(planDbWith({}), tutorialWith({}));
+  describe('the window cap protects the game machine, not just the response', () => {
+    it('narrows the window BEFORE querying, and says it truncated', async () => {
+      // The first version capped only the output array: a request for
+      // 1970..2026 still ran `SELECT ... FROM plan_users` across the whole table
+      // and threw the rows away. Asserting on the arguments the database
+      // actually received, because that is the thing being protected.
+      const spy = jest.fn();
+      const service = new FunnelService(planDbWith({ spy }), tutorialWith({}));
+
+      const series = await service.series(
+        FunnelGranularity.Daily,
+        '1970-01-01',
+        '2026-12-31',
+      );
+
+      const [from, to] = spy.mock.calls[0] as [number, number];
+      const spanDays = Math.round((to - from) / 86_400_000);
+      expect(spanDays).toBeLessThanOrEqual(366);
+      // And the caller is told, rather than reading `from: 1970` off an
+      // envelope that covers one year.
+      expect(series.truncated).toBe(true);
+      // 366 inclusive days back from 2026-12-31.
+      expect(series.from).toBe('2025-12-31');
+    });
+
+    it('caps the MONTHLY mode by days too, not by months', async () => {
+      // The cap used to count buckets, so the monthly mode allowed 366 *months*
+      // — thirty years — while the daily mode allowed 366 days. One constant,
+      // two windows, and the endpoint description claimed they were the same.
+      const service = new FunnelService(planDbWith({}), tutorialWith({}));
+
+      const series = await service.series(
+        FunnelGranularity.Monthly,
+        '1990-01-01',
+        '2026-12-31',
+      );
+
+      // 366 days spans 13 calendar months at most, never 366.
+      expect(series.buckets.length).toBeLessThanOrEqual(13);
+      expect(series.truncated).toBe(true);
+    });
+
+    it('leaves a window inside the cap alone', async () => {
+      const service = new FunnelService(planDbWith({}), tutorialWith({}));
+
+      const series = await service.series(
+        FunnelGranularity.Daily,
+        '2026-03-01',
+        '2026-03-10',
+      );
+
+      expect(series.truncated).toBe(false);
+      expect(series.from).toBe('2026-03-01');
+    });
+  });
+
+  describe('the network source does not speak for the whole past', () => {
+    it('reports null — not zero — before the table starts', async () => {
+      // `plan_users` lost the proxy's history in the 2026-08-20 unification, so
+      // it is only days deep. A query for March SUCCEEDS and returns nothing,
+      // and reading that as a measured zero would publish `rede: 0` for a month
+      // when thousands connected — beside a tutorial step whose ETL reads plugin
+      // files going back to 2025. The funnel would show more people entering the
+      // tutorial than reaching the network.
+      const service = new FunnelService(
+        planDbWith({
+          earliestAt: Date.parse('2026-03-09T00:00:00-03:00'),
+          arrivals: [{ uuid: PREMIUM, registeredAt: MARCH_10_NOON }],
+        }),
+        tutorialWith({}),
+      );
+
+      const series = await service.series(
+        FunnelGranularity.Daily,
+        '2026-03-07',
+        '2026-03-10',
+      );
+
+      // Before coverage: no source, with a reason.
+      expect(countOf(series.buckets[0], FunnelStep.Network)?.value).toBeNull();
+      expect(countOf(series.buckets[1], FunnelStep.Network)?.value).toBeNull();
+      // Inside coverage and genuinely empty: a measured zero.
+      expect(countOf(series.buckets[2], FunnelStep.Network)?.value).toBe(0);
+      // Inside coverage, with arrivals.
+      expect(countOf(series.buckets[3], FunnelStep.Network)?.value).toBe(1);
+    });
+
+    it('publishes where the coverage starts', async () => {
+      const service = new FunnelService(
+        planDbWith({ earliestAt: Date.parse('2026-08-20T15:00:00-03:00') }),
+        tutorialWith({}),
+      );
+
+      const series = await service.series(
+        FunnelGranularity.Daily,
+        '2026-08-19',
+        '2026-08-21',
+      );
+
+      expect(
+        series.sources.find((s) => s.name === 'plan_users')?.coversFrom,
+      ).toBe('2026-08-20');
+    });
+
+    it('treats an empty table as covering nothing, not everything', async () => {
+      const service = new FunnelService(
+        planDbWith({ earliestAt: null }),
+        tutorialWith({}),
+      );
+
+      const series = await service.series(
+        FunnelGranularity.Daily,
+        '2026-03-10',
+        '2026-03-10',
+      );
+
+      expect(countOf(series.buckets[0], FunnelStep.Network)?.value).toBeNull();
+    });
+  });
+
+  it('never publishes an upstream database message in the body', async () => {
+    // The same decision story S7.2 made for `MetricsFailureReason`, and CWE-209:
+    // a mysql2 error reads `Access denied for user 'plan_ro'@'172.18.0.3'`.
+    // Closed label in the body, full message in the log.
+    const service = new FunnelService(
+      planDbWith({ throws: true }),
+      tutorialWith({ throws: true }),
+    );
 
     const series = await service.series(
       FunnelGranularity.Daily,
-      '2020-01-01',
-      '2026-12-31',
+      '2026-03-10',
+      '2026-03-10',
     );
 
-    expect(series.buckets).toHaveLength(366);
+    expect(JSON.stringify(series)).not.toContain('mysql fora do ar');
+    expect(JSON.stringify(series)).not.toContain('postgres fora do ar');
+    for (const source of series.sources) {
+      expect(source.failure).toBe('query_failed');
+    }
   });
 });

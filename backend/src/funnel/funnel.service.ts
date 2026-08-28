@@ -12,13 +12,44 @@ import {
 
 const MS_PER_DAY = 86_400_000;
 /**
- * Ceiling on the span a single request may ask for.
+ * Ceiling on the span a single request may ask for, in **days**.
  *
- * 366 buckets, matching the analytics endpoints of story S5.1. Not arbitrary: a
- * caller asking for ten years would stream ten years of `plan_users` rows out of
- * the game machine's MySQL to build a chart nobody can read.
+ * 366, matching the analytics endpoints of story S5.1. Not arbitrary: a caller
+ * asking for ten years would stream ten years of `plan_users` rows out of the
+ * game machine's MySQL to build a chart nobody can read.
+ *
+ * Counted in days rather than buckets, and the distinction is a bug that was
+ * here: capping *buckets* meant the monthly mode allowed 366 **months** — thirty
+ * years — while the daily mode allowed 366 days. One constant, two windows, and
+ * the endpoint's own description claimed they were the same.
+ *
+ * Enforced in {@link FunnelService.clampFrom}, **before** either source is
+ * queried, so the ceiling protects the game machine and not merely the response.
  */
-const MAX_BUCKETS = 366;
+const MAX_WINDOW_DAYS = 366;
+
+/**
+ * Why a source could not answer.
+ *
+ * A **closed vocabulary**, not the upstream message — the same decision story
+ * S7.2 made for `MetricsFailureReason`, and for the same reason. A `mysql2`
+ * error reads `Access denied for user 'plan_ro'@'172.18.0.3'` or
+ * `connect ECONNREFUSED 10.0.0.5:3306`: internal topology, an account name, and
+ * sometimes a table name, none of which belongs in an HTTP body. `HealthService`
+ * cites CWE-209 for the same call.
+ *
+ * The full message goes to the log, where whoever is debugging will look.
+ */
+export const FUNNEL_SOURCE_FAILURES = [
+  /** The source is not configured — our deploy, not an outage. */
+  'not_configured',
+  /** The query failed: unreachable, refused, or a schema that moved. */
+  'query_failed',
+  /** The tutorial ETL has never completed, so the table means nothing yet. */
+  'never_synced',
+] as const;
+
+export type FunnelSourceFailure = (typeof FUNNEL_SOURCE_FAILURES)[number];
 
 /** What a read produced, plus how fresh each source was. */
 export interface FunnelSeries {
@@ -26,6 +57,14 @@ export interface FunnelSeries {
   platform: PlatformFilter;
   from: string;
   to: string;
+  /**
+   * True when the requested window was longer than the cap and was trimmed.
+   *
+   * Published rather than silently applied: `from`/`to` echo what was actually
+   * read, and a consumer that asked for ten years has to be able to tell that it
+   * did not get ten years.
+   */
+  truncated: boolean;
   buckets: FunnelBucket[];
   /** Provenance, so a stale answer is visibly stale rather than silently old. */
   sources: FunnelSourceState[];
@@ -37,8 +76,16 @@ export interface FunnelSourceState {
   ok: boolean;
   /** ISO-8601 of the data's own currency, where the source reports one. */
   asOf: string | null;
-  /** Why `ok` is false. */
-  detail?: string;
+  /** Closed label. Set exactly when `ok` is false. Never an upstream message. */
+  failure?: FunnelSourceFailure;
+  /**
+   * First day this source can speak for, `YYYY-MM-DD`, or null when unbounded.
+   *
+   * `plan_users` lost the proxy's history in the 2026-08-20 unification, so it
+   * is only a few days deep. Buckets before this are `null` with a reason, never
+   * a measured zero — see `PlanDatabase.earliestArrivalAt`.
+   */
+  coversFrom?: string | null;
 }
 
 /**
@@ -70,12 +117,20 @@ export interface FunnelSourceState {
  * of that. A nightly ETL for a few thousand rows would be ceremony, and it would
  * add a staleness of its own to a number that is currently live.
  *
- * What the criterion is actually protecting — *never make the game machine pay
- * for a dashboard refresh, and keep the last good answer when a source fails* —
- * is delivered by the read path itself: the window is capped, and a source that
- * fails degrades to `ok: false` with its reason while the other half still
- * answers. If `plan_users` ever grows by orders of magnitude, this comment is
- * the place that should stop being true, and the ETL is the answer then.
+ * The criterion has two halves, and only one is delivered here:
+ *
+ * - *"never make the game machine pay for a dashboard refresh"* — **delivered**:
+ *   the window is clamped to `MAX_WINDOW_DAYS` **before** either source is
+ *   queried, so no request can widen the scan.
+ * - *"falha mantém último resultado válido, datado"* — **not delivered.** A
+ *   failed source returns `null` with a closed label, not the last good value.
+ *   That is honest degradation, which is a different thing. The repo already has
+ *   the missing capability in `PlanCache` (`outcome: 'stale'` plus the age it
+ *   actually has), built in story S7.2 for exactly this; wiring the funnel
+ *   through it is the obvious next step and is not in this slice.
+ *
+ * If `plan_users` ever grows by orders of magnitude, this comment is the place
+ * that should stop being true, and the ETL is the answer then.
  */
 @Injectable()
 export class FunnelService {
@@ -93,10 +148,18 @@ export class FunnelService {
    */
   async series(
     granularity: FunnelGranularity,
-    fromDay: string,
+    requestedFrom: string,
     toDay: string,
     platform: PlatformFilter = 'all',
   ): Promise<FunnelSeries> {
+    // Clamped BEFORE the sources are asked, not after. The first version capped
+    // only the output array, so a request for 1970..2026 still ran
+    // `SELECT ... FROM plan_users` across the whole table and then threw the
+    // rows away — the cap protected the response and not the game machine,
+    // which is the thing it exists for.
+    const fromDay = this.clampFrom(requestedFrom, toDay);
+    const truncated = fromDay !== requestedFrom;
+
     const bucketKeys = this.bucketKeys(granularity, fromDay, toDay);
 
     const [network, tutorial] = await Promise.all([
@@ -104,15 +167,19 @@ export class FunnelService {
       this.tutorialByBucket(granularity, fromDay, toDay, platform),
     ]);
 
-    const buckets = bucketKeys.map((key) =>
-      buildBucket(key, {
-        network: network.byBucket.get(key) ?? network.missing,
-        // No daily source; the reason is attached by `buildBucket`.
-        survival: null,
-        tutorialEntered: tutorial.enteredByBucket.get(key) ?? tutorial.missing,
-        tutorialCompleted:
-          tutorial.completedByBucket.get(key) ?? tutorial.missing,
-      } satisfies RawCounts),
+    const buckets = bucketKeys.map(
+      (key) =>
+        buildBucket(key, {
+          network: network.countFor(key),
+          // No daily source; the reason is attached by `buildBucket`.
+          survival: null,
+          tutorialEntered:
+            tutorial.enteredByBucket.get(key) ?? tutorial.missing,
+          tutorialCompleted:
+            tutorial.completedByBucket.get(key) ?? tutorial.missing,
+        } satisfies RawCounts),
+      // `network.countFor` decides per bucket, because coverage is per bucket:
+      // the source can answer for this week and know nothing about March.
     );
 
     return {
@@ -120,9 +187,31 @@ export class FunnelService {
       platform,
       from: fromDay,
       to: toDay,
+      truncated,
       buckets,
       sources: [network.state, tutorial.state],
     };
+  }
+
+  /**
+   * Pull `from` forward so the window never exceeds {@link MAX_WINDOW_DAYS}.
+   *
+   * Trims the **old** end rather than the recent one: a caller asking for too
+   * much almost always wants the latest data, and silently returning 1970 would
+   * be the least useful possible answer.
+   */
+  private clampFrom(requestedFrom: string, toDay: string): string {
+    // `- 1` because both ends are inclusive: `to` minus 365 days, through `to`,
+    // is 366 days. Subtracting the full 366 would allow 367 — the same
+    // inclusive-range slip the tutorial check shipped once.
+    const earliestAllowed =
+      Date.parse(atMidday(toDay)) - (MAX_WINDOW_DAYS - 1) * MS_PER_DAY;
+    const requested = Date.parse(atMidday(requestedFrom));
+
+    if (Number.isNaN(requested) || requested >= earliestAllowed) {
+      return requestedFrom;
+    }
+    return toSaoPauloDay(earliestAllowed) ?? requestedFrom;
   }
 
   /**
@@ -138,28 +227,32 @@ export class FunnelService {
     fromDay: string,
     toDay: string,
     platform: PlatformFilter,
-  ): Promise<BucketedCounts> {
+  ): Promise<NetworkCounts> {
     const byBucket = new Map<string, number>();
 
     if (!this.planDb.configured) {
       return {
-        byBucket,
-        missing: null,
+        countFor: () => null,
         state: {
           name: 'plan_users',
           ok: false,
           asOf: null,
-          detail:
-            'PLAN_DB_HOST nao configurado — o degrau de rede fica sem fonte',
+          failure: 'not_configured',
         },
       };
     }
 
     try {
-      const arrivals = await this.planDb.networkArrivalsBetween(
-        Date.parse(`${fromDay}T00:00:00-03:00`),
-        Date.parse(`${toDay}T23:59:59.999-03:00`),
-      );
+      // `earliestArrivalAt` first, and it is not an optimisation: without it a
+      // successful query over a period the table does not cover reads as a
+      // measured zero. See the method's own doc.
+      const [earliest, arrivals] = await Promise.all([
+        this.planDb.earliestArrivalAt(),
+        this.planDb.networkArrivalsBetween(
+          Date.parse(startOfDay(fromDay)),
+          Date.parse(endOfDay(toDay)),
+        ),
+      ]);
 
       for (const arrival of arrivals) {
         if (platform !== 'all' && platformOf(arrival.uuid) !== platform) {
@@ -176,19 +269,53 @@ export class FunnelService {
         byBucket.set(key, (byBucket.get(key) ?? 0) + 1);
       }
 
+      const coversFrom = earliest === null ? null : toSaoPauloDay(earliest);
+      const coversFromKey =
+        coversFrom === null
+          ? null
+          : granularity === FunnelGranularity.Monthly
+            ? toMonth(coversFrom)
+            : coversFrom;
+
       return {
-        byBucket,
-        // The source answered, so an empty bucket is a measured zero.
-        missing: 0,
-        state: { name: 'plan_users', ok: true, asOf: new Date().toISOString() },
+        countFor: (key) => {
+          const counted = byBucket.get(key);
+          if (counted !== undefined) {
+            return counted;
+          }
+          // Empty bucket. Whether that is a measured zero or a hole depends on
+          // whether the table reaches back this far — and it usually does not:
+          // the proxy's history stayed in the old database at the 2026-08-20
+          // unification, so `plan_users` is only days deep.
+          if (coversFromKey !== null && key >= coversFromKey) {
+            return 0;
+          }
+          return null;
+        },
+        state: {
+          name: 'plan_users',
+          ok: true,
+          asOf: new Date().toISOString(),
+          coversFrom,
+        },
       };
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`Degrau de rede indisponivel: ${detail}`);
+      // The message names the host, the account and sometimes the table. It goes
+      // to the log; the body gets a closed label (CWE-209, and the decision
+      // story S7.2 already made for `MetricsFailureReason`).
+      this.logger.warn(
+        `Degrau de rede indisponivel: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
       return {
-        byBucket,
-        missing: null,
-        state: { name: 'plan_users', ok: false, asOf: null, detail },
+        countFor: () => null,
+        state: {
+          name: 'plan_users',
+          ok: false,
+          asOf: null,
+          failure: 'query_failed',
+        },
       };
     }
   }
@@ -207,12 +334,21 @@ export class FunnelService {
     try {
       lastSync = await this.tutorial.lastSuccessfulSync();
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `Procedencia do tutorial ilegivel: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
       return {
         enteredByBucket,
         completedByBucket,
         missing: null,
-        state: { name: 'tutorial_daily', ok: false, asOf: null, detail },
+        state: {
+          name: 'tutorial_daily',
+          ok: false,
+          asOf: null,
+          failure: 'query_failed',
+        },
       };
     }
 
@@ -227,9 +363,7 @@ export class FunnelService {
           name: 'tutorial_daily',
           ok: false,
           asOf: null,
-          detail:
-            'o ETL do tutorial nunca rodou com sucesso — os degraus de tutorial ' +
-            'ficam sem fonte, o que NAO e o mesmo que ninguem ter entrado',
+          failure: 'never_synced',
         },
       };
     }
@@ -267,13 +401,21 @@ export class FunnelService {
         },
       };
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`Degraus de tutorial indisponiveis: ${detail}`);
+      this.logger.warn(
+        `Degraus de tutorial indisponiveis: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
       return {
         enteredByBucket,
         completedByBucket,
         missing: null,
-        state: { name: 'tutorial_daily', ok: false, asOf: null, detail },
+        state: {
+          name: 'tutorial_daily',
+          ok: false,
+          asOf: null,
+          failure: 'query_failed',
+        },
       };
     }
   }
@@ -293,12 +435,15 @@ export class FunnelService {
   ): string[] {
     const keys: string[] = [];
     const seen = new Set<string>();
-    let cursor = Date.parse(`${fromDay}T12:00:00-03:00`);
-    const end = Date.parse(`${toDay}T12:00:00-03:00`);
+    let cursor = Date.parse(atMidday(fromDay));
+    const end = Date.parse(atMidday(toDay));
+    // The window is already clamped to MAX_WINDOW_DAYS, so this bounds the loop
+    // rather than the answer. `+ 1` because both ends are inclusive.
+    let remaining = MAX_WINDOW_DAYS + 1;
 
     // Midday anchors so a DST transition, if Brazil ever restores one, cannot
     // skip or duplicate a day by moving the cursor across a boundary.
-    while (cursor <= end && keys.length < MAX_BUCKETS) {
+    while (cursor <= end && remaining-- > 0) {
       const day = toSaoPauloDay(cursor);
       if (day !== null) {
         const key =
@@ -315,11 +460,39 @@ export class FunnelService {
   }
 }
 
-interface BucketedCounts {
-  byBucket: Map<string, number>;
-  /** What an absent bucket means: `0` when the source answered, `null` if not. */
-  missing: number | null;
+interface NetworkCounts {
+  /**
+   * The count for one bucket, or null when the source cannot speak for it.
+   *
+   * A function rather than a map plus a fallback, because "what does an empty
+   * bucket mean" is **per bucket**, not per read: the same successful query
+   * knows this week and knows nothing about March.
+   */
+  countFor(bucketKey: string): number | null;
   state: FunnelSourceState;
+}
+
+/** Offsets are fixed at -03:00 — see the note on `atMidday`. */
+function startOfDay(day: string): string {
+  return `${day}T00:00:00-03:00`;
+}
+
+function endOfDay(day: string): string {
+  return `${day}T23:59:59.999-03:00`;
+}
+
+/**
+ * Midday anchor for day arithmetic.
+ *
+ * ⚠️ These three helpers hardcode `-03:00` rather than resolving the zone.
+ * Correct today — Brazil has had no DST since 2019 — and it is the same dormant
+ * edge recorded in `tutorial-entry-rate.check.ts`: if DST returns, the midday
+ * anchor survives a transition but these boundaries drift by an hour and shift
+ * arrivals across days at the window's edges. The fix then is `Intl` on both
+ * ends, the way `toSaoPauloDay` already does.
+ */
+function atMidday(day: string): string {
+  return `${day}T12:00:00-03:00`;
 }
 
 interface TutorialBucketedCounts {
