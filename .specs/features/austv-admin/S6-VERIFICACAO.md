@@ -148,12 +148,41 @@ Os seis checks presentes: `plan.collection_alive`, `plan.proxy_registration_aliv
 - Os quatro estados (`ok` / `breached` / `no_data` / `error`) são **impostos pelo banco**, não só
   pelo tipo: há `CHECK` constraint na migration. "Sem dados" não pode virar `ok` nem zero por
   acidente de código.
-- O contrato `HealthCheck` **exige `n` ao lado de toda razão** — a regra do projeto ("nenhum
-  percentual sem base") virou obrigação de tipo, no lugar exato onde alguém está prestes a agir
-  sobre o número.
+- O contrato `HealthCheck` **documenta** a regra do projeto ("nenhum percentual sem base") como uma
+  das três cláusulas que um check deve obedecer, no lugar exato onde alguém está prestes a agir
+  sobre o número. *(Ver a ressalva logo abaixo: é documentação, não garantia.)*
 - O runner tem guarda de ciclo sobreposto, e um check que lança não derruba os outros cinco.
-- O adapter do `serverOverview` foi escrito sobre **payload real de produção** como fixture, não
-  sobre documentação — a regra que a S6.2 revertida ensinou.
+- O adapter do `serverOverview` foi escrito sobre **payload real de produção** como fixture
+  (`plan-server-overview.spec.ts`: *"production Plan, 2026-08-23"*), não sobre documentação — a
+  regra que a S6.2 revertida ensinou.
+
+### ⚠️ A regra mais importante do projeto não é verificada por máquina nenhuma
+
+Achado desta auditoria, e ela quase o cometeu: a primeira versão deste documento afirmava que o `n`
+obrigatório *"virou obrigação de tipo"*. **Não virou.** Em `health-check.types.ts`:
+
+```ts
+observed?: number;   // opcional
+threshold?: number;  // opcional
+n?: number;          // opcional
+```
+
+Os três são opcionais. A regra — *"`HealthCheckDetail.observed` sem `detail.n` é um percentual sem
+a base dele"* — existe apenas no **docblock** do contrato. Um check que devolva `observed` sem `n`
+compila, passa no lint, persiste, e chega ao Discord como um percentual sem base.
+
+Isso não é defeito de implementação: os seis checks existentes obedecem à regra. É uma **garantia
+ausente**, e ela cobre exatamente o erro que o `HANDOFF.md` cataloga três vezes (*"queda de 96%"*,
+*"48 chegadas/mês"*) — percentuais sobre base contaminada ou inexistente. É a regra que o projeto
+mais repete e a única sem rede de proteção.
+
+Barato de fechar, e a S8.1 é a hora: o funil da §6.2 publica percentual em toda rota, e o critério 3
+da história exige `n` junto de todos. Um tipo que torne o par inseparável — em vez de dois campos
+opcionais lado a lado — serve as duas.
+
+> Que este relatório tenha cometido o overclaim antes de corrigi-lo é o dado, não a ironia: ler o
+> docblock e concluir sobre o tipo é a mesma classe de erro que o `HANDOFF.md` registra em
+> *"li o requisito do check na redação do spec, não no código"*.
 
 ### O critério 4 é o item aberto mais importante do épico
 
@@ -230,5 +259,8 @@ alerta que ninguém viu chegar.
    `config.yml` do Plan — que já é urgente por outro caminho, e antes do unban all.
 3. **Calibrar os três limiares** contra o baseline da S6.0, que está commitado e ocioso.
 
-Os três exigem acesso a máquina de produção e são decisão do dono, não trabalho de sessão. O que
-esta sessão pode fazer — e fez — é corrigir as divergências documento↔código e seguir para a S8.
+Os três exigem acesso a máquina de produção e são decisão do dono, não trabalho de sessão.
+
+O que **é** trabalho de sessão, e sai desta auditoria: tornar o `n` obrigatório verificável por
+máquina, junto da S8.1 — a única regra que o projeto repete em todo documento e não tem nenhuma
+garantia atrás dela.
