@@ -382,6 +382,24 @@ export class EnvironmentVariables {
   })
   TUTORIAL_FINAL_QUEST_ID?: string;
 
+  // Master switch for the nightly rebuild. Off by default so no environment
+  // starts walking the game machine's files by accident. When off, the boot
+  // warns: a job that silently does not run leaves a series that looks current
+  // and is frozen — the same false confidence ADR-006 exists to destroy.
+  @IsOptional()
+  @IsBoolean()
+  TUTORIAL_SYNC_ENABLED?: boolean;
+
+  // When the rebuild runs, as a cron expression in America/Sao_Paulo. Criterion
+  // 2 of S8.0 says "fora do pico", and off-peak is a statement about the clock —
+  // which is why this is a cron and not an interval like the health checks.
+  // A malformed expression leaves the job unscheduled and says so; it never
+  // falls back to the default hour, because running at an hour nobody chose is
+  // how a 20.000-file walk lands in peak.
+  @IsOptional()
+  @MinLength(1, { message: 'TUTORIAL_SYNC_CRON must not be empty when set' })
+  TUTORIAL_SYNC_CRON?: string;
+
   // Express `trust proxy` setting, applied in main.ts so `req.ip` reflects the
   // real client from the Nginx-supplied X-Forwarded-For (and a header forged by a
   // direct client is ignored). A number = trust that many hops; otherwise a

@@ -248,7 +248,22 @@ export const tutorialSyncs = pgTable(
     questsInCatalogue: integer('quests_in_catalogue'),
     /** Which quest was counted as completion on this run. */
     finalQuestId: text('final_quest_id'),
-    /** Why an `error` run failed, in Portuguese. Never a stack trace. */
+    /**
+     * Why an `error` run failed, in Portuguese. Never a stack trace.
+     *
+     * ⚠️ **Contains server-side absolute paths** — the failure messages name the
+     * directory that could not be read, which is the single most useful thing
+     * for whoever is debugging a mount. That is fine where it lives today (the
+     * log and this table, neither reachable from a route) and **is not fine on a
+     * response body**: spec §8 keeps internal topology out of the browser, the
+     * same rule that made the S7.2 metrics contract publish a closed label
+     * instead of the upstream message.
+     *
+     * The S8.1 read model consumes this store. When it surfaces sync provenance
+     * — and it should, because "when was this last measured" is the question the
+     * whole table exists for — it must publish the **status and the timestamp**,
+     * not this field.
+     */
     detail: text('detail'),
   },
   (table) => [

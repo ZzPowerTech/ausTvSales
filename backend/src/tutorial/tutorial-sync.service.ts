@@ -50,14 +50,20 @@ export interface TutorialSyncResult {
  *
  * ## Every failure leaves the previous numbers standing
  *
- * Unconfigured path, unreadable directory, empty catalogue: all of them record
- * an `error` sync and write **nothing**. The series from the last successful run
- * stays in place, dated by its own sync record.
+ * Unconfigured path, unreadable directory, empty catalogue, **and a scan that
+ * came back implausibly small**: all of them record an `error` sync and write
+ * **nothing**. The series from the last successful run stays in place, dated by
+ * its own sync record.
  *
  * The alternative — clearing the table on failure — would turn a typo in an
  * environment variable into "nobody has ever entered the tutorial", which is
  * exactly the shape of the disaster the seventh check exists to detect. A
  * monitoring system that can fabricate its own alarm is worse than none.
+ *
+ * The "implausibly small" clause is not defensive padding: an **empty but
+ * existing** directory does not make `opendir` throw, so without it the most
+ * likely deployment accident — an `rsync` that has not run yet — was a silent
+ * wipe recorded as success. See {@link TutorialSyncService.floorRefusal}.
  *
  * ## Never on the request path
  *
@@ -71,7 +77,15 @@ export class TutorialSyncService implements OnModuleInit {
   private readonly playerdataDir: string | null;
   private readonly catalogueDir: string | null;
   private readonly finalQuestId: string;
-  /** Guards against a second run starting while one is still walking the disk. */
+  /**
+   * Guards against a second run starting while one is still walking the disk.
+   *
+   * **Per instance, so it is not a distributed lock.** With more than one
+   * replica, two processes can walk and write concurrently, and the
+   * replace-all transactions would race. Sound today — the API runs as a single
+   * container — and the thing to fix first if it ever scales out. An advisory
+   * lock in Postgres is the cheap answer when that day comes.
+   */
   private running = false;
 
   constructor(
@@ -139,6 +153,82 @@ export class TutorialSyncService implements OnModuleInit {
     } finally {
       this.running = false;
     }
+  }
+
+  /**
+   * Decide whether a scan is too small to be believed, before it overwrites.
+   *
+   * ## The hole this closes, which the first version of this class had
+   *
+   * `opendir` on an **empty but existing** directory does not throw. So a
+   * playerdata path that resolved to an empty mount — an `rsync` that had not
+   * run yet, a volume that came up bare, a wrong path that happened to exist —
+   * walked zero files, aggregated zero rows, and reached `replaceAll([])`, which
+   * deleted the entire series and recorded the run as **`ok`**.
+   *
+   * That is worse than a crash in the exact way this epic cares about. A later
+   * reader consults `tutorial_syncs`, sees a successful run covering the period,
+   * and renders the hole as a legitimate zero — "nobody entered the tutorial" —
+   * which is indistinguishable from the eight-month outage the seventh check
+   * exists to catch. The layer would have fabricated its own alarm, or hidden a
+   * real one.
+   *
+   * The class doc claimed "every failure leaves the previous numbers standing";
+   * it was true for an absent directory and false for an empty one.
+   *
+   * ## Two floors
+   *
+   * 1. **Zero files is never a valid scan.** The corpus had 19.700 files in the
+   *    baseline and only grows — a `playerdata` outlives the player leaving.
+   * 2. **A scan under half the previous successful one is refused.** Catches the
+   *    partial copy, which is the failure mode a truncated scan produces: a
+   *    smaller number written as `ok`, reading exactly like a drop in entries.
+   *
+   * The symmetry with `MAX_FILES` is the point — there was a ceiling guard and
+   * no floor guard, and the floor is the direction that erases data.
+   */
+  private async floorRefusal(filesScanned: number): Promise<string | null> {
+    if (filesScanned === 0) {
+      return (
+        'Nenhum arquivo de playerdata encontrado — o diretorio existe mas esta ' +
+        'vazio (rsync que ainda nao rodou, montagem vazia, ou caminho errado ' +
+        'que por acaso existe). Nada foi escrito: sobrescrever a serie com zero ' +
+        'seria indistinguivel do apagao que o check procura.'
+      );
+    }
+
+    let last: Awaited<ReturnType<TutorialStore['lastSuccessfulSync']>>;
+    try {
+      last = await this.store.lastSuccessfulSync();
+    } catch (error) {
+      // The floor is a safety net, not a gate. If the provenance table cannot be
+      // read, the absolute floor above has already done the important half, and
+      // refusing the whole run over it would trade one failure for another.
+      this.logger.warn(
+        `Nao foi possivel ler o ultimo sync bem-sucedido para conferir o piso: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return null;
+    }
+
+    const previous = last?.filesScanned ?? null;
+    if (previous === null || previous === 0) {
+      // First ever run, or no prior count to compare against.
+      return null;
+    }
+
+    const floor = Math.floor(previous * MIN_SCAN_FRACTION_OF_LAST);
+    if (filesScanned >= floor) {
+      return null;
+    }
+
+    return (
+      `Apenas ${filesScanned} arquivos lidos contra ${previous} do ultimo sync ` +
+      `bem-sucedido (piso ${floor}) — queda dessa ordem e problema de fonte, nao ` +
+      'de jogadores: o corpus so cresce, porque o playerdata sobrevive ao jogador ' +
+      'sair. Nada foi escrito; a serie anterior continua de pe.'
+    );
   }
 
   private async run(
@@ -237,6 +327,25 @@ export class TutorialSyncService implements OnModuleInit {
       };
     }
 
+    const refusal = await this.floorRefusal(filesScanned);
+    if (refusal !== null) {
+      this.logger.error(refusal);
+      await this.store.recordFailure({
+        detail: refusal,
+        filesScanned,
+        filesFailed,
+        questsInCatalogue: catalogue.ids.length,
+        finalQuestId: catalogue.finalQuestId,
+      });
+      return {
+        ...emptyFailure(refusal),
+        filesScanned,
+        filesFailed,
+        playersInTutorial,
+        playersUndated,
+      };
+    }
+
     const rows = aggregate(contributions);
     await this.store.replaceAll(rows, {
       filesScanned,
@@ -265,6 +374,16 @@ export class TutorialSyncService implements OnModuleInit {
     };
   }
 }
+
+/**
+ * Fraction of the previous run's file count below which a scan is refused.
+ *
+ * A directory that shrank by more than half between two nightly runs is a
+ * source problem, not a player exodus: the corpus only grows, because a
+ * `playerdata` file survives the player leaving. The default is deliberately
+ * loose — this is a guard against a broken mount, not a statistical test.
+ */
+const MIN_SCAN_FRACTION_OF_LAST = 0.5;
 
 function emptyFailure(detail: string): TutorialSyncResult {
   return {

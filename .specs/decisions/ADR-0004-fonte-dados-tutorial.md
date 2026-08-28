@@ -7,6 +7,21 @@
 - **Fecha:** a primeira tarefa da S8.0 (*"escolher a fonte"*) e, por consequência, o 7º check da
   §6.1 e o degrau `tutorial_entrou` da S8.1
 
+> ### ⚠️ Dois namespaces de ADR neste repositório — leia antes de seguir uma referência
+>
+> Este arquivo é `ADR-0004` no índice de [`.specs/decisions/`](README.md), a numeração do
+> **`ausTvSales`** (0001 auth plugin→API, 0002 permissões, 0003 biblioteca de gráfico).
+>
+> O épico **AusTV Admin** tem uma numeração **própria e independente**, embutida no
+> [`spec.md`](../features/austv-admin/spec.md): ADR-001 a ADR-008. Quando este documento cita
+> "ADR-003" (plataforma pelo UUID), "ADR-007" (zero Java na v1) ou "ADR-008", são **os do spec do
+> Admin** — não os deste diretório. Repare que o Admin já tem um ADR-004 seu ("`ausTvSales` continua
+> MIT e intocado pela LGPL"), que **não** é este.
+>
+> É a mesma colisão que o `CLAUDE.md` resolveu para as sprints, e resolvida do mesmo jeito: **não
+> renumerar**, separar por contexto e dizer onde cada uma vale. Renumerar quebraria dezenas de
+> referências cruzadas no spec para resolver um problema que é só de organização.
+
 ## Contexto
 
 O Plan **não coleta absolutamente nada do tutorial**. Isso foi descoberto em 2026-08-23 ao desenhar
@@ -73,16 +88,45 @@ quest-progress:
 - Os ids das quests do tutorial são os nomes de arquivo de `Quests/quests/tutorial/*.yml` — **41
   quests** no baseline, com prefixo numérico e variantes (`04-2tutorial`, `12-3tutorial`).
 
-Números do baseline que servem de teste de aceitação para o ETL:
+Números do baseline, com o que cada um vale como referência:
 
-| medida | valor |
-|---|---|
-| `playerdata_total` | 19.700 |
-| tocou `01tutorial` | 10.834 |
-| concluiu `33tutorial` | **148** |
+| medida | valor | serve de teste de aceitação? |
+|---|---|---|
+| `playerdata_total` | 19.700 | sim |
+| tocou `01tutorial` | 10.834 | **sim** — e coincide com `playerdata_com_tutorial: 10834`, ou seja, "tocou `01tutorial`" e "tocou qualquer quest do tutorial" são o mesmo conjunto neste snapshot |
+| concluiu `33tutorial` | 148 | **não — ver abaixo** |
 
-O `148` bate com o número do `HANDOFF.md`. Se o ETL não reproduzir essas contagens contra o mesmo
-snapshot, **o parser está errado, não o baseline**.
+### ⚠️ O baseline superconta conclusões, então não é árbitro dessa coluna
+
+Descoberto no code review deste ADR. O bloco 2 de `austv-diagnostico.ps1` é um scanner de linha que
+mantém a quest corrente aberta enquanto a indentação for maior, e testa:
+
+```powershell
+elseif ($curId -ne $null -and $key -eq 'completed' -and $val -eq 'true') { $curDone = $true }
+```
+
+**Em qualquer profundidade.** O payload real tem `task-progress: <task>: completed: <bool>` aninhado
+*dentro* do bloco da quest. Logo, uma quest **em progresso** cujo objetivo esteja concluído é
+contada pelo script como **quest concluída**.
+
+O parser deste projeto lê apenas a chave de nível da quest — está correto, e por isso pode produzir
+um número **menor** que o do baseline. A versão anterior deste ADR dizia *"se o ETL não reproduzir
+essas contagens, o parser está errado, não o baseline"*, o que instituía como árbitro justamente o
+lado com o defeito.
+
+### O que ainda **não** foi medido, e é preciso dizer
+
+**Ninguém rodou este parser contra os 19.700 arquivos.** O parser foi testado contra o payload de
+amostra transcrito da saída do baseline; a coluna `concluiu` do baseline e a coluna `completed` do
+ETL nunca foram comparadas.
+
+Afirmar coincidência sem executar é a causa raiz dos cinco erros do `HANDOFF.md` — e literalmente do
+erro 1, que nasceu de ler esta mesma série do `Quests/playerdata`. Portanto:
+
+- `19.700` e `10.834` valem como conferência de sanidade do lado da **entrada**.
+- O `148` **não** vale como alvo. Quando o ETL rodar contra o snapshot real, esperar um número
+  **menor ou igual**; uma diferença para menos é evidência de que o script supercontava, não de que o
+  parser errou. Registrar o par de números quando isso acontecer.
 
 ## Consequências
 
@@ -123,8 +167,19 @@ série saiba o que ela é.
 ### 3. O ETL é idempotente por construção
 
 Como a fonte é um retrato do estado atual, reprocessar o mesmo diretório produz exatamente as mesmas
-linhas. A gravação é um `upsert` por `(data, plataforma)`, então re-executar é seguro e é a operação
-normal — não um caminho de recuperação. É o critério 2 da história.
+linhas. Re-executar é seguro e é a operação **normal**, não um caminho de recuperação. É o critério
+2 da história.
+
+A gravação **substitui a série inteira** dentro de uma transação, e não faz `upsert` por
+`(data, plataforma)`. A diferença importa: um `upsert` deixaria de pé o número velho de um dia cujo
+único entrante teve o `playerdata` apagado — e como a fonte é estado atual, esse dia *deve* mudar.
+Substituir é o que torna a reconstrução fiel à fonte.
+
+**Substituir tem um risco que o `upsert` não tem, e ele é tratado:** uma varredura vazia ou parcial
+apagaria a série. Um diretório **vazio mas existente** não faz o `opendir` falhar, então o caso mais
+provável na prática — um `rsync` que ainda não rodou — seria uma limpeza silenciosa gravada como
+sucesso. O ETL recusa gravar quando lê zero arquivos, e quando lê menos da metade do último sync
+bem-sucedido.
 
 ### 4. Fora do pico
 

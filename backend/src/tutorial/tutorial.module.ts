@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { TutorialStore } from './tutorial.store';
+import { TutorialSyncScheduler } from './tutorial-sync.scheduler';
 import { TutorialSyncService } from './tutorial-sync.service';
 
 /**
@@ -14,11 +16,16 @@ import { TutorialSyncService } from './tutorial-sync.service';
  * ## No controller, and that is deliberate
  *
  * A sync walks ~20.000 files. Nothing here is reachable from an HTTP route: the
- * rebuild is invoked by schedule or by hand. The read side of the funnel is
- * story S8.1 and lives in its own module, which consumes {@link TutorialStore}.
+ * rebuild is driven by {@link TutorialSyncScheduler}, off-peak. The read side of
+ * the funnel is story S8.1 and lives in its own module, which consumes
+ * {@link TutorialStore}.
  */
 @Module({
-  providers: [TutorialStore, TutorialSyncService],
+  // `forRoot()` is idempotent across modules — `InstrumentationModule` also
+  // calls it — and importing it here keeps this module self-contained rather
+  // than silently depending on another module having been loaded first.
+  imports: [ScheduleModule.forRoot()],
+  providers: [TutorialStore, TutorialSyncService, TutorialSyncScheduler],
   exports: [TutorialStore, TutorialSyncService],
 })
 export class TutorialModule {}

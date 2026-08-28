@@ -33,6 +33,30 @@ const FORMATTER = new Intl.DateTimeFormat('en-CA', {
 });
 
 /**
+ * Refuse to load unless `Intl` actually resolved what we asked for.
+ *
+ * A missing **time zone** already fails loudly on its own — `DateTimeFormat`
+ * throws `RangeError` for an unknown zone. A missing **locale** does not: `Intl`
+ * silently falls back, `format()` returns `08/28/2026`, the shape guard in
+ * {@link toSaoPauloDay} rejects every value, and the whole series becomes null.
+ *
+ * That failure is invisible at the point it happens and catastrophic two steps
+ * later, which is the exact profile of the bugs this epic exists to remove. A
+ * Node built with `small-icu` is all it takes.
+ *
+ * Three lines here trade a wrong number in silence for a container that will not
+ * boot.
+ */
+const RESOLVED = FORMATTER.resolvedOptions();
+if (!RESOLVED.locale.startsWith('en-CA') || RESOLVED.timeZone !== TIME_ZONE) {
+  throw new Error(
+    `Intl nao resolveu o esperado (locale ${RESOLVED.locale}, timezone ` +
+      `${RESOLVED.timeZone}) — este Node provavelmente foi compilado com ` +
+      'small-icu. Sem full-icu toda data do tutorial viraria nula em silencio.',
+  );
+}
+
+/**
  * Convert epoch milliseconds to a `YYYY-MM-DD` day in America/Sao_Paulo.
  *
  * @returns the day, or `null` when the input is not a usable epoch. Null is

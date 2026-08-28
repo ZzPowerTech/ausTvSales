@@ -34,6 +34,18 @@ class StoreSpy {
     return Promise.resolve();
   }
 
+  /** What `lastSuccessfulSync` answers. Null = no run ever succeeded. */
+  previousSync: { filesScanned: number | null } | null = null;
+  /** Set to make the provenance read fail, exercising the degraded path. */
+  lastSyncThrows = false;
+
+  lastSuccessfulSync(): Promise<unknown> {
+    if (this.lastSyncThrows) {
+      return Promise.reject(new Error('banco fora do ar'));
+    }
+    return Promise.resolve(this.previousSync);
+  }
+
   asStore(): TutorialStore {
     return this as unknown as TutorialStore;
   }
@@ -321,6 +333,124 @@ describe('TutorialSyncService', () => {
           expect(result.status).toBe('error');
           expect(store.replaced).toEqual([]);
           expect(store.failures[0].finalQuestId).toBe('99tutorial');
+        },
+      );
+    });
+
+    it('writes nothing when the directory exists but is EMPTY', async () => {
+      // The hole that reproved the first version of this PR. `opendir` on an
+      // empty-but-existing directory does not throw, so the scan walked zero
+      // files, aggregated zero rows, and called replaceAll([]) — which deleted
+      // the entire series and recorded the run as `ok`.
+      //
+      // Worse than a crash in the way this epic cares about: a later reader
+      // consults tutorial_syncs, sees a successful run covering the period, and
+      // renders the hole as a legitimate zero. That is indistinguishable from
+      // the eight-month outage the seventh check exists to catch.
+      //
+      // Not hypothetical: the ADR recommends rsync, and an rsync that has not
+      // run yet produces exactly this directory.
+      await withFixture({ players: {} }, async ({ store, service }) => {
+        const result = await service.sync();
+
+        expect(result.status).toBe('error');
+        expect(store.replaced).toEqual([]);
+        expect(store.failures[0].detail).toContain('vazio');
+      });
+    });
+
+    it('writes nothing when the scan collapsed against the last good run', async () => {
+      // The partial copy — rsync caught mid-flight. A truncated scan writes a
+      // smaller number as `ok`, which reads exactly like a drop in entries.
+      // There was a ceiling guard (MAX_FILES) and no floor guard, and the floor
+      // is the direction that erases data.
+      await withFixture(
+        {
+          players: {
+            [`${PREMIUM}.yml`]: playerdata({
+              '01tutorial': { started: MARCH_10 },
+            }),
+          },
+        },
+        async ({ store, service }) => {
+          store.previousSync = { filesScanned: 19_700 };
+
+          const result = await service.sync();
+
+          expect(result.status).toBe('error');
+          expect(store.replaced).toEqual([]);
+          expect(store.failures[0].detail).toContain('19700');
+          // The count it did read travels with the refusal, so whoever reads the
+          // provenance can tell a collapsed scan from a failed one.
+          expect(store.failures[0].filesScanned).toBe(1);
+        },
+      );
+    });
+
+    it('accepts a scan that shrank within tolerance', async () => {
+      // The floor is a guard against a broken mount, not a statistical test on
+      // player behaviour. A run that reads most of the previous corpus proceeds.
+      await withFixture(
+        {
+          players: {
+            [`${PREMIUM}.yml`]: playerdata({
+              '01tutorial': { started: MARCH_10 },
+            }),
+            [`${BEDROCK}.yml`]: playerdata({
+              '01tutorial': { started: MARCH_10 },
+            }),
+          },
+        },
+        async ({ store, service }) => {
+          store.previousSync = { filesScanned: 3 };
+
+          const result = await service.sync();
+
+          expect(result.status).toBe('ok');
+          expect(store.replaced).toHaveLength(1);
+        },
+      );
+    });
+
+    it('still writes on the very first run, with no previous count to compare', async () => {
+      await withFixture(
+        {
+          players: {
+            [`${PREMIUM}.yml`]: playerdata({
+              '01tutorial': { started: MARCH_10 },
+            }),
+          },
+        },
+        async ({ store, service }) => {
+          store.previousSync = null;
+
+          const result = await service.sync();
+
+          expect(result.status).toBe('ok');
+          expect(store.replaced).toHaveLength(1);
+        },
+      );
+    });
+
+    it('does not fail the run when the provenance read itself fails', async () => {
+      // The relative floor is a safety net, not a gate. The absolute floor has
+      // already done the important half; refusing the whole run because the
+      // provenance table is unreadable would trade one failure for another.
+      await withFixture(
+        {
+          players: {
+            [`${PREMIUM}.yml`]: playerdata({
+              '01tutorial': { started: MARCH_10 },
+            }),
+          },
+        },
+        async ({ store, service }) => {
+          store.lastSyncThrows = true;
+
+          const result = await service.sync();
+
+          expect(result.status).toBe('ok');
+          expect(store.replaced).toHaveLength(1);
         },
       );
     });
