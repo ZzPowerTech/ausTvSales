@@ -12,6 +12,8 @@ import { PlanDatabase } from './plan-database';
 import { PlanServersConfig } from './plan-servers.config';
 import { PlatformOfflineShareCheck } from './platform-offline-share.check';
 import { ProxyRegistrationAliveCheck } from './proxy-registration-alive.check';
+import { TutorialModule } from '../tutorial/tutorial.module';
+import { TutorialEntryRateCheck } from './tutorial-entry-rate.check';
 import { VersionDivergenceCheck } from './version-divergence.check';
 
 /**
@@ -50,6 +52,10 @@ import { VersionDivergenceCheck } from './version-divergence.check';
 // decorator-driven job. It registers globally, so `SchedulerRegistry` is still
 // injectable here; it just must be rooted exactly once.
 @Module({
+  // The seventh check reads `TutorialStore`. That is the one place this module
+  // depends on the S8.0 source, and it is a one-way edge: `TutorialModule` knows
+  // nothing about the health layer.
+  imports: [TutorialModule],
   providers: [
     HealthCheckScheduler,
     HealthCheckStore,
@@ -64,12 +70,15 @@ import { VersionDivergenceCheck } from './version-divergence.check';
     PlatformOfflineShareCheck,
     ProxyRegistrationAliveCheck,
     NetworkToSurvivalCheck,
+    TutorialEntryRateCheck,
     {
       // The registry the runner iterates. The runner must not know which checks
       // exist, so adding one is a line here and nothing there.
       //
-      // Six of the seven checks in spec 6.1; the seventh is story S8.0, for the
-      // reason given in this module's docblock.
+      // **All seven** checks of spec §6.1 as of story S8.0. The seventh,
+      // `funnel.tutorial_entry_rate`, joined once ADR-0004 gave it a source —
+      // it is the one that would have caught the eight months of the tutorial
+      // silently not capturing newcomers, and the epic's longest-standing gap.
       provide: HEALTH_CHECKS,
       useFactory: (
         collectionAlive: CollectionAliveCheck,
@@ -78,6 +87,7 @@ import { VersionDivergenceCheck } from './version-divergence.check';
         offlineShare: PlatformOfflineShareCheck,
         proxyRegistration: ProxyRegistrationAliveCheck,
         networkToSurvival: NetworkToSurvivalCheck,
+        tutorialEntryRate: TutorialEntryRateCheck,
       ) => [
         collectionAlive,
         versionDivergence,
@@ -85,6 +95,7 @@ import { VersionDivergenceCheck } from './version-divergence.check';
         offlineShare,
         proxyRegistration,
         networkToSurvival,
+        tutorialEntryRate,
       ],
       inject: [
         CollectionAliveCheck,
@@ -93,6 +104,7 @@ import { VersionDivergenceCheck } from './version-divergence.check';
         PlatformOfflineShareCheck,
         ProxyRegistrationAliveCheck,
         NetworkToSurvivalCheck,
+        TutorialEntryRateCheck,
       ],
     },
   ],

@@ -177,15 +177,18 @@ e não vale):
 
 A entrega mais importante do plano. Sem ela, tudo pode parar em silêncio de novo.
 
-1. [x] **6 dos 7 checks** da §6.1 implementados e agendados — *escopo reduzido de 7 para 6 em
-   2026-08-23, decisão do dono (opção 3)*. O sétimo, `funnel.tutorial_entry_rate`, **não tem fonte
-   de dado** e virou a história própria [S8.0](#s80--fonte-de-dados-do-tutorial--5-sp--featutorial-data-source)
+1. [x] **Os 7 checks** da §6.1 implementados e agendados — o escopo foi reduzido para 6 em
+   2026-08-23 (decisão do dono, opção 3) porque o sétimo, `funnel.tutorial_entry_rate`, **não tinha
+   fonte de dado**. A [S8.0](#s80--fonte-de-dados-do-tutorial--5-sp--featutorial-data-source)
+   construiu a fonte, e o sétimo entrou em **2026-08-28** — este critério fecha retroativamente
 2. [x] Falha dispara **alerta ativo no canal do Discord**, não espera alguém abrir página
 3. [x] Estado de cada check persistido em `health_check`, com histórico
 4. [ ] **Verificado derrubando uma instância de propósito** — o alerta precisa chegar.
-   **Pendente:** exige o agendamento ligado com webhook num ambiente real
-5. ~~Alerta de taxa de entrada no tutorial testado com valor forçado~~ — **movido para a S8.0**;
-   inexequível enquanto o check não tiver fonte
+   **Pendente:** exige o agendamento ligado com webhook num ambiente real. É o **último item aberto
+   da S6** e a promessa raiz do épico
+5. [x] ~~Alerta de taxa de entrada no tutorial testado com valor forçado~~ — **fechado na S8.0** em
+   2026-08-28. Não confundir com o critério 4: um prova que a mensagem é construída certo, o outro
+   que ela chega
 6. [x] Alerta repetido é agrupado, não vira flood
 
 > **Entregue em 2026-08-23** (PRs #127, #128, #131, #135, #137, #139, #140, #141, #143, #144, #145,
@@ -402,12 +405,23 @@ existe para impedir.
 
 **Critérios de aceite:**
 
-1. Fonte escolhida e registrada como ADR, com o custo declarado
-2. ETL idempotente e re-executável, fora do pico
-3. Fonte indisponível → **"sem dados" explícito**, nunca zero
-4. `funnel.tutorial_entry_rate` implementado sobre a fonte nova, fechando o 7º check da §6.1
-5. Alerta testado com **valor forçado** (critério 5 herdado da S6.3)
-6. Se a opção 2 for escolhida, o número é **rotulado como proxy** em todo lugar que aparece
+1. [x] Fonte escolhida e registrada como ADR, com o custo declarado —
+   [ADR-0004](../decisions/ADR-0004-fonte-dados-tutorial.md), opção 1
+2. [x] ETL idempotente e re-executável, fora do pico — `TutorialSyncScheduler`, cron em
+   America/Sao_Paulo, opt-in
+3. [x] Fonte indisponível → **"sem dados" explícito**, nunca zero — e mais forte do que o critério
+   pede: **seis regras de piso** recusam a gravação quando a varredura é degenerada, porque o
+   `replaceAll` apaga antes de reescrever e uma varredura vazia apagaria a série gravando `ok`
+4. [x] `funnel.tutorial_entry_rate` implementado sobre a fonte nova, fechando o 7º check da §6.1
+5. [x] Alerta testado com **valor forçado** — `tutorial-entry-rate.alert.spec.ts` força 12 de 100 e
+   assere sobre o payload HTTP que iria ao webhook. **Não substitui o critério 4 da S6.3**, que
+   segue aberto: este prova que a mensagem é construída certo, não que ela chega
+6. ➖ Sem objeto — a opção 2 não foi escolhida, então não há número a rotular como proxy
+
+> **Entregue em 2026-08-28** (PRs [#168](https://github.com/ZzPowerTech/ausTvSales/pull/168) e o do
+> 7º check). O ADR registra duas coisas que a história não previa: `started-date` é **epoch ms**,
+> então o tutorial vira série diária em vez de retrato; e o script do baseline **superconta
+> conclusões**, o que tira dele o status de árbitro da coluna `concluiu`.
 
 ### S8.1 — Módulo `funnel` · 8 SP · `feat/api-funnel`
 

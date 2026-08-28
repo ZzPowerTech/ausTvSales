@@ -394,13 +394,23 @@ Cada check roda periodicamente e **alerta ativamente no Discord** quando falha.
 | Registro vivo no proxy | nenhum `plan_users.registered` novo em 24h — o check lê `PlanDatabase.networkArrivals()`, **não** `/v1/graph?type=uniqueAndNew` como o `HANDOFF.md` de 23/08 supunha | idem |
 | Instância órfã | servidor em `plan_servers` sem dado recente — ⚠️ o check **construído** reconcilia listas, não recência (ver ADR-002, exceção 2) | Plan em SQLite invisível |
 | Versões divergentes | builds diferentes entre instâncias | risco de corromper schema |
-| **Taxa de entrada no tutorial** ⚠️ | `novatos_no_tutorial / novatos_no_survival` cai abaixo de 70% por 3 dias | tutorial sem capturar por 8 meses |
+| **Taxa de entrada no tutorial** | `novatos_no_tutorial / novatos_no_survival` cai abaixo de 70% — ⚠️ o check mede uma **janela de 7 dias**, não "3 dias consecutivos"; ver a nota | tutorial sem capturar por 8 meses |
 
-> ⚠️ **O check de tutorial não tem fonte de dado** (descoberto em 2026-08-23). O Plan não coleta
-> nada do tutorial; os números do `HANDOFF.md` vieram de ler `Quests/playerdata/*.yml` na máquina
-> do game. Nenhuma das duas exceções ao ADR-002 ajuda — o dado não está em banco nenhum. Os outros
-> **seis** checks foram entregues na S6.3; este virou a história **S8.0**, que começa escolhendo a
-> fonte.
+> ✅ **Entregue em 2026-08-28**, fechando o conjunto. Ficou de fora da S6.3 porque o Plan **não
+> coleta nada do tutorial** e o dado não estava em banco nenhum — nenhuma das duas exceções ao
+> ADR-002 ajudava. A **S8.0** construiu a fonte
+> ([ADR-0004](../../decisions/ADR-0004-fonte-dados-tutorial.md)): ETL noturno lendo
+> `Quests/playerdata/*.yml`, a mesma origem dos números do `HANDOFF.md`.
+>
+> **Duas diferenças entre esta linha e o código, ditas em vez de arredondadas:**
+>
+> 1. **"por 3 dias" virou uma janela de 7 dias.** A cláusula existe para um único dia ruim não
+>    alertar, e foi escrita para uma métrica diária. A janela de 7 dias já suaviza isso; o que
+>    **não** existe é um contador de N avaliações consecutivas.
+> 2. **O numerador e o denominador têm relógios diferentes** — o denominador é buscado ao vivo, o
+>    numerador é o que o último ETL noturno gravou. Um numerador congelado sobre um denominador
+>    vivo é uma razão que cai sozinha, então a frescura do ETL é conferida **antes** da razão: fonte
+>    velha vira `error` culpando o ETL, nunca `breached` culpando o tutorial.
 | Conversão rede → survival | desvio > 15 pontos da média de 30 dias | degrau do lobby |
 | Crescimento anormal de conta offline | share de `java_offline` na rede sobe fora da faixa | tráfego de bot inflando aquisição |
 
@@ -502,13 +512,20 @@ sem sanitizar**.
 - ~~webserver só no proxy em `127.0.0.1`~~ — **contraditório com a §8 e não resolvido.** A §8 exige
   o webserver alcançável pela rede, senão o NestJS da VPS não consome `/v1/*` (ADR-001/002). Este
   critério não pode ser aceito como está; depende da decisão de exposição de rede da §10b
-- [x] **6 dos 7** checks de saúde da §6.1 rodando e alertando no Discord — *escopo reduzido de 7
-  para 6 em 2026-08-23, decisão do dono (opção 3)*. O sétimo,
-  `funnel.tutorial_entry_rate`, não tem fonte de dado e virou a história **S8.0**
+- [x] **Os 7** checks de saúde da §6.1 implementados e agendados — o escopo foi reduzido para 6 em
+  2026-08-23 (decisão do dono, opção 3) porque o sétimo,
+  `funnel.tutorial_entry_rate`, não tinha fonte de dado. A **S8.0** construiu a fonte
+  ([ADR-0004](../../decisions/ADR-0004-fonte-dados-tutorial.md)) e o sétimo entrou em 2026-08-28,
+  fechando o conjunto retroativamente
 - [ ] Verificado **derrubando uma instância de propósito** — pendente: exige o agendamento ligado
   com webhook num ambiente real
-- ~~Alerta de taxa de entrada no tutorial testado com valor forçado~~ — **movido para a S8.0**;
-  inexequível enquanto o check não tiver fonte
+- [x] Alerta de taxa de entrada no tutorial testado com **valor forçado** — S8.0 critério 5.
+  `tutorial-entry-rate.alert.spec.ts` força 12 de 100 (a taxa real de abril/2026), segue o veredito
+  pelo `decideAlerts` e pelo `DiscordAlerter`, e assere sobre o **payload HTTP** que iria ao webhook:
+  o valor, a base ao lado dele, e menções inertes.
+  > Isto **não** substitui o critério acima. Este teste prova que a mensagem é *construída* certo a
+  > partir de uma leitura em falha; só produção prova que ela *chega*. A distinção é o assunto do
+  > [`S6-VERIFICACAO.md`](S6-VERIFICACAO.md).
 - Funil de 4 degraus disponível por mês e por plataforma, com `n` visível
 - Sessão, AFK e tempo por servidor conferidos contra **observação manual**
 - NestJS não referencia tabela interna do Plan fora do módulo de coorte

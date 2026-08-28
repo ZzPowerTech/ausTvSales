@@ -382,6 +382,17 @@ export class EnvironmentVariables {
   })
   TUTORIAL_FINAL_QUEST_ID?: string;
 
+  // Floor on `tutorial entrants / server arrivals` over the 7-day window, 0..1.
+  // §6.1 proposes 70%. **An uncalibrated guess**, exactly like the three from
+  // S6.3: the historical rate was ~100% before dec/2025 and 12% at its worst, so
+  // 70% sits in a wide gap — but a wide gap is not a calibration, and
+  // `ops/baseline/` is what would turn it into one.
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  FUNNEL_MIN_TUTORIAL_ENTRY_RATE?: number;
+
   // Master switch for the nightly rebuild. Off by default so no environment
   // starts walking the game machine's files by accident. When off, the boot
   // warns: a job that silently does not run leaves a series that looks current

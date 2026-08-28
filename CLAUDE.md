@@ -100,10 +100,10 @@ colidem na faixa 6. Os documentos **não** são renumerados; a separação é po
 **AusTV Admin S7 — entregue.** Módulo `health` expondo os checks, módulo `metrics` com client do
 Plan, cache de TTL por endpoint e degradação honesta. 13 de 13 SP, DoD cumprido.
 
-**AusTV Admin S6 — histórias entregues, DoD com itens em aberto.** Os 6 checks que têm fonte estão
-implementados e alertando (o sétimo virou a S8.0), mas **o critério 4 da S6.3 nunca foi cumprido**:
-ninguém derrubou uma instância de propósito para provar que o alerta chega. Ver o bloco abaixo — a
-distinção importa mais que a contagem de SP.
+**AusTV Admin S6 — histórias entregues, DoD com itens em aberto.** Os **7** checks da §6.1 estão
+implementados e alertando — o sétimo entrou em 2026-08-28 pela S8.0, que lhe construiu a fonte —,
+mas **o critério 4 da S6.3 nunca foi cumprido**: ninguém derrubou uma instância de propósito para
+provar que o alerta chega. Ver o bloco abaixo — a distinção importa mais que a contagem de SP.
 
 > **Auditoria de 2026-08-27:**
 > [`S6-VERIFICACAO.md`](.specs/features/austv-admin/S6-VERIFICACAO.md). Duas histórias fecharam com
