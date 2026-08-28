@@ -499,14 +499,78 @@ existe para impedir.
 3. Único ponto do sistema autorizado a fazer SQL direto (ADR-002), em usuário read-only, isolado
    num módulo
 
+> ### 🛑 NÃO INICIADA — três pré-requisitos abertos, e escrever assim mesmo repetiria a S6.2
+>
+> Avaliada em **2026-08-28**, depois de S8.0 e S8.1 entregues. Recomendação: **mover para a S9**,
+> que é exatamente a válvula de escape que o próprio plano nomeia para esta história (`[CORTE]` da
+> S8, e o desbalanço de 18 SP contra 13 de capacidade).
+>
+> #### 1. `/v1/retention` nunca foi avaliado — e o spec já avisa que este é o mesmo erro
+>
+> A exceção 1 do ADR-002 justifica o SQL direto dizendo que *"agregação por coorte × plataforma não
+> existe em nenhum endpoint"*. O próprio spec anotou em 2026-08-26:
+>
+> > `/v1/retention` é candidato **não avaliado**; mesma classe de afirmação de ausência que caiu na
+> > exceção 2.
+>
+> A exceção 2 foi aberta com o argumento de que o Plan não expunha lista de servidores. Era falso —
+> o endpoint existia com outro nome, e ninguém tinha olhado. **Abrir a exceção 1 sem ler o
+> `/v1/retention` seria cometer o mesmo erro pela segunda vez, no mesmo ADR.**
+>
+> #### 2. O schema de `plan_sessions` nunca foi observado
+>
+> Retenção D1/D7/D30 precisa saber se o jogador teve sessão N dias depois de chegar, e isso mora em
+> `plan_sessions`. Não há **nenhuma** coluna dessa tabela registrada em lugar nenhum do repo — o
+> `HANDOFF.md` só menciona que ela foi consultada por engano numa investigação, sem guardar o
+> formato.
+>
+> Escrever SQL contra schema não observado é literalmente o que fez a **S6.2** ser escrita, estimada,
+> revisada, mergeada e revertida — e é a regra sob a qual todos os adapters da S7.2 e o parser da
+> S8.0 foram construídos.
+>
+> #### 3. `plan_users` não tem coortes antigas para reter
+>
+> Descoberto ao construir a S8.1: o histórico do proxy **não veio na unificação de 2026-08-20**
+> (`HANDOFF.md`, "Restrição nova para o baseline da campanha"). Coorte mensal exige meses de
+> chegadas, e a tabela tem dias. Uma retenção D30 precisa de uma coorte com 30 dias de idade, que só
+> existirá a partir de **2026-09-19**.
+>
+> #### O que destrava, em ordem de custo
+>
+> | # | passo | custo | o que resolve |
+> |---|---|---|---|
+> | 1 | `curl` no `/v1/retention` da VPS e registrar o corpo | minutos, com acesso | pode **eliminar** a exceção 1 inteira |
+> | 2 | `DESCRIBE plan_sessions` e registrar o schema | minutos, com acesso | destrava o pré-requisito 2 |
+> | 3 | esperar a primeira coorte de 30 dias | até 2026-09-19 | destrava o pré-requisito 3 |
+>
+> Os dois primeiros são trabalho de minutos **para quem tem acesso à produção**, e nenhum é
+> trabalho de sessão. Nada aqui é impossível; o que seria errado é escrever o módulo antes deles.
+
 ### DoD da S8
 
-- [ ] Funil reproduz os números conhecidos: ~54% rede→survival, ~100% de entrada no tutorial antes
-      de dez/2025
-- [ ] Nenhum endpoint retorna percentual sem `n`
-- [ ] Usuário read-only comprovadamente sem permissão de escrita
+- [ ] ~~Funil reproduz os números conhecidos: ~54% rede→survival, ~100% de entrada no tutorial antes
+      de dez/2025~~ — **inalcançável nas duas metades**, e por dois motivos diferentes: o degrau
+      `survival` não tem série diária, e não existe denominador de rede anterior a 2026-08-20.
+      Detalhe no bloco da S8.1
+- [x] **Nenhum endpoint retorna percentual sem `n`** — imposto pelo *tipo*, não por convenção: em
+      `Conversion`, a variante medida carrega os dois e `{ percent: 50, n: null }` não compila.
+      Fecha o achado que a auditoria da S6 deixou em aberto sobre o `n` opcional
+- [ ] Usuário read-only comprovadamente sem permissão de escrita — pertence à S8.2, não iniciada
 
-**[CORTE]** S8.2.
+### Fechamento da S8 — 2026-08-28
+
+| história | estado |
+|---|---|
+| **S8.0** — Fonte de dados do tutorial | ✅ **entregue** (PRs #168, #169). Fecha também o 7º check da §6.1 e o critério 5 da S6.3 |
+| **S8.1** — Módulo `funnel` | ✅ **entregue** (PR #170), com o degrau `survival` declarado sem fonte e o motivo no payload |
+| **S8.2** — Retenção por coorte | 🛑 **não iniciada** — três pré-requisitos abertos, ver o bloco dela |
+
+**Recomendação: mover a S8.2 para a S9**, que é a válvula de escape que o próprio plano nomeia
+(`[CORTE]` da S8). Isso põe a S8 em 13 SP contra 13 de capacidade e resolve o estouro registrado no
+desbalanço, sem inventar velocidade: os 5 SP da S8.2 não foram executados, foram **adiados por
+falta de pré-requisito** — a mesma distinção que o `HANDOFF.md` pede que se faça ao medir a S6.
+
+**[CORTE]** S8.2 — exercido.
 
 ---
 

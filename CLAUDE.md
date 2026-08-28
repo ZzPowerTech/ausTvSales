@@ -112,11 +112,26 @@ provar que o alerta chega. Ver o bloco abaixo — a distinção importa mais que
 > sobrou é o passo que exige tocar um ambiente real — e é o passo que separa "parece funcionar" de
 > "funciona".
 
-**Próxima: Sprint 8** — fonte de dados do tutorial (S8.0), funil de 4 degraus (S8.1) e retenção por
-coorte (S8.2). A S8 está em **18 SP** contra 13 de capacidade; a S8.2 é a história marcada
-`[CORTE]` e move para a S9 se preciso.
+**AusTV Admin S8 — S8.0 e S8.1 entregues; S8.2 não iniciada.** A fonte do tutorial existe
+([ADR-0004](.specs/decisions/ADR-0004-fonte-dados-tutorial.md): ETL noturno sobre
+`Quests/playerdata`), o 7º check da §6.1 fechou o conjunto, e o módulo `funnel` publica três dos
+quatro degraus. **O `[CORTE]` foi exercido:** a S8.2 (retenção por coorte) move para a S9 — não por
+capacidade, mas porque tem três pré-requisitos abertos, e o primeiro é ler o `/v1/retention` antes
+de abrir a exceção 1 do ADR-002. Detalhe no plano de sprints.
+
+**Próxima: Sprint 9** — módulo `economy` (S9.1) e relatório periódico no Discord (S9.2), mais a
+S8.2 se os pré-requisitos dela forem resolvidos.
 
 **Em aberto, e vale mais que sprint:**
+
+- **Duas leituras de minutos destravam a S8.2, e ninguém as fez.** `curl` no `/v1/retention` (pode
+  **eliminar** a exceção 1 do ADR-002 inteira — e não olhar antes de abrir uma exceção é
+  literalmente o erro que já custou a exceção 2) e `DESCRIBE plan_sessions` (nenhuma coluna dessa
+  tabela está registrada em lugar nenhum). Exigem acesso à produção.
+- **`plan_users` tem dias de profundidade, não meses.** O histórico do proxy não veio na unificação
+  de 2026-08-20, então o degrau de rede do funil só fala do presente e a primeira coorte de D30 só
+  existe em **2026-09-19**. O funil já trata isso — bucket sem cobertura sai `null`, nunca zero —
+  mas nenhum número histórico de rede vai aparecer até lá.
 
 - **O alerta de saúde nunca foi comprovado.** É o último item aberto da S6 e a promessa raiz do
   projeto (§1 do spec: "tornar impossível a cegueira silenciosa"). Exige ligar o agendamento num
