@@ -51,6 +51,24 @@ interface RawArrivalsRow extends RowDataPacket {
 }
 
 /**
+ * One network arrival, as the funnel needs it.
+ *
+ * The uuid exists only to be handed to `platformOf` (ADR-003) and dropped. It is
+ * never persisted and never leaves the aggregation — spec §8 keeps player
+ * identity out of this database.
+ */
+export interface NetworkArrival {
+  uuid: string;
+  /** `plan_users.registered`, epoch ms. */
+  registeredAt: number;
+}
+
+interface RawArrivalRow extends RowDataPacket {
+  uuid: string;
+  registered: number | string | null;
+}
+
+/**
  * Read-only access to `plan_servers` and `plan_users` — **documented exception 2
  * to ADR-002**, approved by the owner on 2026-08-23 and extended the same day.
  *
@@ -233,6 +251,72 @@ export class PlanDatabase implements OnModuleInit, OnModuleDestroy {
       total: toNumber(row?.total) ?? 0,
       lastRegisteredAt: toNumber(row?.last_registered),
     };
+  }
+
+  /**
+   * Every network arrival in a window, as `(uuid, registered)` pairs.
+   *
+   * ## ⚠️ This reads a third column, and that is an extension of exception 2
+   *
+   * The approval of 2026-08-23 says *"only two columns are read: `registered`
+   * and the row count"*. This method also reads **`uuid`**, and the reason is
+   * that the spec asks for two things that can only be satisfied together:
+   *
+   * - §6.2 requires every funnel step to be **segmentable by `platform`**;
+   * - ADR-003 says `platform` is **derived from the uuid**, in this project by
+   *   design, because deriving it any other way would need a plugin.
+   *
+   * So a funnel that honours §6.2 has to read the uuid. The alternative is
+   * shipping the network step without platform segmentation, which fails
+   * criterion 2 of story S8.1.
+   *
+   * **What this is not:** a new table. `plan_users` was already opened by the
+   * same approval, the access stays `SELECT`-only on the same read-only user,
+   * and the uuid is consumed by `platformOf` and **discarded** — spec §8 keeps
+   * player identity out of this database, so nothing here is ever persisted.
+   *
+   * Flagged for the owner rather than done quietly: the exception's own text
+   * says any widening belongs in the spec, and this is a widening.
+   *
+   * ## Why the whole window rather than a `GROUP BY`
+   *
+   * Bucketing by day has to happen in America/Sao_Paulo (`CLAUDE.md`), and
+   * `platform` comes from a UUID rule that is TypeScript, not SQL. Doing either
+   * in MySQL would either hardcode a timezone into someone else's database or
+   * duplicate ADR-003 in a second language, where the two spellings would drift.
+   *
+   * The cost is bounded and measured: `plan_users` held **5.566 rows** in total
+   * on 2026-08-23, and this is windowed. Streaming a few thousand pairs is
+   * cheaper than either alternative is risky.
+   *
+   * @param from epoch ms, inclusive.
+   * @param to epoch ms, inclusive.
+   *
+   * @throws when the database is unreachable. Never an empty array on failure —
+   *   "nobody arrived" and "we could not ask" must stay distinguishable.
+   */
+  async networkArrivalsBetween(
+    from: number,
+    to: number,
+  ): Promise<NetworkArrival[]> {
+    if (!this.pool) {
+      throw new Error(
+        'PLAN_DB_HOST nao configurado — sem conexao com o banco do Plan',
+      );
+    }
+
+    const [rows] = await this.pool.query<RawArrivalRow[]>(
+      'SELECT uuid, registered FROM plan_users ' +
+        'WHERE registered >= ? AND registered <= ? ORDER BY registered',
+      [from, to],
+    );
+
+    return rows
+      .map((row) => ({
+        uuid: row.uuid,
+        registeredAt: toNumber(row.registered),
+      }))
+      .filter((row): row is NetworkArrival => row.registeredAt !== null);
   }
 }
 

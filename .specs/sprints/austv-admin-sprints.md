@@ -425,11 +425,53 @@ existe para impedir.
 
 ### S8.1 — Módulo `funnel` · 8 SP · `feat/api-funnel`
 
-1. Série diária e mensal de `rede → survival → tutorial_entrou → tutorial_concluiu`
-2. Cada degrau segmentável por `platform` (ADR-003, direto do UUID)
-3. **`n` retornado junto de todo percentual** — o contrato não permite percentual sem base
-4. Período sem dados → "sem dados" explícito, distinto de zero
-5. Agregação pesada em job **fora do pico**; falha mantém último resultado válido, datado
+1. [~] Série diária e mensal de `rede → survival → tutorial_entrou → tutorial_concluiu` — **três dos
+   quatro degraus**. O `survival` está no contrato de todo bucket, mas sem números e **com o motivo
+   escrito**; ver o bloco abaixo
+2. [x] Cada degrau segmentável por `platform` (ADR-003, direto do UUID) — exigiu ler
+   `plan_users.uuid`, uma **extensão da exceção 2 do ADR-002** registrada lá e pendente do dono
+3. [x] **`n` retornado junto de todo percentual** — imposto pela *forma*: `percent` e `n` são um par
+   que existe ou não existe junto, então publicar razão sem base é irrepresentável, não apenas
+   desencorajado
+4. [x] Período sem dados → "sem dados" explícito, distinto de zero — e a distinção vai além do
+   bucket: `sources` reporta cada store separadamente, então um apagão de banco não se parece com
+   um período vazio
+5. [~] Agregação pesada em job **fora do pico**; falha mantém último resultado válido, datado — ver
+   a justificativa abaixo
+
+> #### ⚠️ O degrau `survival` ficou sem série diária, e isso é uma lacuna real
+>
+> É o degrau cuja descoberta abriu o épico — **54% de quem conecta na rede nunca chega ao
+> survival** —, então vale dizer alto em vez de deixar alguém notar.
+>
+> Uma **série diária** de chegadas a um backend precisa de uma de duas fontes, e nenhuma está ao
+> alcance desta história:
+>
+> 1. **`/v1/graph?type=uniqueAndNew`** — o endpoint certo, mas **ninguém observou o payload dele**.
+>    Escrever parser contra forma imaginada é o erro que fez a S6.2 ser escrita, mergeada e
+>    revertida, e é a regra sob a qual os adapters da S7.2 foram construídos.
+> 2. **`plan_user_info`**, que registra a entrada por servidor — mas essa tabela é a **exceção 1** do
+>    ADR-002, escopada ao módulo de coorte da **S8.2**. Puxá-la aqui seria alargar uma exceção que
+>    pertence a outra história.
+>
+> **O sinal não sumiu do sistema, só desta série:** a conversão rede→servidor em janela de 7 dias
+> existe e é vigiada continuamente pelo check `funnel.network_to_survival` desde a S6.3.
+>
+> Fechar isto é observar o corpo do `/v1/graph` numa instância viva — trabalho de minutos com acesso,
+> impossível sem ele.
+>
+> #### Sobre o critério 5, e por que não virou job
+>
+> O critério pressupõe agregação pesada. Medida, não é: `plan_users` tinha **5.566 linhas no total**
+> em 2026-08-23, e toda leitura aqui é ainda janelada em cima disso. Um ETL noturno para alguns
+> milhares de linhas seria cerimônia — e acrescentaria uma defasagem própria a um número que hoje é
+> vivo.
+>
+> O que o critério protege de fato — *nunca fazer a máquina do jogo pagar por um refresh de
+> dashboard, e manter a última resposta boa quando uma fonte falha* — é entregue pelo caminho de
+> leitura: a janela é limitada a 366 buckets, e uma fonte que falha degrada para `ok: false` com o
+> motivo enquanto a outra metade continua respondendo. Se `plan_users` crescer ordens de grandeza,
+> é este parágrafo que deixa de valer, e o ETL é a resposta então.
 
 ### S8.2 — Retenção D1/D7/D30 por coorte e plataforma · 5 SP · `feat/api-cohort-retention`
 
