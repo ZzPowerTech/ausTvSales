@@ -105,6 +105,13 @@ implementados e alertando (o sétimo virou a S8.0), mas **o critério 4 da S6.3 
 ninguém derrubou uma instância de propósito para provar que o alerta chega. Ver o bloco abaixo — a
 distinção importa mais que a contagem de SP.
 
+> **Auditoria de 2026-08-27:**
+> [`S6-VERIFICACAO.md`](.specs/features/austv-admin/S6-VERIFICACAO.md). Duas histórias fecharam com
+> o **mesmo tipo** de lacuna, e não é coincidência: a S6.2b entregou os scripts de auditoria sem
+> nunca rodá-los, e a S6.3 entregou a camada de alerta sem nunca dispará-la. Nos dois casos o que
+> sobrou é o passo que exige tocar um ambiente real — e é o passo que separa "parece funcionar" de
+> "funciona".
+
 **Próxima: Sprint 8** — fonte de dados do tutorial (S8.0), funil de 4 degraus (S8.1) e retenção por
 coorte (S8.2). A S8 está em **18 SP** contra 13 de capacidade; a S8.2 é a história marcada
 `[CORTE]` e move para a S9 se preciso.
@@ -115,6 +122,9 @@ coorte (S8.2). A S8 está em **18 SP** contra 13 de capacidade; a S8.2 é a hist
   projeto (§1 do spec: "tornar impossível a cegueira silenciosa"). Exige ligar o agendamento num
   ambiente real, com webhook configurado, e derrubar uma instância de propósito. **Todo o resto da
   camada de saúde é construção sobre uma entrega que ninguém verificou ponta a ponta.**
+- **A auditoria de rede da S6.2b nunca foi rodada.** Os scripts, o runbook e o template estão em
+  `ops/audit/`; **nenhum relatório preenchido existe**, e o produto da história é o registro, não o
+  script. Fechar isso e ler a whitelist do Plan (item abaixo) são a mesma tarefa.
 - **O webserver do Plan não tem autenticação** (`authRequired: false`, medido 2026-08-26). A
   whitelist de IP é o único controle **conhecido** na porta 25504 e **ninguém leu o conteúdo dela**;
   o `ufw` estava inativo em 2026-08-21 e não foi reverificado. Se os endpoints de escrita não

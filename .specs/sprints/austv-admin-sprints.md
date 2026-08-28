@@ -118,6 +118,23 @@ e não vale):
 5. Usuário **read-only** dedicado para o ETL, separado dos usuários dos plugins
 6. Nenhuma credencial nova em arquivo versionado
 
+> ### ⚠️ Fechada com o instrumento pronto e a medição por fazer (auditoria de 2026-08-27)
+>
+> `ops/audit/` tem os dois scripts, o runbook e o `exposure-report-TEMPLATE.md`. **Não existe
+> nenhum relatório preenchido**, e portanto nenhum dos seis critérios acima tem registro — exceto o
+> 6, verificável no repo, e o 4b, que foi respondido por outro caminho
+> (`Use_X-Forwarded-For_Header: false`, lido do config do Plan em 2026-08-23 e registrado no
+> `HANDOFF.md`).
+>
+> O método entregue é bom e acerta a parte fácil de errar. Mas a issue define o produto da história
+> como *"o registro técnico do estado atual, porque o ETL vai assumir que essa rede é alcançável"* —
+> e sem ele, quando o ETL da S9.1 parar, não haverá linha de base para dizer o que mudou.
+>
+> O passo 1 desse runbook é a leitura da whitelist no `config.yml` do Plan, que o `CLAUDE.md` já
+> lista como urgente **antes do unban all** por um caminho independente. Fechar a S6.2b e fazer essa
+> verificação são a mesma tarefa. Detalhe em
+> [`S6-VERIFICACAO.md`](../features/austv-admin/S6-VERIFICACAO.md).
+
 ### ~~S6.2 — Unificar os bancos do Plan~~ · **CONCLUÍDA em 2026-08-20** · ~~5 SP~~ → 0
 
 > **Executada pelo dono fora do fluxo de sprint** (confirmado por ele em 2026-08-23). Os bancos do
@@ -191,13 +208,23 @@ A entrega mais importante do plano. Sem ela, tudo pode parar em silêncio de nov
 
 ### DoD da S6
 
+> Auditado em 2026-08-27 contra o repositório, não contra este documento. Resultado completo em
+> [`S6-VERIFICACAO.md`](../features/austv-admin/S6-VERIFICACAO.md).
+
 - [x] `plan_servers` mostra proxy e backends num único banco, mesma build — **feito em 2026-08-20**,
       fora do fluxo de sprint (ver S6.2)
 - [ ] ~~Dump restaurável dos dois bancos guardado fora da VPS~~ — sem objeto: a unificação já
       aconteceu e não existem mais "dois bancos" a dumpar
 - [ ] Alerta comprovado por teste destrutivo intencional — **último item aberto da S6**
-- [ ] Baseline pré-campanha commitado
-- [ ] Spec órfão `specs/spec.md` (coleta de sessão no proxy) marcado superseded
+- [x] Baseline pré-campanha commitado — `ops/baseline/2026-08-19/`, as-of `2026-08-19 20:20`.
+      Parcial e **declarado como tal**: 2 dos 5 artefatos do `HANDOFF.md` foram localizados, e o
+      README lista onde os outros três foram procurados
+- [ ] ~~Spec órfão `specs/spec.md` (coleta de sessão no proxy) marcado superseded~~ — **sem objeto
+      neste repositório**: `git log --all -- 'specs/'` não retorna nada, o arquivo nunca existiu
+      aqui. Provável referência à pasta do Drive de onde o spec e este plano foram recuperados
+- [ ] **Novo, saído da auditoria:** relatório da S6.2b preenchido e commitado. Os scripts e o
+      runbook estão em `ops/audit/`, mas **nenhum dos sete critérios da história tem registro** —
+      só existe o `exposure-report-TEMPLATE.md`. O produto da história é o registro, não o script
 
 ### Riscos
 
