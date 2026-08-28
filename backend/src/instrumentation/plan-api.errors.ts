@@ -2,17 +2,38 @@
  * Error taxonomy of the Plan HTTP client (story S6.3, ADR-001/ADR-002).
  *
  * The distinctions here are not cosmetic. The instrumentation-health layer has
- * to answer "is the measurement still happening?", and the four failures below
- * demand four different human reactions:
+ * to answer "is the measurement still happening?", and the failures below demand
+ * different human reactions:
  *
  * - unreachable  → the game VPS or the Plan process is down. Real incident.
- * - auth         → our credential is wrong or expired. Our bug, not an outage.
+ * - auth (401)   → Plan asked us to log in. Our credential, our bug.
+ * - forbidden (403) → Plan reached us and refused. Cause is NOT determined here.
  * - http         → Plan answered and refused. Usually a bad path or a version skew.
  * - malformed    → Plan answered with something that is not the JSON we expect.
  *
  * Collapsing them into one "Plan failed" would recreate the ADR-006 problem one
- * level down: an alert that fires without telling you which of four unrelated
+ * level down: an alert that fires without telling you which of several unrelated
  * things broke is only marginally better than no alert.
+ *
+ * ## Why 401 and 403 stopped sharing a class (2026-08-27)
+ *
+ * They were one class, `PlanAuthError`, described as "our credential is wrong or
+ * expired. Our bug, not an outage." Against this Plan instance that label is
+ * wrong often enough to be dangerous, and the alert carried it:
+ *
+ * - `/v1/whoami` on the production instance answers `{"authRequired":false}`
+ *   (measured 2026-08-26). With authentication off there is no credential to be
+ *   wrong, so a 403 cannot mean what the label said.
+ * - Plan answers **403 for a server name it does not recognise** — a caller
+ *   mistake, not an access problem at all.
+ * - Plan's own IP whitelist rejects with 403. On 2026-08-26 every endpoint began
+ *   answering 403 to one origin, cause never established.
+ *
+ * So a 403 has at least three plausible causes and this layer cannot tell them
+ * apart from the response alone. The honest contract is to name the observation
+ * (Plan refused) and enumerate the candidates, never to assert one. Asserting
+ * the wrong cause is worse than a vague alert: it sends whoever is on the other
+ * end to the wrong place with confidence. Detail in `HANDOFF.md`.
  */
 
 /** Base class so callers can catch every Plan transport failure at once. */
@@ -65,21 +86,67 @@ export class PlanNotConfiguredError extends PlanApiError {
 }
 
 /**
- * Plan answered 401 or 403.
+ * Plan answered **401** — it wants a login we did not provide.
+ *
+ * Narrow on purpose. 401 is the one status where "our credential is wrong or
+ * missing" is what the protocol itself says, so the alert may state it. 403 is
+ * {@link PlanForbiddenError} and states nothing of the sort.
  *
  * Deliberately **not** transient: retrying a rejected credential just burns the
- * schedule. It is also the one failure here that is our own misconfiguration
- * rather than an outage, and the alert must say so — otherwise someone goes
- * looking for a dead server that is actually running fine.
+ * schedule.
+ *
+ * Note for whoever provisions the credential: Plan authenticates with a
+ * **session cookie** obtained from `POST /auth/login`, not with the bearer token
+ * this client sends today (read from the instance's own OpenAPI, 2026-08-26).
+ * If a 401 ever shows up here, `PLAN_API_TOKEN` in its current shape will not
+ * fix it.
  */
 export class PlanAuthError extends PlanApiError {
-  constructor(
-    readonly url: string,
-    readonly status: number,
-  ) {
+  readonly status = 401;
+
+  constructor(readonly url: string) {
     super(
-      `Plan recusou a credencial (HTTP ${status}) em ${url} — ` +
-        'verifique PLAN_API_TOKEN e a whitelist de IP do Plan',
+      `Plan exigiu autenticacao (HTTP 401) em ${url} — o Plan autentica por ` +
+        'cookie de sessao (/auth/login), nao pelo bearer que este client envia',
+      false,
+      undefined,
+    );
+  }
+}
+
+/**
+ * Plan answered **403** — it received the request and refused to serve it.
+ *
+ * ## What this class deliberately does not claim
+ *
+ * That the credential is wrong. Against the AusTV instance a 403 has at least
+ * three unrelated causes, and the response body does not separate them:
+ *
+ * 1. **The server name is not one Plan knows.** Plan answers 403, not 404, for
+ *    an unrecognised `?server=`. This is a caller bug and the cheapest to check.
+ * 2. **Plan's application-level IP whitelist rejected the origin.** On
+ *    2026-08-26 every endpoint began answering 403 to one machine; the cause was
+ *    never established.
+ * 3. **A web-permission group denies this principal.** Only possible where
+ *    authentication is on, and on this instance `/v1/whoami` reports
+ *    `authRequired: false` (measured 2026-08-26).
+ *
+ * The message enumerates them in the order they are cheapest to rule out. Naming
+ * a single cause here would be a guess wearing the clothes of a diagnosis — the
+ * previous version asserted "credencial recusada", which under the whitelist
+ * hypothesis sends the reader to the one place that is not the problem.
+ *
+ * Not transient: whatever the cause, the next cycle gets the same answer.
+ */
+export class PlanForbiddenError extends PlanApiError {
+  readonly status = 403;
+
+  constructor(readonly url: string) {
+    super(
+      `Plan recusou a requisicao (HTTP 403) em ${url} — causas possiveis, da ` +
+        'mais barata de descartar para a mais cara: nome de servidor que o Plan ' +
+        'nao reconhece, whitelist de IP do Plan (config.yml) recusando esta ' +
+        'origem, ou permissao web negada para este chamador',
       false,
       undefined,
     );

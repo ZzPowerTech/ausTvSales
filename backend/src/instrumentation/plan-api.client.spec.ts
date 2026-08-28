@@ -2,6 +2,7 @@ import { ConfigService } from '@nestjs/config';
 import { PlanApiClient } from './plan-api.client';
 import {
   PlanAuthError,
+  PlanForbiddenError,
   PlanHttpError,
   PlanMalformedResponseError,
   PlanNotConfiguredError,
@@ -216,22 +217,49 @@ describe('PlanApiClient', () => {
   });
 
   describe('failure classification', () => {
-    it.each([401, 403])(
-      'maps HTTP %i to PlanAuthError and does not retry it',
-      async (status) => {
-        fetchMock.mockResolvedValue(textResponse('denied', status));
-        const client = new PlanApiClient(
-          configWith({ ...BASE, PLAN_RETRIES: 3 }),
-        );
+    it('maps HTTP 401 to PlanAuthError and does not retry it', async () => {
+      fetchMock.mockResolvedValue(textResponse('denied', 401));
+      const client = new PlanApiClient(
+        configWith({ ...BASE, PLAN_RETRIES: 3 }),
+      );
 
-        await expect(
-          client.getJson('v1/serverOverview'),
-        ).rejects.toBeInstanceOf(PlanAuthError);
-        // A rejected credential will not fix itself; retrying only delays the
-        // alert and hides that the cause is our own configuration.
-        expect(fetchMock).toHaveBeenCalledTimes(1);
-      },
-    );
+      await expect(client.getJson('v1/serverOverview')).rejects.toBeInstanceOf(
+        PlanAuthError,
+      );
+      // A rejected credential will not fix itself; retrying only delays the
+      // alert and hides that the cause is our own configuration.
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('maps HTTP 403 to PlanForbiddenError, not to PlanAuthError', async () => {
+      fetchMock.mockResolvedValue(textResponse('denied', 403));
+      const client = new PlanApiClient(
+        configWith({ ...BASE, PLAN_RETRIES: 3 }),
+      );
+
+      const error: unknown = await client
+        .getJson('v1/serverOverview')
+        .catch((e: unknown) => e);
+
+      // The distinction is the point of the split: this Plan answers 403 for an
+      // unknown server name and for a whitelist rejection, neither of which is a
+      // credential being wrong. Labelling it `auth` sent the reader to
+      // PLAN_API_TOKEN — the one thing that could not be the cause on an
+      // instance whose `/v1/whoami` reports `authRequired: false`.
+      expect(error).toBeInstanceOf(PlanForbiddenError);
+      expect(error).not.toBeInstanceOf(PlanAuthError);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('names the 403 candidates instead of asserting one cause', () => {
+      const message = new PlanForbiddenError('http://plan:25504/v1/x').message;
+
+      expect(message).toContain('nome de servidor');
+      expect(message).toContain('whitelist');
+      expect(message).toContain('permissao web');
+      // The regression this guards: the old message read "recusou a credencial".
+      expect(message).not.toContain('credencial');
+    });
 
     it('maps a 404 to PlanHttpError without retrying', async () => {
       fetchMock.mockResolvedValue(textResponse('not found', 404));
@@ -324,7 +352,8 @@ describe('PlanApiClient', () => {
       expect(new PlanHttpError('u', 500, '').transient).toBe(true);
       expect(new PlanHttpError('u', 429, '').transient).toBe(true);
       expect(new PlanHttpError('u', 400, '').transient).toBe(false);
-      expect(new PlanAuthError('u', 401).transient).toBe(false);
+      expect(new PlanAuthError('u').transient).toBe(false);
+      expect(new PlanForbiddenError('u').transient).toBe(false);
       expect(new PlanUnreachableError('u').transient).toBe(true);
     });
   });

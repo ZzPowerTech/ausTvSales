@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PlanApiClient } from '../instrumentation/plan-api.client';
 import {
   PlanAuthError,
+  PlanForbiddenError,
   PlanHttpError,
   PlanMalformedResponseError,
   PlanNotConfiguredError,
@@ -283,6 +284,12 @@ function classify(error: unknown): MetricsFailureReason | null {
   }
   if (error instanceof PlanAuthError) {
     return 'auth';
+  }
+  // Before `PlanHttpError` and separate from `auth`: a 403 here is most often a
+  // server name Plan does not recognise or its IP whitelist, neither of which is
+  // a credential problem. See `PlanForbiddenError`.
+  if (error instanceof PlanForbiddenError) {
+    return 'forbidden';
   }
   if (error instanceof PlanMalformedResponseError) {
     return 'malformed';

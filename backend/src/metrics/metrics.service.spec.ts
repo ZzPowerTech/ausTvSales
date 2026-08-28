@@ -1,7 +1,10 @@
 import { NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PlanApiClient } from '../instrumentation/plan-api.client';
-import { PlanUnreachableError } from '../instrumentation/plan-api.errors';
+import {
+  PlanForbiddenError,
+  PlanUnreachableError,
+} from '../instrumentation/plan-api.errors';
 import { PlanServersConfig } from '../instrumentation/plan-servers.config';
 import { MetricsService } from './metrics.service';
 import { PlanCache } from './plan-cache';
@@ -201,6 +204,26 @@ describe('MetricsService', () => {
       expect(body.freshness.reason).toBe('unreachable');
       expect(JSON.stringify(body)).not.toContain('198.51.100.7');
       expect(JSON.stringify(body)).not.toContain('25504');
+    });
+
+    it('reports a 403 as `forbidden`, never as `auth`', async () => {
+      // The consumer-visible half of the 401/403 split. `auth` tells whoever
+      // reads it to go look at the credential; against this Plan a 403 is far
+      // more likely to be the IP whitelist or a server name it does not know,
+      // and `/v1/whoami` reports `authRequired: false`, so there is no
+      // credential to be wrong in the first place.
+      const getJson = jest
+        .fn()
+        .mockRejectedValue(
+          new PlanForbiddenError('http://198.51.100.7:25504/v1/serverOverview'),
+        );
+
+      const { body } = await build(getJson).serverOverview('Survival');
+
+      expect(body.freshness.reason).toBe('forbidden');
+      // Still a closed label: the enumeration of candidates lives in the log,
+      // not in a body that names the Plan host back to a browser.
+      expect(JSON.stringify(body)).not.toContain('198.51.100.7');
     });
 
     it('distinguishes a contract change from an outage', async () => {
