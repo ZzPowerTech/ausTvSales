@@ -425,11 +425,72 @@ existe para impedir.
 
 ### S8.1 — Módulo `funnel` · 8 SP · `feat/api-funnel`
 
-1. Série diária e mensal de `rede → survival → tutorial_entrou → tutorial_concluiu`
-2. Cada degrau segmentável por `platform` (ADR-003, direto do UUID)
-3. **`n` retornado junto de todo percentual** — o contrato não permite percentual sem base
-4. Período sem dados → "sem dados" explícito, distinto de zero
-5. Agregação pesada em job **fora do pico**; falha mantém último resultado válido, datado
+1. [~] Série diária e mensal de `rede → survival → tutorial_entrou → tutorial_concluiu` — **três dos
+   quatro degraus**. O `survival` está no contrato de todo bucket, mas sem números e **com o motivo
+   escrito**; ver o bloco abaixo
+2. [x] Cada degrau segmentável por `platform` (ADR-003, direto do UUID) — exigiu ler
+   `plan_users.uuid`, uma **extensão da exceção 2 do ADR-002** registrada lá e pendente do dono
+3. [x] **`n` retornado junto de todo percentual** — imposto pela *forma*: `percent` e `n` são um par
+   que existe ou não existe junto, então publicar razão sem base é irrepresentável, não apenas
+   desencorajado
+4. [x] Período sem dados → "sem dados" explícito, distinto de zero — e a distinção vai além do
+   bucket: `sources` reporta cada store separadamente, então um apagão de banco não se parece com
+   um período vazio
+5. [~] Agregação pesada em job **fora do pico**; falha mantém último resultado válido, datado — ver
+   a justificativa abaixo
+
+> #### ⚠️ O degrau `survival` ficou sem série diária, e isso é uma lacuna real
+>
+> É o degrau cuja descoberta abriu o épico — **54% de quem conecta na rede nunca chega ao
+> survival** —, então vale dizer alto em vez de deixar alguém notar.
+>
+> Uma **série diária** de chegadas a um backend precisa de uma de duas fontes, e nenhuma está ao
+> alcance desta história:
+>
+> 1. **`/v1/graph?type=uniqueAndNew`** — o endpoint certo, mas **ninguém observou o payload dele**.
+>    Escrever parser contra forma imaginada é o erro que fez a S6.2 ser escrita, mergeada e
+>    revertida, e é a regra sob a qual os adapters da S7.2 foram construídos.
+> 2. **`plan_user_info`**, que registra a entrada por servidor — mas essa tabela é a **exceção 1** do
+>    ADR-002, escopada ao módulo de coorte da **S8.2**. Puxá-la aqui seria alargar uma exceção que
+>    pertence a outra história.
+>
+> **O sinal não sumiu do sistema, só desta série:** a conversão rede→servidor em janela de 7 dias
+> existe e é vigiada continuamente pelo check `funnel.network_to_survival` desde a S6.3.
+>
+> Fechar isto é observar o corpo do `/v1/graph` numa instância viva — trabalho de minutos com acesso,
+> impossível sem ele.
+>
+> #### Sobre o critério 5: metade entregue, metade não
+>
+> O critério pressupõe agregação pesada. Medida, não é: `plan_users` tinha **5.566 linhas no total**
+> em 2026-08-23, e toda leitura é ainda janelada em cima disso. Um ETL noturno para alguns milhares
+> de linhas seria cerimônia — e acrescentaria uma defasagem própria a um número que hoje é vivo.
+>
+> Das duas metades do critério:
+>
+> - **"fora do pico"** → ✅ o que ele protege é entregue de outro jeito: a janela é limitada a 366
+>   **dias** e o corte acontece **antes** de qualquer fonte ser consultada, então nenhum pedido
+>   consegue alargar a varredura na máquina do jogo.
+> - **"falha mantém último resultado válido, datado"** → ❌ **não entregue.** Uma fonte que falha
+>   devolve `null` com rótulo fechado, não o último valor bom. Isso é degradação honesta, que é
+>   outra coisa. A capacidade existe no repo — `PlanCache` (`outcome: 'stale'` + a idade real),
+>   construída na S7.2 exatamente para isto — e ligar o funil nela é o próximo passo óbvio.
+
+> #### E o item 1 do DoD da S8 não é verificável hoje, nas **duas** metades
+>
+> *"Funil reproduz os números conhecidos: ~54% rede→survival, ~100% de entrada no tutorial antes de
+> dez/2025."*
+>
+> - **~54% rede→survival** — o degrau `survival` não tem série diária (bloco acima).
+> - **~100% antes de dez/2025** — igualmente impossível, e por um motivo diferente: `plan_users`
+>   **perdeu o histórico do proxy** na unificação de 2026-08-20 (`HANDOFF.md`, "Restrição nova para
+>   o baseline da campanha"). Não há denominador de rede anterior a essa data, então a taxa de
+>   dez/2025 não tem como ser calculada a partir desta fonte.
+>
+> O funil **não finge** conseguir: buckets anteriores à cobertura de `plan_users` saem com `rede:
+> null` e motivo, nunca com um zero medido. Sem essa guarda, o período default mensal publicaria
+> doze meses de `rede: 0` ao lado de números reais de tutorial — um funil onde mais gente entra no
+> tutorial do que conecta na rede.
 
 ### S8.2 — Retenção D1/D7/D30 por coorte e plataforma · 5 SP · `feat/api-cohort-retention`
 

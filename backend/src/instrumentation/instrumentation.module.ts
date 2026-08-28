@@ -127,6 +127,10 @@ import { VersionDivergenceCheck } from './version-divergence.check';
     // absent from every count — and absence reads as fine.
     HEALTH_CHECKS,
     PlanServersConfig,
+    // Exported for the S8.1 funnel, whose network step is `plan_users`. Keeping
+    // the single MySQL connection in this module is limit 3 of ADR-002's
+    // exception 2 — the funnel borrows the class rather than opening its own.
+    PlanDatabase,
   ],
 })
 export class InstrumentationModule {}

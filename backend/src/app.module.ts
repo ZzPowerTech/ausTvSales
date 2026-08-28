@@ -10,6 +10,7 @@ import { HealthModule } from './health/health.module';
 import { InstrumentationModule } from './instrumentation/instrumentation.module';
 import { ItemsModule } from './items/items.module';
 import { MetricsModule } from './metrics/metrics.module';
+import { FunnelModule } from './funnel/funnel.module';
 import { TutorialModule } from './tutorial/tutorial.module';
 import { SalesModule } from './sales/sales.module';
 
@@ -43,6 +44,9 @@ import { SalesModule } from './sales/sales.module';
     // tutorial, entao este modulo le os arquivos do proprio plugin Quests e e a
     // unica origem de dois dos quatro degraus do funil da secao 6.2.
     TutorialModule,
+    // Funil de 4 degraus (S8.1, secao 6.2). Le o PlanDatabase e o TutorialStore;
+    // nao escreve nada e nao agenda nada.
+    FunnelModule,
     CategoriesModule,
     ItemsModule,
     SalesModule,

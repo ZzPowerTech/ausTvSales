@@ -132,6 +132,27 @@ para o proxy, e `serverOverview` do proxy vem com `numbers: {}`.
 Só duas colunas são lidas: `registered` e a contagem de linhas. `plan_users` é
 tabela de identidade — das mais estáveis do schema do Plan.
 
+> #### ⚠️ Extensão de 2026-08-28 — `plan_users.uuid`, para a S8.1
+>
+> **Decisão do dono pendente.** Implementada e sinalizada em vez de feita em silêncio, porque o
+> limite 1 abaixo diz que qualquer alargamento pertence a esta seção.
+>
+> **O que muda:** o funil da S8.1 lê uma **terceira coluna**, `uuid`, de uma tabela que esta mesma
+> exceção já abriu.
+>
+> **Por quê, e por que não dava para evitar:** o spec pede duas coisas que só se satisfazem juntas.
+> A §6.2 exige cada degrau **segmentável por `platform`**, e o ADR-003 diz que `platform` é
+> **derivada do UUID** — por desenho, porque derivá-la de outro jeito exigiria plugin (e foi o que
+> cancelou uma sprint inteira). Um funil que honra a §6.2 tem de ler o uuid. A alternativa é
+> entregar o degrau de rede sem segmentação por plataforma, o que reprova o critério 2 da S8.1.
+>
+> **O que isto não é:** tabela nova. O acesso continua `SELECT` no mesmo usuário read-only, e o
+> uuid é consumido por `platformOf` e **descartado dentro da agregação** — nada identificável chega
+> ao contrato nem é persistido, o que a §8 exige.
+>
+> **Custo:** três colunas em vez de duas, na tabela mais estável do schema do Plan. Se o dono
+> preferir não abrir, o degrau de rede sai sem plataforma e o critério 2 fica parcial.
+
 **Limites, que fazem parte da decisão:**
 
 1. **Duas tabelas, e apenas estas: `plan_servers` e `plan_users`.** Qualquer outra
