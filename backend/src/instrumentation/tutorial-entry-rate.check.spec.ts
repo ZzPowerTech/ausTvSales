@@ -52,7 +52,7 @@ function storeWith({
           : { id: 1, ranAt: new Date(Date.now() - syncAgeMs), status: 'ok' },
       ),
     ),
-    enteredSince: jest.fn(() =>
+    enteredBetween: jest.fn(() =>
       enteredThrows
         ? Promise.reject(new Error('postgres fora do ar'))
         : Promise.resolve(entered),
@@ -124,21 +124,58 @@ describe('TutorialEntryRateCheck', () => {
   });
 
   describe("a stale numerator is reported as OUR failure, not the tutorial's", () => {
-    it('errors when the ETL has not succeeded within the window', async () => {
-      // The trap this check is most exposed to: the denominator is fetched live
-      // and the numerator is whatever the last nightly ETL wrote. A frozen
-      // numerator over a growing denominator is a ratio that falls on its own —
-      // it would fire this alert, blame the tutorial, and be wrong.
+    it('errors after ONE missed night, not after a whole window', async () => {
+      // The tolerance is sized to the ETL's period, and getting that wrong is
+      // the defect the first version of this check shipped with. Allowing the
+      // source to age a full 7 days let the ratio decay almost to zero — and
+      // fire, blaming the tutorial — before the guard ever closed. The nightly
+      // cron leaves the series ~24h old at worst, so 36h names one missed night.
       const [observation] = await build(
         planWith(overview(100)),
-        storeWith({ entered: 90, syncAgeMs: 9 * MS_PER_DAY }),
+        storeWith({ entered: 90, syncAgeMs: 40 * 3_600_000 }),
       ).run();
 
       expect(observation.status).toBe('error');
       expect(observation.detail.summary).toContain('ETL do tutorial');
-      expect(observation.detail.summary).toContain('9 dia');
+      expect(observation.detail.summary).toContain('40h');
       // No ratio at all: publishing one from a frozen source is the mistake.
       expect(observation.detail.observed).toBeUndefined();
+    });
+
+    it('does NOT publish a decayed ratio at four days stale', async () => {
+      // The exact scenario the review reproduced against the first version: the
+      // ETL has been dead four nights, the tutorial is perfectly healthy, and
+      // the check published `breached` at 50% citing the eight-month outage.
+      // The alert was real, the blame was wrong, and the tolerance was why.
+      const [observation] = await build(
+        planWith(overview(100)),
+        storeWith({ entered: 50, syncAgeMs: 4 * MS_PER_DAY }),
+      ).run();
+
+      expect(observation.status).toBe('error');
+      expect(observation.status).not.toBe('breached');
+      expect(observation.detail.summary).not.toContain('8 meses');
+    });
+
+    it('accepts a normal overnight age', async () => {
+      // A 25-hour-old series is what a healthy nightly cron looks like just
+      // before the next run. Refusing it would make the check permanently mute.
+      const [observation] = await build(
+        planWith(overview(100)),
+        storeWith({ entered: 90, syncAgeMs: 25 * 3_600_000 }),
+      ).run();
+
+      expect(observation.status).toBe('ok');
+    });
+
+    it('honours a configured tolerance', async () => {
+      const [observation] = await build(
+        planWith(overview(100)),
+        storeWith({ entered: 90, syncAgeMs: 40 * 3_600_000 }),
+        { TUTORIAL_MAX_SYNC_AGE_HOURS: 72 },
+      ).run();
+
+      expect(observation.status).toBe('ok');
     });
 
     it('errors when the ETL has never succeeded', async () => {
@@ -177,6 +214,52 @@ describe('TutorialEntryRateCheck', () => {
       await build(plan, storeWith({ syncAgeMs: null })).run();
 
       expect(getJson).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('the two sides are counted over the same span', () => {
+    it('asks for a CLOSED seven-day range, not an open one', async () => {
+      // The open `>= fromDay` counted eight calendar days against a seven-day
+      // denominator — a systematic +14% on the numerator, in the direction that
+      // HIDES a breach: a true 62% published as ~71% and reported `ok`.
+      const enteredBetween = jest.fn(() => Promise.resolve(90));
+      const store = {
+        lastSuccessfulSync: jest.fn(() =>
+          Promise.resolve({ id: 1, ranAt: new Date(), status: 'ok' }),
+        ),
+        enteredBetween,
+      } as unknown as TutorialStore;
+
+      await build(planWith(overview(100)), store).run();
+
+      const [from, to] = enteredBetween.mock.calls[0] as unknown as [
+        string,
+        string,
+      ];
+      const spanDays =
+        (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) /
+          MS_PER_DAY +
+        1;
+      // Both ends inclusive, so the span is exactly the window.
+      expect(spanDays).toBe(7);
+    });
+
+    it('names the population skew instead of publishing a tidy 130%', async () => {
+      // The numerator is network-wide and the denominator is per-server, so the
+      // ratio can exceed 100%. Printing "130% entraram no tutorial" as if it
+      // were a clean reading is the kind of number this project has been burned
+      // by three times. Still `ok` — entry is plainly not collapsing.
+      const [observation] = await build(
+        planWith(overview(100)),
+        storeWith({ entered: 130 }),
+      ).run();
+
+      expect(observation.status).toBe('ok');
+      expect(observation.detail.summary).toContain('acima de 100%');
+      expect(observation.detail.summary).toContain('mesma populacao');
+      // The raw numbers still travel, so the reader can judge for themselves.
+      expect(observation.detail.n).toBe(100);
+      expect(observation.detail.context?.entraram_no_tutorial).toBe(130);
     });
   });
 

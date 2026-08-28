@@ -67,7 +67,7 @@ function buildCheck(): TutorialEntryRateCheck {
         status: 'ok',
       }),
     ),
-    enteredSince: jest.fn(() => Promise.resolve(FORCED_ENTERED)),
+    enteredBetween: jest.fn(() => Promise.resolve(FORCED_ENTERED)),
   } as unknown as TutorialStore;
 
   return new TutorialEntryRateCheck(plan, SERVERS, store, {

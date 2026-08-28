@@ -187,19 +187,33 @@ export class TutorialStore {
   }
 
   /**
-   * Entrants in the last `days` days, counting today.
+   * Entrants in a **closed** day range, both ends inclusive.
    *
    * Serves the seventh check, whose numerator is a windowed count rather than a
    * series. Summed in Postgres instead of in the process: the check runs on a
    * schedule of minutes and has no use for the individual days.
+   *
+   * ## Why both ends, and not an open `>= fromDay`
+   *
+   * The open version silently counted **eight** calendar days for a seven-day
+   * window — `fromDay` inclusive through today, with no upper bound — against a
+   * denominator that really was seven. A systematic +14% on the numerator, in
+   * the direction that **hides** a breach: a true 62% published as ~71% and
+   * reported `ok`.
+   *
+   * A ratio whose two sides are counted over different spans is the composition
+   * that produced three of the five errors catalogued in `HANDOFF.md`. The range
+   * is closed so the caller has to name both ends and cannot drift.
    */
-  async enteredSince(fromDay: string): Promise<number> {
+  async enteredBetween(fromDay: string, toDay: string): Promise<number> {
     const [row] = await this.db
       .select({
         total: sql<string>`coalesce(sum(${tutorialDaily.entered}), 0)`,
       })
       .from(tutorialDaily)
-      .where(gte(tutorialDaily.day, fromDay));
+      .where(
+        and(gte(tutorialDaily.day, fromDay), lte(tutorialDaily.day, toDay)),
+      );
 
     // `sum()` comes back as a string from pg for bigint results; Number() on a
     // missing row would be NaN, so the coalesce above is load-bearing.

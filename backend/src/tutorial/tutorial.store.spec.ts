@@ -202,19 +202,23 @@ describe('TutorialStore', () => {
     });
   });
 
-  describe('enteredSince', () => {
+  describe('enteredBetween', () => {
     it('reads the summed total, which pg returns as a string', async () => {
       // `sum()` comes back as a string for bigint results. Number() on it is the
       // whole point of the coalesce in the query.
       db.select.mockReturnValue(chain([{ total: '4212' }]).proxy);
 
-      await expect(store.enteredSince('2026-03-01')).resolves.toBe(4212);
+      await expect(
+        store.enteredBetween('2026-03-01', '2026-03-07'),
+      ).resolves.toBe(4212);
     });
 
     it('returns 0 rather than NaN when the query yields no row', async () => {
       db.select.mockReturnValue(chain([]).proxy);
 
-      await expect(store.enteredSince('2026-03-01')).resolves.toBe(0);
+      await expect(
+        store.enteredBetween('2026-03-01', '2026-03-07'),
+      ).resolves.toBe(0);
     });
   });
 

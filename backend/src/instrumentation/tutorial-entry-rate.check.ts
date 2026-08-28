@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { TutorialStore } from '../tutorial/tutorial.store';
 import { toSaoPauloDay } from '../tutorial/tutorial-day';
@@ -24,6 +24,27 @@ const DEFAULT_MIN_ENTRY_RATE = 0.7;
 const DEFAULT_MIN_SAMPLE = 20;
 
 /**
+ * How stale the tutorial series may be before the ratio is refused.
+ *
+ * **Sized to the ETL's period, not to the comparison window**, and the first
+ * version of this check got that wrong in a way that mattered. It allowed the
+ * source to be as old as the window itself, on the reasoning that "a series
+ * older than seven days cannot describe a seven-day window". True, but far too
+ * late: the numerator freezes while `fromDay` advances every night, so the ratio
+ * **decays continuously from the very first missed run** — by the time seven
+ * days have passed, most of the decay has already happened and the alert has
+ * already fired blaming the tutorial. That is precisely the trap this check
+ * documents itself as avoiding.
+ *
+ * The nightly cron leaves the series at most ~24h old in normal operation, so 36
+ * hours means **one missed night is named**, which is the right moment: a
+ * stopped ETL is a problem in its own right, and every hour past it makes the
+ * ratio more wrong.
+ */
+const DEFAULT_MAX_SYNC_AGE_HOURS = 36;
+const MS_PER_HOUR = 3_600_000;
+
+/**
  * How many newcomers to the server actually start the tutorial? (spec §6.1)
  *
  * ## The seventh check, and the one that matters most
@@ -41,6 +62,41 @@ const DEFAULT_MIN_SAMPLE = 20;
  *   rebuilds nightly from the game machine's `Quests/playerdata`.
  * - **Denominator** — server arrivals, from `serverOverview.last_7_days`, over
  *   the API (the ADR-002 default path).
+ *
+ * ## ⚠️ The two sides do not count exactly the same population
+ *
+ * Stated rather than smoothed over, because a ratio built from two series of
+ * different provenance is the composition that produced errors 1, 2 and 3 of the
+ * five in `HANDOFF.md` — and the lesson written there ("a series derived from a
+ * plugin measures that plugin, not reality") applies to this check as much as to
+ * anything it watches.
+ *
+ * | | numerator | denominator |
+ * |---|---|---|
+ * | source | `Quests/playerdata` via ETL | Plan `/v1/serverOverview` |
+ * | scope | the **network** | **this backend** |
+ * | who counts | anyone whose earliest tutorial `started-date` falls in the window | players new to this server in the window |
+ * | window | 7 calendar days, America/Sao_Paulo | Plan's rolling `last_7_days` |
+ *
+ * In practice the two nearly coincide, because a player's earliest tutorial
+ * start is normally the week they arrived and the tutorial belongs to Survival.
+ * But they can diverge — a player who reached the network earlier and only now
+ * got to the tutorial counts in the numerator and not the denominator — and the
+ * ratio **can exceed 100%**. When it does, the verdict says so in words instead
+ * of publishing a tidy-looking percentage.
+ *
+ * The calendar-day/rolling-window mismatch at the boundary is the same known
+ * imprecision `network-to-survival.check` records: small on a weekly window and
+ * constant across cycles, so trend movement stays meaningful while the absolute
+ * number should not be quoted to the decimal.
+ *
+ * ## One numerator, N backends
+ *
+ * The numerator is network-wide and is divided by **each** configured backend.
+ * That is sound while the tutorial belongs to one server, which is the case
+ * today (§6.1 words the check as `novatos_no_survival`). Configure a second
+ * backend and the same entrants are counted against both — so the check logs a
+ * warning rather than quietly publishing two ratios that share a numerator.
  *
  * ## A stale numerator is worse than a missing one, and is the trap here
  *
@@ -81,8 +137,12 @@ const DEFAULT_MIN_SAMPLE = 20;
 export class TutorialEntryRateCheck implements HealthCheck {
   readonly name = HealthCheckName.TutorialEntryRate;
 
+  private readonly logger = new Logger(TutorialEntryRateCheck.name);
   private readonly minEntryRate: number;
   private readonly minSample: number;
+  private readonly maxSyncAgeMs: number;
+  /** So the fan-out warning is said once, not on every cycle. */
+  private warnedAboutFanOut = false;
 
   constructor(
     private readonly plan: PlanApiClient,
@@ -95,6 +155,9 @@ export class TutorialEntryRateCheck implements HealthCheck {
       DEFAULT_MIN_ENTRY_RATE;
     this.minSample =
       config.get<number>('FUNNEL_MIN_SAMPLE') ?? DEFAULT_MIN_SAMPLE;
+    this.maxSyncAgeMs =
+      (config.get<number>('TUTORIAL_MAX_SYNC_AGE_HOURS') ??
+        DEFAULT_MAX_SYNC_AGE_HOURS) * MS_PER_HOUR;
   }
 
   async run(): Promise<HealthCheckObservation[]> {
@@ -103,9 +166,26 @@ export class TutorialEntryRateCheck implements HealthCheck {
       return [];
     }
 
-    const windowStart = Date.now() - WINDOW_DAYS * MS_PER_DAY;
-    const fromDay = toSaoPauloDay(windowStart);
-    if (fromDay === null) {
+    if (backends.length > 1 && !this.warnedAboutFanOut) {
+      // Once, not per cycle: this is a configuration observation, and repeating
+      // it every fifteen minutes would train whoever reads the log to skip it.
+      this.warnedAboutFanOut = true;
+      this.logger.warn(
+        `${backends.length} backends configurados, mas o numerador do tutorial e ` +
+          'de REDE — as mesmas entradas serao divididas por cada servidor. A ' +
+          'secao 6.1 redige este check como `novatos_no_survival`; enquanto o ' +
+          'tutorial pertencer a um servidor so, a razao dos demais nao significa ' +
+          'nada.',
+      );
+    }
+
+    const now = Date.now();
+    // `WINDOW_DAYS - 1` because both ends are inclusive: today minus six, through
+    // today, is seven calendar days. Subtracting the full seven would count
+    // eight and inflate the numerator against a seven-day denominator.
+    const fromDay = toSaoPauloDay(now - (WINDOW_DAYS - 1) * MS_PER_DAY);
+    const toDay = toSaoPauloDay(now);
+    if (fromDay === null || toDay === null) {
       // Unreachable in practice — `Date.now()` is always a usable epoch — but
       // returning a verdict beats letting a null flow into a query.
       return backends.map((server) =>
@@ -128,7 +208,7 @@ export class TutorialEntryRateCheck implements HealthCheck {
           this.errorFor(server, sourceAge.problem as string),
         );
       }
-      entered = await this.tutorial.enteredSince(fromDay);
+      entered = await this.tutorial.enteredBetween(fromDay, toDay);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       return backends.map((server) =>
@@ -147,10 +227,17 @@ export class TutorialEntryRateCheck implements HealthCheck {
   /**
    * Is the tutorial series recent enough to be compared against a live number?
    *
-   * Returns a `problem` string when it is not. The tolerance is the window
-   * itself: a series older than seven days cannot describe a seven-day window,
-   * and comparing it against a live denominator would manufacture a falling
-   * ratio out of a stopped job.
+   * Returns a `problem` string when it is not. The tolerance is the **ETL's
+   * period**, not the comparison window — see {@link DEFAULT_MAX_SYNC_AGE_HOURS}
+   * for why the difference is the whole point.
+   *
+   * ## What this does NOT catch, stated because the ADR introduced it
+   *
+   * It measures when the ETL last *ran successfully*, not how fresh the files it
+   * read were. ADR-0004 recommends `rsync`, so a nightly ETL over a mirror that
+   * stopped updating has a fresh `ranAt` and a frozen numerator, and sails
+   * through here. Closing that needs a freshness signal from the copy itself,
+   * which the ADR leaves as an operations decision.
    */
   private async tutorialFreshness(): Promise<SourceFreshness> {
     const last = await this.tutorial.lastSuccessfulSync();
@@ -164,14 +251,15 @@ export class TutorialEntryRateCheck implements HealthCheck {
     }
 
     const ageMs = Date.now() - last.ranAt.getTime();
-    const ageDays = Math.floor(ageMs / MS_PER_DAY);
-    if (ageMs > WINDOW_DAYS * MS_PER_DAY) {
+    if (ageMs > this.maxSyncAgeMs) {
+      const ageHours = Math.floor(ageMs / MS_PER_HOUR);
+      const toleranceHours = Math.floor(this.maxSyncAgeMs / MS_PER_HOUR);
       return {
         problem:
-          `o ETL do tutorial nao roda com sucesso ha ${ageDays} dia(s), mais que a ` +
-          `janela de ${WINDOW_DAYS} — um numerador congelado contra um denominador ` +
-          'vivo produz uma taxa que cai sozinha, e o problema seria a medicao, ' +
-          'nao o tutorial.',
+          `o ETL do tutorial nao roda com sucesso ha ${ageHours}h (tolerancia ` +
+          `${toleranceHours}h) — a serie congela enquanto a janela anda, entao a ` +
+          'taxa cai sozinha a partir da primeira noite perdida. O problema aqui e ' +
+          'a medicao, nao o tutorial.',
       };
     }
 
@@ -271,6 +359,27 @@ export class TutorialEntryRateCheck implements HealthCheck {
             `${percent}% das ${arrivals} chegadas em ${server.name} entraram no ` +
             `tutorial em ${WINDOW_DAYS} dias (minimo ${thresholdPercent}%) — ` +
             'foi assim que o tutorial parou de capturar novatos por 8 meses',
+        },
+      };
+    }
+
+    if (rate > 1) {
+      // Above 100% the two sides have visibly stopped describing the same
+      // population, and saying "130% entraram no tutorial" as if it were a clean
+      // reading is the kind of number this project has been burned by. Still
+      // `ok` — whatever else is true, entry is not collapsing — but the summary
+      // names the skew instead of dressing it as a result.
+      return {
+        checkName,
+        status: 'ok',
+        detail: {
+          ...common,
+          summary:
+            `${entered} entradas no tutorial contra ${arrivals} chegadas em ` +
+            `${server.name} em ${WINDOW_DAYS} dias — razao acima de 100%, o que ` +
+            'significa que os dois lados nao estao contando a mesma populacao ' +
+            '(o numerador e de rede e o denominador e deste servidor). Entrada ' +
+            'nao esta caindo; a razao e que nao deve ser lida como percentual.',
         },
       };
     }

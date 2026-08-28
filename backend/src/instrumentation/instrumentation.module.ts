@@ -24,9 +24,9 @@ import { VersionDivergenceCheck } from './version-divergence.check';
  * answers "is the *measurement* of the game network still happening?" — the
  * question nobody was asking while the proxy sat dead for three months.
  *
- * **Code-complete** as of story S6.3: persistence, alert policy, Discord
+ * **Code-complete** as of story S8.0: persistence, alert policy, Discord
  * alerter, Plan transport, the two adapters, the runner, the scheduler, and
- * **six of the seven checks** of spec §6.1.
+ * **all seven checks** of spec §6.1.
  *
  * Code-complete is the whole claim, and the distinction is the one this epic is
  * about. Criterion 4 of S6.3 — *"verified by taking an instance down on
@@ -35,17 +35,18 @@ import { VersionDivergenceCheck } from './version-divergence.check';
  * piece below is assembled and unit-tested; none of it has been observed
  * end-to-end. See `.specs/features/austv-admin/S6-VERIFICACAO.md`.
  *
- * The seventh, `funnel.tutorial_entry_rate`, is absent because Plan **collects
+ * ## The seventh arrived late, and why
+ *
+ * `funnel.tutorial_entry_rate` was left out of S6.3 because Plan **collects
  * nothing about the tutorial** — the numbers in `HANDOFF.md` came from reading
  * `Quests/playerdata/*.yml` on the game machine, which no API, no MySQL and no
- * PostgreSQL can reach. The owner chose option 3 on 2026-08-23: ship the six
- * that have a source and give the seventh its own story, **S8.0**, which starts
- * by choosing the source.
+ * PostgreSQL could reach. The owner chose option 3 on 2026-08-23: ship the six
+ * that had a source, and give the seventh its own story.
  *
- * That leaves the longest outage this server ever recorded — the tutorial stopped
- * capturing newcomers in dec/2025 and nobody noticed for eight months — without
- * an automatic alert until S8.0 lands. A trade-off taken with that fact in view,
- * not an omission.
+ * That story, **S8.0**, built the source (ADR-0004: a nightly ETL over those
+ * files), and the check joined on 2026-08-28. Until then the longest outage this
+ * server ever recorded — the tutorial silently not capturing newcomers for eight
+ * months — had no automatic alert at all. It does now.
  */
 // `ScheduleModule.forRoot()` moved to `AppModule` in S8.0, when a second module
 // needed a scheduler and calling it twice turned out to duplicate every
@@ -53,8 +54,13 @@ import { VersionDivergenceCheck } from './version-divergence.check';
 // injectable here; it just must be rooted exactly once.
 @Module({
   // The seventh check reads `TutorialStore`. That is the one place this module
-  // depends on the S8.0 source, and it is a one-way edge: `TutorialModule` knows
-  // nothing about the health layer.
+  // depends on the S8.0 source.
+  //
+  // Not a DI cycle, though not quite a one-way edge either: `tutorial-aggregate`
+  // imports `platformOf` from this directory. That file is a pure function with
+  // no imports of its own — ADR-003's UUID rule, which lives here for historical
+  // reasons rather than architectural ones — so nothing circular can form. Worth
+  // saying because "one-way" would have been the tidier claim and the false one.
   imports: [TutorialModule],
   providers: [
     HealthCheckScheduler,

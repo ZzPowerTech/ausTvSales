@@ -394,25 +394,32 @@ Cada check roda periodicamente e **alerta ativamente no Discord** quando falha.
 | Registro vivo no proxy | nenhum `plan_users.registered` novo em 24h — o check lê `PlanDatabase.networkArrivals()`, **não** `/v1/graph?type=uniqueAndNew` como o `HANDOFF.md` de 23/08 supunha | idem |
 | Instância órfã | servidor em `plan_servers` sem dado recente — ⚠️ o check **construído** reconcilia listas, não recência (ver ADR-002, exceção 2) | Plan em SQLite invisível |
 | Versões divergentes | builds diferentes entre instâncias | risco de corromper schema |
-| **Taxa de entrada no tutorial** | `novatos_no_tutorial / novatos_no_survival` cai abaixo de 70% — ⚠️ o check mede uma **janela de 7 dias**, não "3 dias consecutivos"; ver a nota | tutorial sem capturar por 8 meses |
+| **Taxa de entrada no tutorial** ⚠️ | `novatos_no_tutorial / novatos_no_survival` cai abaixo de 70% — o check mede uma **janela de 7 dias**, não "3 dias consecutivos"; ver a nota abaixo da tabela | tutorial sem capturar por 8 meses |
+| Conversão rede → survival | desvio > 15 pontos da média de 30 dias | degrau do lobby |
+| Crescimento anormal de conta offline | share de `java_offline` na rede sobe fora da faixa | tráfego de bot inflando aquisição |
 
-> ✅ **Entregue em 2026-08-28**, fechando o conjunto. Ficou de fora da S6.3 porque o Plan **não
-> coleta nada do tutorial** e o dado não estava em banco nenhum — nenhuma das duas exceções ao
-> ADR-002 ajudava. A **S8.0** construiu a fonte
+> ### ✅ O 7º check entrou em 2026-08-28, e diverge desta tabela em três pontos
+>
+> Ficou de fora da S6.3 porque o Plan **não coleta nada do tutorial** e o dado não estava em banco
+> nenhum — nenhuma das duas exceções ao ADR-002 ajudava. A **S8.0** construiu a fonte
 > ([ADR-0004](../../decisions/ADR-0004-fonte-dados-tutorial.md)): ETL noturno lendo
 > `Quests/playerdata/*.yml`, a mesma origem dos números do `HANDOFF.md`.
 >
-> **Duas diferenças entre esta linha e o código, ditas em vez de arredondadas:**
+> As divergências, ditas em vez de arredondadas — e o aviso no topo desta seção é exatamente sobre
+> isto: **a tabela é a intenção, o código é o contrato**.
 >
 > 1. **"por 3 dias" virou uma janela de 7 dias.** A cláusula existe para um único dia ruim não
 >    alertar, e foi escrita para uma métrica diária. A janela de 7 dias já suaviza isso; o que
 >    **não** existe é um contador de N avaliações consecutivas.
 > 2. **O numerador e o denominador têm relógios diferentes** — o denominador é buscado ao vivo, o
->    numerador é o que o último ETL noturno gravou. Um numerador congelado sobre um denominador
->    vivo é uma razão que cai sozinha, então a frescura do ETL é conferida **antes** da razão: fonte
->    velha vira `error` culpando o ETL, nunca `breached` culpando o tutorial.
-| Conversão rede → survival | desvio > 15 pontos da média de 30 dias | degrau do lobby |
-| Crescimento anormal de conta offline | share de `java_offline` na rede sobe fora da faixa | tráfego de bot inflando aquisição |
+>    numerador é o que o último ETL noturno gravou. Um numerador congelado sobre um denominador vivo
+>    é uma razão que **cai sozinha**, então a frescura do ETL é conferida **antes** da razão: fonte
+>    velha vira `error` culpando o ETL, nunca `breached` culpando o tutorial. A tolerância é o
+>    período do ETL (36h), não a janela — permitir a idade da janela deixaria o alerta disparar
+>    quando quase todo o estrago já aconteceu.
+> 3. **`novatos_no_survival` é o denominador, mas o numerador é de REDE.** Os dois lados não contam
+>    exatamente a mesma população, e a razão pode passar de 100%. Quando passa, o veredito diz isso
+>    em palavras em vez de publicar um percentual arrumadinho.
 
 ### 6.2 Camada 2 — Funil em camadas
 

@@ -393,6 +393,18 @@ export class EnvironmentVariables {
   @Max(1)
   FUNNEL_MIN_TUTORIAL_ENTRY_RATE?: number;
 
+  // How stale the tutorial series may be before the entry-rate check refuses to
+  // publish a ratio. Sized to the **ETL's period**, not to the comparison
+  // window: the numerator freezes while the window advances, so the ratio decays
+  // from the very first missed run. The nightly cron leaves the series at most
+  // ~24h old, so 36h names one missed night — which is the right moment, since
+  // every hour past it makes the ratio more wrong.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(720)
+  TUTORIAL_MAX_SYNC_AGE_HOURS?: number;
+
   // Master switch for the nightly rebuild. Off by default so no environment
   // starts walking the game machine's files by accident. When off, the boot
   // warns: a job that silently does not run leaves a series that looks current
