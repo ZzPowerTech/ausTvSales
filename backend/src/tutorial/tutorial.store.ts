@@ -31,6 +31,8 @@ export interface TutorialSyncRecord {
   status: 'ok' | 'error';
   filesScanned: number | null;
   filesFailed: number | null;
+  playersInTutorial: number | null;
+  daysWritten: number | null;
   questsInCatalogue: number | null;
   finalQuestId: string | null;
   detail: string | null;
@@ -41,6 +43,8 @@ export interface FailedSync {
   detail: string;
   filesScanned?: number;
   filesFailed?: number;
+  playersInTutorial?: number;
+  daysWritten?: number;
   questsInCatalogue?: number;
   finalQuestId?: string;
 }
@@ -49,6 +53,8 @@ export interface FailedSync {
 export interface SuccessfulSync {
   filesScanned: number;
   filesFailed: number;
+  playersInTutorial: number;
+  daysWritten: number;
   questsInCatalogue: number;
   finalQuestId: string;
 }
@@ -116,6 +122,8 @@ export class TutorialStore {
       detail: failure.detail,
       filesScanned: failure.filesScanned ?? null,
       filesFailed: failure.filesFailed ?? null,
+      playersInTutorial: failure.playersInTutorial ?? null,
+      daysWritten: failure.daysWritten ?? null,
       questsInCatalogue: failure.questsInCatalogue ?? null,
       finalQuestId: failure.finalQuestId ?? null,
     });

@@ -1,5 +1,5 @@
 {
-  "id": "61ff8216-2296-4a40-a7e4-892bd039b45e",
+  "id": "9da2dc0b-64ce-4ec9-b434-adfc1bf17f0e",
   "prevId": "5e47c246-c1a5-4c32-a547-844a4bf18a4f",
   "version": "7",
   "dialect": "postgresql",
@@ -526,6 +526,18 @@
         },
         "files_failed": {
           "name": "files_failed",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "players_in_tutorial": {
+          "name": "players_in_tutorial",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "days_written": {
+          "name": "days_written",
           "type": "integer",
           "primaryKey": false,
           "notNull": false

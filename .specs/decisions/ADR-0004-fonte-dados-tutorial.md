@@ -46,7 +46,12 @@ As alternativas, com o que cada uma custa:
 |---|---|---|---|
 | **1** | **ETL lendo `Quests/playerdata`** | ETL de **arquivo**, não de banco; exige que o diretório seja alcançável a partir da API | **nada — é a fonte real** |
 | 2 | Proxies do Essentials (`kit prot` = `02tutorial`, `home` ≥1 = `05tutorial`) | mais barato; os scripts do baseline já leem | são **proxies**: kit ou home obtidos por outra via inflam o número |
+| 3 | Entregar 6 dos 7 checks e adiar o do tutorial | zero agora | **já foi escolhida**, em 2026-08-23 — é o que abriu esta história. Não é mais uma opção; é o estado de que se parte |
 | 4 | Instrumentar o tutorial na origem (plugin/comando) | contraria o **ADR-007** (zero Java na v1) | reabre decisão fechada, e implanta código na produção do Minecraft |
+
+> A numeração salta de propósito e a opção 3 está listada por isso: ela existe nas quatro opções
+> originais do `HANDOFF.md`, e omiti-la faria a tabela parecer ter perdido uma linha. Escolhê-la de
+> novo seria adiar indefinidamente.
 
 ### Por que a opção 2 é recusada mesmo sendo mais barata
 
@@ -175,11 +180,25 @@ A gravação **substitui a série inteira** dentro de uma transação, e não fa
 único entrante teve o `playerdata` apagado — e como a fonte é estado atual, esse dia *deve* mudar.
 Substituir é o que torna a reconstrução fiel à fonte.
 
-**Substituir tem um risco que o `upsert` não tem, e ele é tratado:** uma varredura vazia ou parcial
-apagaria a série. Um diretório **vazio mas existente** não faz o `opendir` falhar, então o caso mais
-provável na prática — um `rsync` que ainda não rodou — seria uma limpeza silenciosa gravada como
-sucesso. O ETL recusa gravar quando lê zero arquivos, e quando lê menos da metade do último sync
-bem-sucedido.
+**Substituir tem um risco que o `upsert` não tem:** *qualquer* execução que chegue ao fim sem nada a
+escrever apaga a série e grava `ok`. Quatro acidentes levam lá, e os dois últimos mantêm
+`filesScanned` alto — por isso um piso que olhe só a entrada não os pega:
+
+| acidente | como aparece | regra que recusa |
+|---|---|---|
+| `rsync` não rodou; montagem vazia | 0 arquivos | 1 — zero nunca é varredura válida |
+| `rsync` pego no meio | poucos arquivos | 2 — abaixo de metade do último sync bom |
+| **Quests mudou o formato do arquivo** | muitos arquivos, todos ilegíveis | 3 — taxa de falha ≥ 50% |
+| **um id de quest foi renomeado** | muitos arquivos, zero jogadores no tutorial | 4 — zero contra um anterior > 0 |
+
+Um diretório **vazio mas existente** não faz o `opendir` falhar, e é o caso mais provável na prática.
+As regras 3 e 4 medem a **saída** da varredura, e existem porque a primeira versão deste ETL só
+media a entrada — e passava batido justamente nos dois acidentes que não reduzem a contagem de
+arquivos.
+
+A regra 4 precisa do valor da execução anterior, e é por isso que `players_in_tutorial` é
+**persistido** em `tutorial_syncs`, não apenas logado: "zero jogadores no tutorial" é legítimo num
+servidor novo e catastrófico neste.
 
 ### 4. Fora do pico
 
@@ -204,8 +223,10 @@ entra. É circular — assume verdadeira exatamente a proporção que o check ex
 ## Pendências que este ADR **não** decide
 
 1. **Como o diretório chega à VPS.** Recomendado `rsync`; a execução é operação.
-2. **Qual quest marca a conclusão.** O baseline aponta `33tutorial` (148 conclusões, batendo com o
-   `HANDOFF.md`), mas o id fica **configurável** em vez de fixo no código: a estrutura do tutorial é
-   fato de negócio e já mudou antes. O id efetivamente usado é publicado junto do número.
+2. **Qual quest marca a conclusão.** O baseline aponta `33tutorial` — é o passo de maior prefixo, e
+   o `HANDOFF.md` cita o mesmo id. *(O `148` que aparece ao lado dele na saída **identifica a
+   quest**; ele não valida contagem nenhuma — ver a ressalva sobre a supercontagem do script, acima
+   nesta página.)* O id fica **configurável** em vez de fixo no código: a estrutura do tutorial é
+   fato de negócio e já mudou antes. O id efetivamente usado é gravado em cada execução do ETL.
 3. **O limiar do check** (a §6.1 propõe 70% por 3 dias) entra como **chute conservador marcado como
    tal**, igual aos três da S6.3, e precisa de calibração contra o baseline.

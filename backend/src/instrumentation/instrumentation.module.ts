@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { ScheduleModule } from '@nestjs/schedule';
 import { CollectionAliveCheck } from './collection-alive.check';
 import { DiscordAlerter } from './discord-alerter';
 import { HEALTH_CHECKS } from './health-check.contract';
@@ -46,8 +45,11 @@ import { VersionDivergenceCheck } from './version-divergence.check';
  * an automatic alert until S8.0 lands. A trade-off taken with that fact in view,
  * not an omission.
  */
+// `ScheduleModule.forRoot()` moved to `AppModule` in S8.0, when a second module
+// needed a scheduler and calling it twice turned out to duplicate every
+// decorator-driven job. It registers globally, so `SchedulerRegistry` is still
+// injectable here; it just must be rooted exactly once.
 @Module({
-  imports: [ScheduleModule.forRoot()],
   providers: [
     HealthCheckScheduler,
     HealthCheckStore,

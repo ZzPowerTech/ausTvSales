@@ -35,7 +35,10 @@ class StoreSpy {
   }
 
   /** What `lastSuccessfulSync` answers. Null = no run ever succeeded. */
-  previousSync: { filesScanned: number | null } | null = null;
+  previousSync: {
+    filesScanned: number | null;
+    playersInTutorial?: number | null;
+  } | null = null;
   /** Set to make the provenance read fail, exercising the degraded path. */
   lastSyncThrows = false;
 
@@ -242,17 +245,26 @@ describe('TutorialSyncService', () => {
             [`${PREMIUM}.yml`]: playerdata({
               '01tutorial': { started: MARCH_10 },
             }),
+            '22222222-3333-4444-8555-666666666666.yml': playerdata({
+              '01tutorial': { started: MARCH_10 },
+            }),
           },
         },
         async ({ store, service }) => {
           const result = await service.sync();
 
           expect(result.status).toBe('ok');
-          expect(result.filesScanned).toBe(2);
+          expect(result.filesScanned).toBe(3);
           // Reported separately from `filesScanned`, never folded into it: a run
-          // that failed on half the corpus still produced a number, and whoever
-          // reads that number has to know its coverage.
+          // whose coverage is partial still produced a number, and whoever reads
+          // it has to know how much of the corpus it covers.
+          //
+          // Three files, not two: at two, one failure is 50% of the corpus, which
+          // the parse-failure floor now refuses outright. That refusal is the
+          // point — half the files failing is a format change, not a data point —
+          // so this fixture has to actually express "a minority failed".
           expect(result.filesFailed).toBe(1);
+          expect(store.replaced[0].sync.filesFailed).toBe(1);
           expect(store.replaced[0].rows).toHaveLength(1);
         },
       );
@@ -383,6 +395,129 @@ describe('TutorialSyncService', () => {
           // The count it did read travels with the refusal, so whoever reads the
           // provenance can tell a collapsed scan from a failed one.
           expect(store.failures[0].filesScanned).toBe(1);
+        },
+      );
+    });
+
+    it('writes nothing when every file failed to parse', async () => {
+      // The half of the hole the first fix missed. `filesScanned` stays HIGH, so
+      // an input-only floor waves this through — and it is what a Quests format
+      // change looks like. Writing the survivors' numbers as the whole corpus is
+      // how a plugin update becomes a reported collapse.
+      await withFixture(
+        {
+          players: {
+            [`${PREMIUM}.yml`]: 'quest-progress:\n  a: [1,\n',
+            [`${BEDROCK}.yml`]: 'quest-progress:\n  b: [2,\n',
+          },
+        },
+        async ({ store, service }) => {
+          const result = await service.sync();
+
+          expect(result.status).toBe('error');
+          expect(result.filesScanned).toBe(2);
+          expect(result.filesFailed).toBe(2);
+          expect(store.replaced).toEqual([]);
+          expect(store.failures[0].detail).toContain('ilegiveis');
+        },
+      );
+    });
+
+    it('tolerates a minority of unreadable files', async () => {
+      // Individual failures are normal and counted, not fatal — one corrupt file
+      // among twenty thousand says nothing about the corpus.
+      await withFixture(
+        {
+          players: {
+            [`${PREMIUM}.yml`]: playerdata({
+              '01tutorial': { started: MARCH_10 },
+            }),
+            [`${BEDROCK}.yml`]: playerdata({
+              '01tutorial': { started: MARCH_10 },
+            }),
+            '22222222-3333-4444-8555-666666666666.yml':
+              'quest-progress:\n  a: [1,\n',
+          },
+        },
+        async ({ store, service }) => {
+          const result = await service.sync();
+
+          expect(result.status).toBe('ok');
+          expect(result.filesFailed).toBe(1);
+          expect(store.replaced).toHaveLength(1);
+        },
+      );
+    });
+
+    it('writes nothing when the tutorial vanished from a healthy corpus', async () => {
+      // What a renamed quest id looks like: the catalogue loads, every file
+      // parses, and no key matches. Legitimate on a brand-new server and
+      // catastrophic on this one — only the previous run separates them, which
+      // is why `players_in_tutorial` is persisted rather than merely logged.
+      await withFixture(
+        {
+          players: {
+            [`${PREMIUM}.yml`]: playerdata({
+              diario_escavacao: { started: MARCH_10 },
+            }),
+            [`${BEDROCK}.yml`]: playerdata({
+              diario_arco: { started: MARCH_10 },
+            }),
+          },
+        },
+        async ({ store, service }) => {
+          store.previousSync = { filesScanned: 2, playersInTutorial: 10_834 };
+
+          const result = await service.sync();
+
+          expect(result.status).toBe('error');
+          expect(result.playersInTutorial).toBe(0);
+          expect(store.replaced).toEqual([]);
+          expect(store.failures[0].detail).toContain('10834');
+        },
+      );
+    });
+
+    it('allows zero tutorial players when there were none before either', async () => {
+      // A brand-new server, or one whose tutorial nobody has reached yet. The
+      // rule needs a previous non-zero to have anything to compare against.
+      await withFixture(
+        {
+          players: {
+            [`${PREMIUM}.yml`]: playerdata({
+              diario_escavacao: { started: MARCH_10 },
+            }),
+          },
+        },
+        async ({ store, service }) => {
+          store.previousSync = { filesScanned: 1, playersInTutorial: 0 };
+
+          const result = await service.sync();
+
+          expect(result.status).toBe('ok');
+          expect(store.replaced).toHaveLength(1);
+        },
+      );
+    });
+
+    it('records on the refusal how many rows it would have written', async () => {
+      // So the provenance row says how close the run came, not merely that it
+      // stopped.
+      await withFixture(
+        {
+          players: {
+            [`${PREMIUM}.yml`]: playerdata({
+              '01tutorial': { started: MARCH_10 },
+            }),
+          },
+        },
+        async ({ store, service }) => {
+          store.previousSync = { filesScanned: 19_700 };
+
+          await service.sync();
+
+          expect(store.failures[0].daysWritten).toBe(1);
+          expect(store.failures[0].playersInTutorial).toBe(1);
         },
       );
     });

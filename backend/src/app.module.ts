@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { AuthModule } from './auth/auth.module';
 import { CategoriesModule } from './categories/categories.module';
@@ -18,6 +19,13 @@ import { SalesModule } from './sales/sales.module';
       isGlobal: true,
       validate: validateEnv,
     }),
+    // Raiz UNICA do agendamento, e a unicidade e o ponto. `forRoot()` registra
+    // um SchedulerOrchestrator, e cada orchestrator varre o app inteiro pelo
+    // DiscoveryModule — chamar duas vezes faz todo @Cron/@Interval disparar em
+    // dobro (medido na S8.0, quando um segundo modulo passou a precisar de
+    // agendamento). Mesma forma do ThrottlerModule.forRoot() do PR #156, mesma
+    // resolucao: uma raiz so, na raiz da composicao.
+    ScheduleModule.forRoot(),
     DatabaseModule,
     // AuthModule registers the global deny-by-default guard, so it must be in
     // place before any feature module exposes a route.

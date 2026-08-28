@@ -244,6 +244,17 @@ export const tutorialSyncs = pgTable(
      * whoever reads that number needs to know it covers half the corpus.
      */
     filesFailed: integer('files_failed'),
+    /**
+     * Players who touched at least one tutorial quest, dated or not.
+     *
+     * Stored because it is the **output-side** number the next run compares
+     * against. A run that reads every file successfully and finds zero tutorial
+     * players is what a renamed quest id looks like, and it is indistinguishable
+     * from a real collapse unless the previous run's value is on record.
+     */
+    playersInTutorial: integer('players_in_tutorial'),
+    /** `(day, platform)` rows written. Zero is a refusal signal, not a result. */
+    daysWritten: integer('days_written'),
     /** Tutorial quests found in the catalogue directory. */
     questsInCatalogue: integer('quests_in_catalogue'),
     /** Which quest was counted as completion on this run. */

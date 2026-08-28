@@ -14,6 +14,8 @@ CREATE TABLE "tutorial_syncs" (
 	"status" text NOT NULL,
 	"files_scanned" integer,
 	"files_failed" integer,
+	"players_in_tutorial" integer,
+	"days_written" integer,
 	"quests_in_catalogue" integer,
 	"final_quest_id" text,
 	"detail" text,
