@@ -57,12 +57,34 @@ interface RawArrivalsRow extends RowDataPacket {
  * ## Why this class is allowed to exist
  *
  * ADR-002 says the API talks to `/v1/*` and never to Plan's tables. Two checks in
- * spec §6.1 cannot obey it, because Plan exposes **no catalogue of servers**:
- * `/v1/servers` and `/v1/networkOverview` both return 404 on the AusTV instance.
+ * spec §6.1 need a catalogue of servers, because without a list
+ * `plan.orphan_instance` could only ever check servers somebody already
+ * configured by hand — which certifies health for exactly the case the check
+ * exists to catch: the instance nobody knew was there.
  *
- * Without a list, `plan.orphan_instance` could only ever check servers somebody
- * already configured by hand — which certifies health for exactly the case the
- * check exists to catch: the instance nobody knew was there.
+ * ## ⚠️ The argument this exception was granted on has since been falsified
+ *
+ * The approval of 2026-08-23 rested on "Plan exposes **no** catalogue of
+ * servers", evidenced by 404s from `/v1/servers` and `/v1/networkOverview`.
+ * **Both names were wrong.** The instance's own OpenAPI, read at `/docs` on
+ * 2026-08-26, documents `GET /v1/networkMetadata` — *"metadata about the network
+ * such as list of servers"*.
+ *
+ * So this class exists on a premise that did not hold. It has **not** been
+ * removed, and that is a decision, not an oversight:
+ *
+ * 1. Nobody has read the body of `/v1/networkMetadata`. Whether it carries
+ *    `plan_version` per instance — which `plan.version_divergence` reads from
+ *    `plan_servers` today — is unknown. Swapping the source before knowing would
+ *    trade a working check for a hopeful one.
+ * 2. The same is unresolved for the `plan_users` half: `/v1/playersTable`
+ *    documents `registered` per player, but nobody checked whether it serves the
+ *    network-arrivals count these checks need.
+ *
+ * **Trigger to revisit:** read those two bodies. Until then the exception has
+ * lost its stated motive but not its function, and the honest state is to say so
+ * here rather than to leave the old justification standing. Detail in ADR-002 of
+ * the spec and in `HANDOFF.md`.
  *
  * ## The limits, which are part of the approval
  *
@@ -70,7 +92,7 @@ interface RawArrivalsRow extends RowDataPacket {
  *    `plan_user_info` and `plan_sessions` included — needs a new numbered
  *    exception in the spec, not a quiet query added here.
  * 2. **A dedicated read-only MySQL user**, separate from the plugins' user and
- *    from exception 1's. `SELECT` on this table and nothing else.
+ *    from exception 1's. `SELECT` on those two tables and nothing else.
  * 3. **This is the only place** in the NestJS app that opens a MySQL connection
  *    to the game database.
  * 4. Credentials from the environment, never versioned.
@@ -104,7 +126,8 @@ export class PlanDatabase implements OnModuleInit, OnModuleDestroy {
     if (!this.configured) {
       this.logger.warn(
         'PLAN_DB_HOST nao configurado — os checks que dependem do banco do Plan ' +
-          '(orphan_instance, version_divergence, proxy_registration_alive) vao ' +
+          '(orphan_instance, version_divergence, proxy_registration_alive e o ' +
+          'denominador de network_to_survival) vao ' +
           'reportar `error`, nunca `ok`.',
       );
       return;

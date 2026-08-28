@@ -23,15 +23,28 @@ import { VersionDivergenceCheck } from './version-divergence.check';
  * answers "is the *measurement* of the game network still happening?" — the
  * question nobody was asking while the proxy sat dead for three months.
  *
- * Grows over the story: persistence, then the Discord alerter, then the Plan
- * transport. Still missing, in order: the response shape of each `/v1` endpoint
- * (needs one observation against the live instance), the six checks that have a
- * source, and the scheduler that runs them.
+ * **Code-complete** as of story S6.3: persistence, alert policy, Discord
+ * alerter, Plan transport, the two adapters, the runner, the scheduler, and
+ * **six of the seven checks** of spec §6.1.
  *
- * The seventh check, `funnel.tutorial_entry_rate`, has **no data source at all**
- * — Plan does not collect anything about the tutorial. That is recorded in
- * `HANDOFF.md` with four options and is a decision for the owner, not a gap to
- * paper over here.
+ * Code-complete is the whole claim, and the distinction is the one this epic is
+ * about. Criterion 4 of S6.3 — *"verified by taking an instance down on
+ * purpose"* — has **never been done**: nobody has run this layer with the
+ * schedule enabled and a webhook configured and watched an alert arrive. Every
+ * piece below is assembled and unit-tested; none of it has been observed
+ * end-to-end. See `.specs/features/austv-admin/S6-VERIFICACAO.md`.
+ *
+ * The seventh, `funnel.tutorial_entry_rate`, is absent because Plan **collects
+ * nothing about the tutorial** — the numbers in `HANDOFF.md` came from reading
+ * `Quests/playerdata/*.yml` on the game machine, which no API, no MySQL and no
+ * PostgreSQL can reach. The owner chose option 3 on 2026-08-23: ship the six
+ * that have a source and give the seventh its own story, **S8.0**, which starts
+ * by choosing the source.
+ *
+ * That leaves the longest outage this server ever recorded — the tutorial stopped
+ * capturing newcomers in dec/2025 and nobody noticed for eight months — without
+ * an automatic alert until S8.0 lands. A trade-off taken with that fact in view,
+ * not an omission.
  */
 @Module({
   imports: [ScheduleModule.forRoot()],
@@ -53,12 +66,8 @@ import { VersionDivergenceCheck } from './version-divergence.check';
       // The registry the runner iterates. The runner must not know which checks
       // exist, so adding one is a line here and nothing there.
       //
-      // Six of the seven checks in spec 6.1. The seventh,
-      // `funnel.tutorial_entry_rate`, has **no data source at all** — Plan
-      // collects nothing about the tutorial, and the numbers in HANDOFF.md came
-      // from reading `Quests/playerdata/*.yml` on the game machine, which no
-      // API, no MySQL and no PostgreSQL can reach. It is a decision for the
-      // owner between the four options recorded there, not a gap to paper over.
+      // Six of the seven checks in spec 6.1; the seventh is story S8.0, for the
+      // reason given in this module's docblock.
       provide: HEALTH_CHECKS,
       useFactory: (
         collectionAlive: CollectionAliveCheck,

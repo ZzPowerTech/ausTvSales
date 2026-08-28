@@ -105,9 +105,11 @@ export class MetricsService {
   /**
    * The instances this API is configured to read.
    *
-   * Configuration rather than discovery, because Plan exposes no catalogue:
-   * `/v1/servers` and `/v1/networkOverview` both answer 404 (verified
-   * 2026-08-23). The cost is stated in `PlanServersConfig`.
+   * The **declared** inventory, not a discovery of what Plan actually runs. A
+   * caller reading this as "the servers that exist" would miss precisely the
+   * instance nobody configured — which is why `plan.orphan_instance` reconciles
+   * this list against the observed one instead of trusting it. Cost and the
+   * falsified premise behind it are stated in `PlanServersConfig`.
    */
   configuredServers(): ConfiguredServersDto {
     return {

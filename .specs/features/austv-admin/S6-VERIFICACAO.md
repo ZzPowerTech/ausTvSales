@@ -230,11 +230,18 @@ sistema — o erro que o `HANDOFF.md` já cataloga.
 1. **O docblock de `PlanServersConfig` afirma que `plan.orphan_instance` "cannot be built here".**
    Ele **foi construído** e está registrado no módulo. O texto é anterior à exceção 2 do ADR-002 e
    nunca foi atualizado.
-2. **Três arquivos ainda afirmam que o Plan não expõe lista de servidores**
-   (`plan-servers.config.ts`, `plan-database.ts`, `metrics.service.ts`) e o `.env.example` repete.
-   A premissa **caiu em 2026-08-26**: o endpoint é `/v1/networkMetadata`; `/v1/servers` e
-   `/v1/networkOverview` davam 404 por serem nomes errados. É a justificativa alegada da exceção 2,
-   e ela está sem apoio. *(O `HANDOFF.md` e o spec já registram a queda; os docblocks, não.)*
+2. **Cinco lugares ainda afirmam que o Plan não expõe lista de servidores**
+   (`plan-servers.config.ts`, `plan-database.ts`, `metrics.service.ts`, `metrics.controller.ts` e
+   `env.validation.ts`), e o `.env.example` repete. A premissa **caiu em 2026-08-26**: o endpoint é
+   `/v1/networkMetadata`; `/v1/servers` e `/v1/networkOverview` davam 404 por serem nomes errados.
+   É a justificativa alegada da exceção 2, e ela está sem apoio. *(O `HANDOFF.md` e o spec já
+   registram a queda; os docblocks, não.)*
+
+   > **Correção de 2026-08-28:** esta linha dizia "três arquivos". São cinco — e o que faltava
+   > incluía o `@ApiOperation` de `metrics.controller.ts`, que é a versão da afirmação falsa
+   > **publicada no OpenAPI**, isto é, a que um consumidor externo lê. Encontrado no code review do
+   > PR que corrigiu os outros. Auditoria que enumera fontes tem de enumerar todas; parar na
+   > terceira é a mesma classe de erro que ela veio catalogar.
 3. **O docblock de `InstrumentationModule` lista como "still missing" os seis checks e o
    agendador.** Todos existem.
 4. ~~**401 e 403 colapsados em `PlanAuthError`**, com rótulo causal errado.~~ — **corrigido**

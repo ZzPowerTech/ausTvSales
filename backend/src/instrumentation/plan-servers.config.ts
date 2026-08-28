@@ -18,27 +18,44 @@ export interface PlanServer {
 }
 
 /**
- * The Plan instances to evaluate, from configuration (story S6.3).
+ * The Plan instances this API is **expected** to see, from configuration
+ * (story S6.3).
  *
- * ## Why configuration and not discovery
+ * ## What this list is, and what it is not
  *
- * Plan exposes no endpoint that lists servers: `/v1/servers` and
- * `/v1/networkOverview` both return **404** on the AusTV instance (verified
- * 2026-08-23). The list does exist in the `plan_servers` table, but ADR-002
- * forbids this API from touching Plan's tables outside the cohort module, so
- * reading it here would need a second documented exception.
+ * It is the *declared* inventory: what a deploy says should exist. It is not a
+ * discovery mechanism and must never be mistaken for one — a server absent from
+ * here is invisible to every check that iterates it.
  *
- * Configuration is the honest middle: explicit, reviewable, and a server missing
- * from the list is a deploy mistake rather than a silent gap.
+ * That is precisely why `plan.orphan_instance` does **not** use this list as its
+ * source of truth. It reconciles this declared list against the *observed* one
+ * from `PlanDatabase.listServers()`, so the instance nobody configured is
+ * exactly what it reports. Checking the configured list against itself would
+ * certify health for the one case the check exists to catch.
  *
- * ## The cost, stated plainly
+ * ## Correction of 2026-08-26 — this docblock used to claim the opposite
  *
- * This is exactly why `plan.orphan_instance` — "a server registered in Plan with
- * no recent data" — **cannot** be built here. Detecting an instance nobody
- * configured requires the list nobody exposes. Left unimplemented rather than
- * faked against the configured list, which would only ever check servers we
- * already know about and would report a clean bill of health for the very case
- * the check exists to catch.
+ * It stated that Plan "exposes no endpoint that lists servers", citing 404s on
+ * `/v1/servers` and `/v1/networkOverview`, and concluded that
+ * `plan.orphan_instance` **could not be built**. Both halves were wrong:
+ *
+ * - The endpoint exists. It is **`GET /v1/networkMetadata`** — *"metadata about
+ *   the network such as list of servers"* — read from the instance's own OpenAPI
+ *   at `/docs`. The two names tried on 2026-08-23 were simply the wrong names.
+ * - The check was built anyway, over exception 2 of ADR-002 (`plan_servers` by
+ *   read-only SQL), and that 404 conclusion is the **justification the exception
+ *   was granted on**. The exception therefore lost its stated motive.
+ *
+ * The motive being gone is not the same as the exception being closeable: nobody
+ * has read the body of `/v1/networkMetadata`, so whether it carries
+ * `plan_version` per instance — which `plan.version_divergence` needs — is
+ * unknown. Reading it is the trigger to revisit. See ADR-002 in the spec and
+ * `HANDOFF.md`.
+ *
+ * The root error is one this project has now made five times: **concluding
+ * absence from a search that did not find**, instead of consulting the source
+ * that enumerates. It cost an exception to an ADR, opened on the argument that
+ * there was no alternative.
  */
 @Injectable()
 export class PlanServersConfig implements OnModuleInit {
