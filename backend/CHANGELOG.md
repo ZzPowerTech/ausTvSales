@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.15.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.14.0...backend-v0.15.0) (2026-08-28)
+
+
+### Features
+
+* **backend:** 7o check da secao 6.1 — funnel.tutorial_entry_rate (S8.0) ([#169](https://github.com/ZzPowerTech/ausTvSales/issues/169)) ([a59b47e](https://github.com/ZzPowerTech/ausTvSales/commit/a59b47e4d59a579cccbdf317edade2eefa35fa05))
+* **backend:** fonte de dados do tutorial e ETL idempotente (S8.0) ([#168](https://github.com/ZzPowerTech/ausTvSales/issues/168)) ([eb68df1](https://github.com/ZzPowerTech/ausTvSales/commit/eb68df1536fcbc0aab24a8804f5d846aa62da866))
+* **backend:** modulo funnel — os degraus que tem fonte, e o motivo do que nao tem (S8.1) ([#170](https://github.com/ZzPowerTech/ausTvSales/issues/170)) ([5fd7bb5](https://github.com/ZzPowerTech/ausTvSales/commit/5fd7bb56d2acf029429d6212df49295c7793d80f))
+
+
+### Bug Fixes
+
+* **backend:** 403 do Plan deixa de ser rotulado como credencial errada ([#164](https://github.com/ZzPowerTech/ausTvSales/issues/164)) ([222eb2f](https://github.com/ZzPowerTech/ausTvSales/commit/222eb2fc4ce62a84333cc7e401c2313b28019427))
+
 ## [0.14.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.13.0...backend-v0.14.0) (2026-08-26)
 
 
