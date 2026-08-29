@@ -9,7 +9,23 @@ import { Platform, platformOf } from './platform';
 import { PlanServersConfig } from './plan-servers.config';
 
 const DEFAULT_WINDOW_DAYS = 7;
-const DEFAULT_MAX_SHARE = 0.5;
+/**
+ * Ceiling for the offline share among arrivals, calibrated 2026-08-29.
+ *
+ * The first value shipped was 0.5, marked in `.env.example` as a conservative
+ * guess rather than a measurement. Production then measured it, the hard way:
+ * on 2026-08-26 the check read 51,5% (17/33), 50,0% (16/32) and 51,6% (16/31)
+ * within two hours and announced each one. The threshold had been set exactly
+ * on top of the real distribution, so a single player crossing it flipped the
+ * verdict.
+ *
+ * The reading itself is the calibration: the real share is ~51% and stable, so
+ * the ceiling belongs above the band, not inside it. 0.65 leaves roughly 14
+ * points of headroom — wide enough that ordinary variation is quiet, narrow
+ * enough that the bot-registration surge this check exists to catch (which
+ * would push the share toward 1.0, not toward 0.55) still trips it.
+ */
+const DEFAULT_MAX_SHARE = 0.65;
 /** Below this many arrivals the share is noise, not a trend. */
 const DEFAULT_MIN_SAMPLE = 20;
 const MS_PER_DAY = 86_400_000;

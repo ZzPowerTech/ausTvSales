@@ -174,21 +174,115 @@ describe('HealthCheckStore', () => {
     });
   });
 
-  describe('lastAlertAt', () => {
-    it('returns the timestamp of the most recent announced row', async () => {
+  describe('healthyStreak', () => {
+    /** Rows as the query returns them: newest first within each check. */
+    function ranked(rows: Array<[string, string]>): {
+      rows: Array<{ check_name: string; status: string; rn: number }>;
+    } {
+      const seen: Record<string, number> = {};
+      return {
+        rows: rows.map(([check_name, status]) => {
+          seen[check_name] = (seen[check_name] ?? 0) + 1;
+          return { check_name, status, rn: seen[check_name] };
+        }),
+      };
+    }
+
+    it('conta os ok consecutivos a partir do mais recente', async () => {
+      db.execute.mockResolvedValue(
+        ranked([
+          ['a', 'ok'],
+          ['a', 'ok'],
+          ['a', 'ok'],
+        ]),
+      );
+
+      await expect(store.healthyStreak()).resolves.toEqual(new Map([['a', 3]]));
+    });
+
+    it('para no primeiro veredito de falha', async () => {
+      db.execute.mockResolvedValue(
+        ranked([
+          ['a', 'ok'],
+          ['a', 'breached'],
+          ['a', 'ok'],
+        ]),
+      );
+
+      await expect(store.healthyStreak()).resolves.toEqual(new Map([['a', 1]]));
+    });
+
+    it('trata no_data como quebra de sequencia, nao como ok', async () => {
+      // Um ciclo que nao pode ser medido nao e prova de que o check esta bem.
+      db.execute.mockResolvedValue(
+        ranked([
+          ['a', 'ok'],
+          ['a', 'no_data'],
+          ['a', 'ok'],
+        ]),
+      );
+
+      await expect(store.healthyStreak()).resolves.toEqual(new Map([['a', 1]]));
+    });
+
+    it('omite um check cujo veredito mais recente nao e ok', async () => {
+      db.execute.mockResolvedValue(
+        ranked([
+          ['a', 'breached'],
+          ['a', 'ok'],
+        ]),
+      );
+
+      await expect(store.healthyStreak()).resolves.toEqual(new Map());
+    });
+
+    it('mantem cada check independente', async () => {
+      db.execute.mockResolvedValue(
+        ranked([
+          ['a', 'ok'],
+          ['a', 'ok'],
+          ['b', 'error'],
+          ['c', 'ok'],
+        ]),
+      );
+
+      await expect(store.healthyStreak()).resolves.toEqual(
+        new Map([
+          ['a', 2],
+          ['c', 1],
+        ]),
+      );
+    });
+  });
+
+  describe('lastAlert', () => {
+    it('returns the status and timestamp of the most recent announced row', async () => {
       const at = new Date('2026-08-20T12:00:00.000Z');
-      db.select.mockReturnValue(chain([{ alertedAt: at }]).proxy);
+      db.select.mockReturnValue(
+        chain([{ status: 'breached', alertedAt: at }]).proxy,
+      );
 
       await expect(
-        store.lastAlertAt(HealthCheckName.TutorialEntryRate),
-      ).resolves.toEqual(at);
+        store.lastAlert(HealthCheckName.TutorialEntryRate),
+      ).resolves.toEqual({ status: 'breached', at });
+    });
+
+    it('carries the status of an announced recovery, not just of a failure', async () => {
+      // O status e o que distingue "o canal esta segurando um problema aberto"
+      // de "o ultimo recado foi um all-clear" — a decisao inteira depende dele.
+      const at = new Date('2026-08-21T12:00:00.000Z');
+      db.select.mockReturnValue(chain([{ status: 'ok', alertedAt: at }]).proxy);
+
+      await expect(
+        store.lastAlert(HealthCheckName.TutorialEntryRate),
+      ).resolves.toEqual({ status: 'ok', at });
     });
 
     it('returns null when the check was never announced', async () => {
       db.select.mockReturnValue(chain([]).proxy);
 
       await expect(
-        store.lastAlertAt(HealthCheckName.TutorialEntryRate),
+        store.lastAlert(HealthCheckName.TutorialEntryRate),
       ).resolves.toBeNull();
     });
   });

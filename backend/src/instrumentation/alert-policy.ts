@@ -1,15 +1,21 @@
-import {
-  NOTIFIABLE_STATUSES,
-  type HealthCheckRecord,
-  type HealthCheckStatus,
-} from './health-check.types';
+import type { HealthCheckRecord, LastAlert } from './health-check.types';
 
-/** Why an observation that looked notifiable was not announced. */
+/** Why an observation that could have notified was not announced. */
 export type SuppressionReason =
-  /** Already announced recently and still in the same failing state. */
+  /** Already announced recently and still in the same state. */
   | 'grouped'
-  /** The status is not one that notifies. */
-  | 'not_notifiable';
+  /** Nothing to say: healthy, and the channel is not holding an open problem. */
+  | 'not_notifiable'
+  /**
+   * Healthy again, but not for long enough to be believed.
+   *
+   * Distinct from `not_notifiable`, and the distinction is the point: this
+   * observation **would** have been announced as a recovery under the old rule.
+   * Folding it into the generic bucket would hide how often the layer is
+   * holding an all-clear back, which is the number to watch if
+   * `confirmRecoveryAfter` is ever tuned.
+   */
+  | 'recovery_unconfirmed';
 
 export interface SuppressedObservation {
   record: HealthCheckRecord;
@@ -19,10 +25,10 @@ export interface SuppressedObservation {
 export interface AlertDecision {
   /** Failing observations that must reach Discord now. */
   announce: HealthCheckRecord[];
-  /** Checks that just returned to `ok` after having been announced as failing. */
+  /** Checks that returned to `ok` after an announced problem, and stayed. */
   recovered: HealthCheckRecord[];
   /**
-   * Checks that stopped producing data after having been announced as failing.
+   * Checks that stopped producing data after an announced failure.
    *
    * Split out of {@link recovered} deliberately. `no_data` is not a recovery: it
    * means the check went from "measured and broken" to "cannot be measured at
@@ -32,23 +38,65 @@ export interface AlertDecision {
    * rule that a collection gap is never rendered as a healthy value.
    */
   lostSignal: HealthCheckRecord[];
-  /** Notifiable observations deliberately held back, with the reason. */
+  /** Observations deliberately held back, with the reason. */
   suppressed: SuppressedObservation[];
 }
 
 export interface AlertPolicyInput {
   /** Verdicts produced by the run that just finished. */
   observations: readonly HealthCheckRecord[];
-  /** Status of each check *before* this run — absent means it never ran. */
-  previousStatus: ReadonlyMap<string, HealthCheckStatus>;
-  /** When each check was last announced — absent or null means never. */
-  lastAlertAt: ReadonlyMap<string, Date | null>;
+  /**
+   * What the channel was last told about each check — absent or null means it
+   * has never been told anything.
+   *
+   * This, and **not** the previous row of `health_checks`, is the state the
+   * policy compares against. See the function doc for why the difference is the
+   * whole fix.
+   */
+  lastAlert: ReadonlyMap<string, LastAlert | null>;
   now: Date;
   /**
-   * How long a check must stay in the same failing state before it is announced
-   * again. Guards against a three-month outage producing one message per cycle.
+   * How long a check must stay in the same announced state before it is
+   * repeated. Guards against a three-month outage producing one message per
+   * cycle.
    */
   reAlertAfterMs: number;
+  /**
+   * Consecutive healthy verdicts, per check, ending at the newest one.
+   *
+   * From `HealthCheckStore.healthyStreak()`. Absent means the check has no
+   * healthy streak to speak of.
+   */
+  healthyStreak: ReadonlyMap<string, number>;
+  /**
+   * How many consecutive healthy verdicts a recovery needs before it is
+   * announced.
+   *
+   * ## The reading that made this necessary
+   *
+   * Production, 2026-08-26. `platform.offline_account_share` produced three
+   * Discord messages in under two hours:
+   *
+   * | hora | valor | conta | veredito |
+   * |---|---|---|---|
+   * | 19:39 | 51,5% | 17/33 | breached — anunciado |
+   * | 19:54 | 50,0% | 16/32 | ok — **"normalizado" anunciado** |
+   * | 21:24 | 51,6% | 16/31 | breached — anunciado |
+   *
+   * Nothing changed on the server. With ~32 arrivals in the window a **single
+   * player** moves the ratio by three points, and the threshold sat exactly on
+   * the data. The check was reporting sampling noise as a state change, and the
+   * channel was being taught that its messages mean nothing — which is
+   * ADR-006's silence arriving as noise instead.
+   *
+   * A failure is still announced on the **first** observation: a real outage
+   * must not wait. Only the *recovery* is confirmed, because an all-clear that
+   * turns out to be wrong is worse than one that arrives a cycle late.
+   *
+   * At the default cadence of 15 minutes, 2 means a recovery is announced ~15
+   * minutes after it holds.
+   */
+  confirmRecoveryAfter: number;
 }
 
 /**
@@ -58,16 +106,40 @@ export interface AlertPolicyInput {
  * team hears about an outage, and it must be testable without a webhook, a clock
  * or a database.
  *
- * The policy balances two failure modes that are equally bad. Alerting on every
- * cycle of a long outage trains the team to mute the channel, which reproduces
- * ADR-006's silence with extra noise. Alerting only on the transition means a
- * message missed on a busy day is a message lost forever. So: announce on entry
- * into a failing state, then repeat at most once per `reAlertAfterMs`.
+ * ## The state that matters is the channel's, not the table's
+ *
+ * The obvious implementation compares each verdict against the previous row of
+ * `health_checks` and announces on every change. That is what shipped, and the
+ * production reading of 2026-08-26 showed what it costs: with the recovery held
+ * back by {@link AlertPolicyInput.confirmRecoveryAfter}, the *next* breach still
+ * looked like a fresh transition (`ok` row → `breached` row) and was announced
+ * again. Half the flap survives a hysteresis applied to recoveries alone.
+ *
+ * So the comparison is against {@link AlertPolicyInput.lastAlert}: the last
+ * verdict that actually reached the channel. A breach announced at 19:39 and a
+ * breach observed at 21:24 with no all-clear in between are, to everyone reading
+ * the channel, **the same open incident** — and repeating it is governed by
+ * `reAlertAfterMs` like any other ongoing failure. That single change collapses
+ * the three-message flap into one message.
+ *
+ * It also removes a hazard rather than adding one: the runner no longer has to
+ * read the previous state *before* inserting the new rows, an ordering whose
+ * inversion would have silenced the whole layer while looking healthy.
+ *
+ * ## The rest of the rules
+ *
+ * Alerting on every cycle of a long outage trains the team to mute the channel,
+ * which reproduces ADR-006's silence with extra noise. Alerting only on the
+ * transition means a message missed on a busy day is a message lost forever. So:
+ * announce on entry into a failing state, then repeat at most once per
+ * `reAlertAfterMs`.
  *
  * A check moving from one failing state to another (`breached` → `error`) is
- * treated as a new event: "the tutorial rate is low" and "we cannot reach the
+ * announced as a new event: "the tutorial rate is low" and "we cannot reach the
  * Plan at all" are different problems and the second must not hide behind the
- * first.
+ * first. A check that oscillates *between* those two therefore still speaks
+ * every cycle — deliberately, because a source flipping between broken and
+ * unreachable is itself news.
  */
 export function decideAlerts(input: AlertPolicyInput): AlertDecision {
   const announce: HealthCheckRecord[] = [];
@@ -76,71 +148,66 @@ export function decideAlerts(input: AlertPolicyInput): AlertDecision {
   const suppressed: SuppressedObservation[] = [];
 
   for (const record of input.observations) {
-    const previous = input.previousStatus.get(record.checkName);
+    const last = input.lastAlert.get(record.checkName) ?? null;
+    /** The channel is holding an unresolved problem about this check. */
+    const open: LastAlert | null =
+      last !== null && last.status !== 'ok' ? last : null;
 
-    if (!isNotifiable(record.status)) {
-      if (wasAnnouncedFailure(previous, input.lastAlertAt, record.checkName)) {
+    /**
+     * Repeat of an identical announced state: say it again only once the
+     * re-alert window has elapsed.
+     */
+    const repeat = (since: LastAlert, bucket: HealthCheckRecord[]): void => {
+      if (input.now.getTime() - since.at.getTime() >= input.reAlertAfterMs) {
+        bucket.push(record);
+      } else {
+        suppressed.push({ record, reason: 'grouped' });
+      }
+    };
+
+    if (record.status === 'ok') {
+      if (open === null) {
+        // Healthy, and nothing outstanding. The overwhelmingly common case.
+        suppressed.push({ record, reason: 'not_notifiable' });
+      } else if (
+        (input.healthyStreak.get(record.checkName) ?? 0) >=
+        input.confirmRecoveryAfter
+      ) {
         // Closing the loop matters: without it, the only way to learn that an
         // outage ended is to go look, which is the habit this epic removes.
-        //
-        // But only `ok` closes it. A check that fell to `no_data` did not get
-        // better — we simply stopped being able to see it, and announcing
-        // "normalizado" there is a false all-clear.
-        if (record.status === 'no_data') {
-          lostSignal.push(record);
-        } else {
-          recovered.push(record);
-        }
+        recovered.push(record);
       } else {
-        suppressed.push({ record, reason: 'not_notifiable' });
+        // Healthy, but not for long enough to be believed yet. Held rather than
+        // announced — see `confirmRecoveryAfter` for the reading behind it.
+        suppressed.push({ record, reason: 'recovery_unconfirmed' });
       }
       continue;
     }
 
-    if (previous !== record.status) {
-      // Entered a failing state, or moved to a different one.
-      announce.push(record);
+    if (record.status === 'no_data') {
+      if (open === null) {
+        // "Sem dados" is not a failure on its own: a ratio without a base is
+        // not a low number, it is an unmeasured one. Alerting here is noise.
+        suppressed.push({ record, reason: 'not_notifiable' });
+      } else if (open.status === 'no_data') {
+        repeat(open, lostSignal);
+      } else {
+        // The check did not get better — we stopped being able to see it.
+        // Announcing "normalizado" here would be a false all-clear.
+        lostSignal.push(record);
+      }
       continue;
     }
 
-    const last = input.lastAlertAt.get(record.checkName) ?? null;
-    if (last === null) {
-      // Still failing, but the previous failure was never actually delivered —
-      // a webhook outage, most likely. Retry rather than stay quiet.
-      announce.push(record);
-      continue;
-    }
-
-    const elapsed = input.now.getTime() - last.getTime();
-    if (elapsed >= input.reAlertAfterMs) {
+    // `breached` or `error`.
+    if (open === null || open.status !== record.status) {
+      // Never announced, newly failing, a different failure, or failing again
+      // after an all-clear the channel actually received.
       announce.push(record);
     } else {
-      suppressed.push({ record, reason: 'grouped' });
+      repeat(open, announce);
     }
   }
 
   return { announce, recovered, lostSignal, suppressed };
-}
-
-function isNotifiable(status: HealthCheckStatus): boolean {
-  return NOTIFIABLE_STATUSES.includes(status);
-}
-
-/**
- * True when the check was in a failing state that had actually been announced.
- *
- * Both halves are required. Without the previous status we would announce a
- * "recovery" for a check that has always been healthy; without the delivered
- * alert we would announce the recovery of a failure nobody ever heard about.
- */
-function wasAnnouncedFailure(
-  previous: HealthCheckStatus | undefined,
-  lastAlertAt: ReadonlyMap<string, Date | null>,
-  checkName: string,
-): boolean {
-  return (
-    previous !== undefined &&
-    isNotifiable(previous) &&
-    (lastAlertAt.get(checkName) ?? null) !== null
-  );
 }

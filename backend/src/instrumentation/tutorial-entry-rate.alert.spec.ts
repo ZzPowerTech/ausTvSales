@@ -106,8 +106,9 @@ describe('funnel.tutorial_entry_rate — alerta com valor forcado (S8.0 criterio
 
     const decision = decideAlerts({
       observations: stored,
-      previousStatus: new Map(),
-      lastAlertAt: new Map(),
+      lastAlert: new Map(),
+      healthyStreak: new Map(),
+      confirmRecoveryAfter: 2,
       reAlertAfterMs: 24 * 3_600_000,
       now: new Date(),
     });
@@ -161,8 +162,9 @@ describe('funnel.tutorial_entry_rate — alerta com valor forcado (S8.0 criterio
         detail: observation.detail,
         alertedAt: null,
       })),
-      previousStatus: new Map(),
-      lastAlertAt: new Map(),
+      lastAlert: new Map(),
+      healthyStreak: new Map(),
+      confirmRecoveryAfter: 2,
       reAlertAfterMs: 24 * 3_600_000,
       now: new Date(),
     });
@@ -187,8 +189,9 @@ describe('funnel.tutorial_entry_rate — alerta com valor forcado (S8.0 criterio
         detail: observation.detail,
         alertedAt: null,
       })),
-      previousStatus: new Map(),
-      lastAlertAt: new Map(),
+      lastAlert: new Map(),
+      healthyStreak: new Map(),
+      confirmRecoveryAfter: 2,
       reAlertAfterMs: 24 * 3_600_000,
       now: new Date(),
     });

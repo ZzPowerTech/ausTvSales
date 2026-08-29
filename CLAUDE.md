@@ -139,10 +139,13 @@ S8.2 se os pré-requisitos dela forem resolvidos.
   algo que ninguém verificou.
   **Falta metade do critério 4:** o caminho **`error`** — fonte que *morre*, não limiar que estoura.
   É outro código e é o que cobre o apagão de três meses. Teste: parar o Plan por um ciclo.
-- **🔴 Os alertas estão oscilando, e isso é ativo.** 51,5% (n=33) → 50,0% (n=32) → 51,6% (n=31) em
-  duas horas: com n≈32 **um único jogador vira o alerta**, e o limiar de 0,5 caiu exatamente em cima
-  do valor real. É o "canal do Discord vira mudo" acontecendo. A boa notícia é que isso **é** a
-  calibração que faltava: o share offline real é ~51%, estável.
+- **A oscilação dos alertas foi fechada em 2026-08-29.** 51,5% (n=33) → 50,0% (n=32) → 51,6%
+  (n=31) em duas horas: com n≈32 um único jogador virava o alerta, e o limiar de 0,5 caía em cima
+  do valor real. Duas correções, no mesmo PR: o limiar foi **calibrado para 0,65** usando essa
+  própria leitura (share real ~51%, estável), e a política passou a decidir contra **o que o canal
+  foi informado por último**, não contra a linha anterior da tabela — com histerese de 2 ciclos no
+  all-clear. A falha continua saindo no primeiro ciclo; só a recuperação espera. A sequência real
+  das três mensagens vira **uma**, e está fixada em teste.
 - **A auditoria de rede da S6.2b nunca foi rodada.** Os scripts, o runbook e o template estão em
   `ops/audit/`; **nenhum relatório preenchido existe**, e o produto da história é o registro, não o
   script. Fechar isso e ler a whitelist do Plan (item abaixo) são a mesma tarefa.
@@ -157,9 +160,10 @@ S8.2 se os pré-requisitos dela forem resolvidos.
 - **[#157](https://github.com/ZzPowerTech/ausTvSales/issues/157) — perda de venda em silêncio.**
   Um 429 faz o plugin marcar a venda como permanentemente falha. Descoberto na S7; é dado perdido,
   não incômodo.
-- **Os três limiares da S6.3 seguem sem calibração** contra o baseline (chute conservador, marcado
-  como tal no `.env.example`). Enquanto isso, o alerta é ruído em potencial — que é como um canal
-  do Discord vira mudo.
+- **Dois dos três limiares da S6.3 seguem sem calibração** contra o baseline (chute conservador,
+  marcado como tal no `.env.example`). O terceiro, o share offline, foi calibrado pela produção —
+  ver o item acima. Enquanto os outros dois forem chute, o alerta é ruído em potencial, que é como
+  um canal do Discord vira mudo.
 - **Probe externo de uptime.** O critério 2 da S7.1 pede endpoint "para uso externo" e o 3 exige
   JWT — um monitor não faz OAuth. Ficou sob a sessão; a saída recomendada é heartbeat, não
   endpoint. Decisão do dono.

@@ -39,22 +39,25 @@ function asRecord(
 
 interface StoreStub {
   store: HealthCheckStore;
-  latestAll: jest.Mock;
   record: jest.Mock;
-  lastAlertAt: jest.Mock;
+  lastAlert: jest.Mock;
+  healthyStreak: jest.Mock;
   markAlerted: jest.Mock;
 }
 
-function buildStore(previous: HealthCheckRecord[] = []): StoreStub {
-  const latestAll = jest.fn(() => {
-    calls.push('latestAll');
-    return Promise.resolve(previous);
-  });
+function buildStore(): StoreStub {
   const record = jest.fn((observations: HealthCheckObservation[]) => {
     calls.push('record');
     return Promise.resolve(observations.map(asRecord));
   });
-  const lastAlertAt = jest.fn(() => Promise.resolve(null));
+  const lastAlert = jest.fn(() => {
+    calls.push('lastAlert');
+    return Promise.resolve(null);
+  });
+  const healthyStreak = jest.fn(() => {
+    calls.push('healthyStreak');
+    return Promise.resolve(new Map<string, number>());
+  });
   const markAlerted = jest.fn((ids: number[]) => {
     calls.push('markAlerted');
     return Promise.resolve(ids.length);
@@ -62,14 +65,14 @@ function buildStore(previous: HealthCheckRecord[] = []): StoreStub {
 
   return {
     store: {
-      latestAll,
       record,
-      lastAlertAt,
+      lastAlert,
+      healthyStreak,
       markAlerted,
     } as unknown as HealthCheckStore,
-    latestAll,
     record,
-    lastAlertAt,
+    lastAlert,
+    healthyStreak,
     markAlerted,
   };
 }
@@ -120,7 +123,7 @@ describe('HealthCheckRunner', () => {
   });
 
   describe('ordering', () => {
-    it('reads the previous state BEFORE persisting the new verdicts', async () => {
+    it('reads the alert state AFTER persisting the new verdicts', async () => {
       const store = buildStore();
       const { alerter } = buildAlerter();
       const check = fakeCheck(HealthCheckName.OrphanInstance, () =>
@@ -131,11 +134,14 @@ describe('HealthCheckRunner', () => {
         check,
       ]).runAll();
 
-      // If the snapshot were taken after the insert, `latestAll` would return the
-      // rows this cycle just wrote, every check would look unchanged, no
-      // transition would ever fire, and the system would go silent while
-      // appearing healthy.
-      expect(calls.indexOf('latestAll')).toBeLessThan(calls.indexOf('record'));
+      // `healthyStreak` has to include the verdict this cycle just wrote — the
+      // question is "has it been ok for two cycles *including this one*". And
+      // `lastAlert` reads rows that only ever get stamped after delivery, so it
+      // cannot be polluted by the insert.
+      expect(calls.indexOf('record')).toBeLessThan(calls.indexOf('lastAlert'));
+      expect(calls.indexOf('record')).toBeLessThan(
+        calls.indexOf('healthyStreak'),
+      );
     });
 
     it('stamps alerted_at only after the alerter reports delivery', async () => {
@@ -268,7 +274,7 @@ describe('HealthCheckRunner', () => {
 
     it('releases the guard even when the cycle throws', async () => {
       const store = buildStore();
-      store.latestAll.mockRejectedValueOnce(new Error('banco fora'));
+      store.record.mockRejectedValueOnce(new Error('banco fora'));
       const { alerter } = buildAlerter();
       const check = fakeCheck(HealthCheckName.OrphanInstance, () =>
         Promise.resolve([observation('x', 'ok')]),
@@ -288,8 +294,7 @@ describe('HealthCheckRunner', () => {
 
   describe('resumo', () => {
     it('tallies every status and reports what was delivered', async () => {
-      const previous: HealthCheckRecord[] = [];
-      const store = buildStore(previous);
+      const store = buildStore();
       const { alerter, publish } = buildAlerter([1, 2]);
       const check = fakeCheck(HealthCheckName.CollectionAlive, () =>
         Promise.resolve([

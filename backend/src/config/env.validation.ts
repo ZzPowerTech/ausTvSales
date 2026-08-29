@@ -144,6 +144,16 @@ export class EnvironmentVariables {
   @Max(720)
   HEALTH_ALERT_REALERT_HOURS?: number;
 
+  // Quantos vereditos `ok` consecutivos uma recuperacao precisa antes de virar
+  // um "normalizado" no canal. A falha continua sendo anunciada no primeiro
+  // ciclo; so o all-clear espera confirmacao, porque um all-clear errado e pior
+  // que um all-clear atrasado.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(20)
+  HEALTH_ALERT_CONFIRM_RECOVERY?: number;
+
   // --- Plan JSON API (AusTV Admin S6.3, ADR-001/ADR-002) ---
 
   // Base URL of the Plan webserver, e.g. http://198.89.99.229:25504. Per ADR-001
@@ -301,8 +311,9 @@ export class EnvironmentVariables {
   PLATFORM_OFFLINE_WINDOW_DAYS?: number;
 
   // Teto da fracao de java_offline entre as chegadas da janela, de 0 a 1.
-  // PRECISA ser calibrado contra o baseline antes de ser levado a serio — o
-  // padrao de 0.5 e um chute conservador, nao uma medida.
+  // Calibrado em 2026-08-29 contra a leitura de producao de 2026-08-26 (share
+  // real ~51%, estavel): o padrao de 0.65 deixa folga acima da banda. O valor
+  // anterior, 0.5, caia exatamente em cima dela e oscilava a cada jogador.
   @IsOptional()
   @IsNumber()
   @Min(0)

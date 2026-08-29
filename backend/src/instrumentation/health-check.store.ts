@@ -6,6 +6,7 @@ import type {
   HealthCheckDetail,
   HealthCheckRecord,
   HealthCheckStatus,
+  LastAlert,
 } from './health-check.types';
 
 /** One check verdict, before it is persisted. */
@@ -117,6 +118,73 @@ export class HealthCheckStore {
     return result.rows.map(fromRawRow);
   }
 
+  /**
+   * How many of the most recent verdicts, per check, are consecutively `ok`.
+   *
+   * Counts backwards from the newest row and stops at the first row that is not
+   * `ok`, so a check that has been healthy for four cycles reports 4 and one
+   * that just turned `ok` after a breach reports 1.
+   *
+   * `no_data` breaks the streak like a failure does, and that is the point: a
+   * cycle in which the check could not be measured is not evidence that it is
+   * healthy. Counting it would be the project's oldest mistake — reading an
+   * absence of data as a good reading — wearing a different hat.
+   *
+   * ## Why the alert layer needs this
+   *
+   * Production, 2026-08-26: `platform.offline_account_share` went
+   * `breached (51,5%) → ok (50,0%) → breached (51,6%)` in under two hours, and
+   * announced all three. With n≈32 arrivals a **single player** moves the ratio
+   * by three points, so the check was reporting sampling noise as a state
+   * change and the channel got three messages about nothing changing.
+   *
+   * A recovery confirmed over several cycles is a recovery; one observation is a
+   * coin flip. This is what lets the policy tell them apart — see
+   * `AlertPolicyInput.healthyStreak`.
+   *
+   * @param window how many recent rows per check to consider. The streak
+   *   saturates here, which is fine: the policy only compares it against a
+   *   small threshold.
+   */
+  async healthyStreak(window = 10): Promise<Map<string, number>> {
+    const result = await this.db.execute<{
+      check_name: string;
+      status: HealthCheckStatus;
+      rn: number;
+    }>(sql`
+      SELECT check_name, status, rn FROM (
+        SELECT
+          ${healthChecks.checkName} AS check_name,
+          ${healthChecks.status}    AS status,
+          row_number() OVER (
+            PARTITION BY ${healthChecks.checkName}
+            ORDER BY ${healthChecks.checkedAt} DESC, ${healthChecks.id} DESC
+          ) AS rn
+        FROM ${healthChecks}
+      ) ranked
+      WHERE rn <= ${window}
+      ORDER BY check_name, rn
+    `);
+
+    const streaks = new Map<string, number>();
+    const broken = new Set<string>();
+
+    for (const row of result.rows) {
+      // Rows arrive newest-first per check. Once a non-`ok` verdict appears,
+      // the streak for that check is closed and later (older) rows are ignored.
+      if (broken.has(row.check_name)) {
+        continue;
+      }
+      if (row.status !== 'ok') {
+        broken.add(row.check_name);
+        continue;
+      }
+      streaks.set(row.check_name, (streaks.get(row.check_name) ?? 0) + 1);
+    }
+
+    return streaks;
+  }
+
   /** Recent verdicts of one check, newest first. */
   async history(checkName: string, limit = 50): Promise<HealthCheckRecord[]> {
     const rows = await this.db
@@ -130,15 +198,24 @@ export class HealthCheckStore {
   }
 
   /**
-   * When this check was last announced on Discord, or null if never.
+   * What this check last told Discord, or null if it never has.
    *
    * This is the input to alert grouping: a check that has been failing for three
    * months must not notify once per cycle, or the channel gets trained into
    * being ignored — which reproduces ADR-006's silence, only louder.
+   *
+   * The **status** travels with the timestamp because the alert policy compares
+   * each verdict against what the channel was last told, not against the last
+   * row written. Only rows whose message actually went out carry `alerted_at`,
+   * so a recovery that was held back leaves this pointing at the failure that is
+   * still, as far as anyone reading the channel knows, open.
    */
-  async lastAlertAt(checkName: string): Promise<Date | null> {
+  async lastAlert(checkName: string): Promise<LastAlert | null> {
     const rows = await this.db
-      .select({ alertedAt: healthChecks.alertedAt })
+      .select({
+        status: healthChecks.status,
+        alertedAt: healthChecks.alertedAt,
+      })
       .from(healthChecks)
       .where(
         and(
@@ -149,7 +226,8 @@ export class HealthCheckStore {
       .orderBy(desc(healthChecks.alertedAt))
       .limit(1);
 
-    return rows.length > 0 ? (rows[0].alertedAt ?? null) : null;
+    const row = rows[0];
+    return row?.alertedAt ? { status: row.status, at: row.alertedAt } : null;
   }
 
   /**

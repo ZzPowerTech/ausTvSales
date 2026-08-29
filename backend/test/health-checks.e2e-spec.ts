@@ -246,7 +246,7 @@ describe('health_checks (e2e)', () => {
       ).toBeNull();
     });
 
-    it('lastAlertAt ignores rows that were never announced', async () => {
+    it('lastAlert ignores rows that were never announced', async () => {
       const [first] = await store.record([
         {
           checkName: HealthCheckName.CollectionAlive,
@@ -265,9 +265,7 @@ describe('health_checks (e2e)', () => {
         },
       ]);
 
-      const lastAlert = await store.lastAlertAt(
-        HealthCheckName.CollectionAlive,
-      );
+      const lastAlert = await store.lastAlert(HealthCheckName.CollectionAlive);
       const latest = await store.latest(HealthCheckName.CollectionAlive);
 
       expect(lastAlert).not.toBeNull();
@@ -285,7 +283,7 @@ describe('health_checks (e2e)', () => {
       ]);
 
       await expect(
-        store.lastAlertAt(HealthCheckName.NetworkToSurvival),
+        store.lastAlert(HealthCheckName.NetworkToSurvival),
       ).resolves.toBeNull();
     });
   });

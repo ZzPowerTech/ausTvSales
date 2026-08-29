@@ -7,10 +7,19 @@ import {
   HealthCheckStore,
   type HealthCheckObservation,
 } from './health-check.store';
-import type { HealthCheckStatus } from './health-check.types';
+import type { HealthCheckStatus, LastAlert } from './health-check.types';
 
 /** Matches the default documented in `.env.example`. */
 const DEFAULT_REALERT_HOURS = 24;
+/**
+ * Consecutive healthy verdicts a recovery needs before it is announced.
+ *
+ * Two, at the default 15-minute cadence, means an all-clear arrives ~15 minutes
+ * after it holds. That is the trade the production reading of 2026-08-26 paid
+ * for: three messages in two hours about a ratio that never left its band. See
+ * `AlertPolicyInput.confirmRecoveryAfter`.
+ */
+const DEFAULT_CONFIRM_RECOVERY = 2;
 const MS_PER_HOUR = 3_600_000;
 
 /** What one cycle did. Returned for logging, and for the S7.1 `health` module. */
@@ -39,22 +48,23 @@ export interface HealthCheckRunSummary {
  *
  * ## Order is the whole design
  *
- * The previous status of every check must be read **before** the new verdicts are
- * inserted. `HealthCheckStore.latestAll()` returns the newest row per check, so
- * reading it after the insert would return the rows this cycle just wrote and
- * every check would look unchanged — no transition would ever be detected, and
- * the system would go permanently quiet while appearing to work. That is the
- * ADR-006 failure with extra steps, so the ordering is load-bearing rather than
- * incidental.
- *
  * `markAlerted` runs **last**, and only over the ids the alerter says it
  * delivered. A row stamped before the webhook succeeded would suppress its own
  * retry and lose the alert for good.
+ *
+ * Everything the policy compares against — `lastAlert` and `healthyStreak` — is
+ * read **after** the insert, on purpose: both questions are about the state
+ * including the verdict this cycle just produced. An earlier version compared
+ * against the previous *row* and therefore had to read it before inserting, an
+ * ordering whose inversion would have silenced the whole layer while it looked
+ * healthy. Comparing against what the channel was last told removed that trap
+ * rather than documenting it.
  */
 @Injectable()
 export class HealthCheckRunner {
   private readonly logger = new Logger(HealthCheckRunner.name);
   private readonly reAlertAfterMs: number;
+  private readonly confirmRecoveryAfter: number;
 
   /**
    * Guards against overlapping cycles.
@@ -75,6 +85,9 @@ export class HealthCheckRunner {
     const hours =
       config.get<number>('HEALTH_ALERT_REALERT_HOURS') ?? DEFAULT_REALERT_HOURS;
     this.reAlertAfterMs = hours * MS_PER_HOUR;
+    this.confirmRecoveryAfter =
+      config.get<number>('HEALTH_ALERT_CONFIRM_RECOVERY') ??
+      DEFAULT_CONFIRM_RECOVERY;
   }
 
   async runAll(): Promise<HealthCheckRunSummary> {
@@ -99,14 +112,7 @@ export class HealthCheckRunner {
   }
 
   private async cycle(startedAt: Date): Promise<HealthCheckRunSummary> {
-    // 1. Snapshot the "before" picture. Must precede the insert — see the class
-    //    doc; reading it afterwards makes every check look unchanged forever.
-    const previous = await this.store.latestAll();
-    const previousStatus = new Map(
-      previous.map((record) => [record.checkName, record.status]),
-    );
-
-    // 2. Run the checks. One failing check must never silence the others.
+    // 1. Run the checks. One failing check must never silence the others.
     const observations = await this.runChecks();
 
     if (observations.length === 0) {
@@ -114,25 +120,34 @@ export class HealthCheckRunner {
       return emptySummary(startedAt, true);
     }
 
-    // 3. Persist before deciding, so the alert always references a stored row.
+    // 2. Persist before deciding, so the alert always references a stored row.
     const records = await this.store.record(observations);
 
-    // 4. `lastAlertAt` is per check and cannot come from `latestAll`: that gives
-    //    the newest row's `alerted_at`, not the newest row that *has* one.
+    // 3. What the channel was last told, per check. It cannot come from
+    //    `latestAll`: that gives the newest row's `alerted_at`, not the newest
+    //    row that *has* one.
     const names = [...new Set(records.map((record) => record.checkName))];
-    const lastAlertAt = new Map(
+    const lastAlert = new Map(
       await Promise.all(
         names.map(
           async (name) =>
-            [name, await this.store.lastAlertAt(name)] as [string, Date | null],
+            [name, await this.store.lastAlert(name)] as [
+              string,
+              LastAlert | null,
+            ],
         ),
       ),
     );
 
+    // 4. The healthy streak includes the verdict just written, because "has it
+    //    been ok for two cycles *including this one*" is the question asked.
+    const healthyStreak = await this.store.healthyStreak();
+
     const decision = decideAlerts({
       observations: records,
-      previousStatus,
-      lastAlertAt,
+      lastAlert,
+      healthyStreak,
+      confirmRecoveryAfter: this.confirmRecoveryAfter,
       now: new Date(),
       reAlertAfterMs: this.reAlertAfterMs,
     });
