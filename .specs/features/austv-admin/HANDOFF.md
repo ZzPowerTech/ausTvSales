@@ -559,8 +559,26 @@ O princípio está na §11 item 3b1 do spec — *"filtro de aplicação nunca su
 | camada | estado | quando foi visto |
 |---|---|---|
 | firewall de rede | `ufw` inativo | **2026-08-21**, e **não reverificado** desde a mudança de estado de 26/08 |
-| whitelist de aplicação | existe; recusou ao menos um IP | conteúdo **nunca lido** |
+| whitelist de aplicação | **lida pelo dono, e adequada** | **2026-08-28** ✅ |
 | autenticação | **desligada** | 2026-08-26, medido |
+
+> ### ✅ A whitelist foi lida em 2026-08-28
+>
+> Aberta desde 2026-08-21 e apontada como **a verificação urgente antes do unban all**. O dono leu o
+> `config.yml` do Plan e reporta a whitelist como adequada.
+>
+> **O que isso fecha:** a única camada de controle de acesso *conhecida* na 25504 deixou de ser uma
+> incógnita. Com a autenticação desligada (`authRequired: false`, medido em 26/08), era ela sozinha
+> decidindo quem alcança a porta — e agora se sabe que ela decide, em vez de se supor.
+>
+> Fecha também, por consequência, a candidata mais provável para o 403 que a máquina residencial
+> levou em 26/08.
+>
+> **O que continua aberto, e a §11 item 3b1 do spec é explícita:** *"filtro de aplicação nunca
+> substitui filtro de rede"*. O `ufw` estava inativo em 2026-08-21 e **não foi reverificado**. Uma
+> whitelist de aplicação boa numa porta sem filtro de rede é uma camada, não duas — e a §8 do spec
+> pede as duas. A **superfície de escrita** (`POST /v1/saveGroupPermissions` e companhia) também
+> segue não sondada.
 
 A whitelist é o único controle **conhecido de acesso à porta** — gate por endpoint é questão
 separada, e o `storePreferences` acima mostra que ao menos um existe. E "conhecido" não é o mesmo

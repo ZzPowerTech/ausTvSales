@@ -133,18 +133,27 @@ S8.2 se os pré-requisitos dela forem resolvidos.
   existe em **2026-09-19**. O funil já trata isso — bucket sem cobertura sai `null`, nunca zero —
   mas nenhum número histórico de rede vai aparecer até lá.
 
-- **O alerta de saúde nunca foi comprovado.** É o último item aberto da S6 e a promessa raiz do
-  projeto (§1 do spec: "tornar impossível a cegueira silenciosa"). Exige ligar o agendamento num
-  ambiente real, com webhook configurado, e derrubar uma instância de propósito. **Todo o resto da
-  camada de saúde é construção sobre uma entrega que ninguém verificou ponta a ponta.**
+- **O alerta de saúde CHEGA — comprovado em 2026-08-26.** Alertas reais do
+  `platform.offline_account_share` foram observados no canal: `breached`, recuperação, agrupamento e
+  o `n` ao lado do percentual, tudo funcionando em produção. A camada deixou de ser construção sobre
+  algo que ninguém verificou.
+  **Falta metade do critério 4:** o caminho **`error`** — fonte que *morre*, não limiar que estoura.
+  É outro código e é o que cobre o apagão de três meses. Teste: parar o Plan por um ciclo.
+- **🔴 Os alertas estão oscilando, e isso é ativo.** 51,5% (n=33) → 50,0% (n=32) → 51,6% (n=31) em
+  duas horas: com n≈32 **um único jogador vira o alerta**, e o limiar de 0,5 caiu exatamente em cima
+  do valor real. É o "canal do Discord vira mudo" acontecendo. A boa notícia é que isso **é** a
+  calibração que faltava: o share offline real é ~51%, estável.
 - **A auditoria de rede da S6.2b nunca foi rodada.** Os scripts, o runbook e o template estão em
   `ops/audit/`; **nenhum relatório preenchido existe**, e o produto da história é o registro, não o
   script. Fechar isso e ler a whitelist do Plan (item abaixo) são a mesma tarefa.
-- **O webserver do Plan não tem autenticação** (`authRequired: false`, medido 2026-08-26). A
-  whitelist de IP é o único controle **conhecido** na porta 25504 e **ninguém leu o conteúdo dela**;
-  o `ufw` estava inativo em 2026-08-21 e não foi reverificado. Se os endpoints de escrita não
-  tiverem gate próprio — não sondado —, quem estiver na whitelist reescreve permissões do Plan sem
-  credencial. **Ler o `config.yml` antes do unban all.** Detalhe no `HANDOFF.md`.
+- **O webserver do Plan não tem autenticação** (`authRequired: false`, medido 2026-08-26), e a
+  whitelist de IP é o único controle **conhecido** na porta 25504.
+  ✅ **A whitelist foi lida pelo dono em 2026-08-28 e está adequada** — era a verificação urgente
+  antes do unban all, e fechou.
+  **O que sobra:** o `ufw` estava inativo em 2026-08-21 e **não foi reverificado**, e a §11 3b1 do
+  spec é explícita — *filtro de aplicação nunca substitui filtro de rede*. Uma whitelist boa numa
+  porta sem filtro de rede é uma camada, não as duas que a §8 pede. A superfície de **escrita**
+  (`POST /v1/saveGroupPermissions`) também segue não sondada. Detalhe no `HANDOFF.md`.
 - **[#157](https://github.com/ZzPowerTech/ausTvSales/issues/157) — perda de venda em silêncio.**
   Um 429 faz o plugin marcar a venda como permanentemente falha. Descoberto na S7; é dado perdido,
   não incômodo.
