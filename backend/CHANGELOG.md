@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.15.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.14.0...backend-v0.15.0) (2026-08-28)
+## [0.15.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.14.0...backend-v0.15.0) (2026-08-29)
 
 
 ### Features
