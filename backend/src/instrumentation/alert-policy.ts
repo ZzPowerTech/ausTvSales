@@ -117,29 +117,46 @@ export interface AlertPolicyInput {
  *
  * So the comparison is against {@link AlertPolicyInput.lastAlert}: the last
  * verdict that actually reached the channel. A breach announced at 19:39 and a
- * breach observed at 21:24 with no all-clear in between are, to everyone reading
- * the channel, **the same open incident** — and repeating it is governed by
- * `reAlertAfterMs` like any other ongoing failure. That single change collapses
- * the three-message flap into one message.
+ * breach observed at 21:24 with **no all-clear delivered in between** are, to
+ * everyone reading the channel, the same open incident — and repeating it is
+ * governed by `reAlertAfterMs` like any other ongoing failure.
+ *
+ * The bound on that is worth stating precisely, because it is narrower than it
+ * sounds: if the healthy stretch in the middle lasts long enough for the
+ * recovery to be *confirmed and delivered*, the next breach is a genuinely new
+ * incident and does announce. That is correct — a check that was demonstrably
+ * fine for hours and then broke is news. What this removes is the sub-window
+ * flap, where the all-clear never held.
  *
  * It also removes a hazard rather than adding one: the runner no longer has to
  * read the previous state *before* inserting the new rows, an ordering whose
  * inversion would have silenced the whole layer while looking healthy.
  *
- * ## The rest of the rules
+ * ## Every repeat is bounded, including the changes of kind
  *
  * Alerting on every cycle of a long outage trains the team to mute the channel,
  * which reproduces ADR-006's silence with extra noise. Alerting only on the
  * transition means a message missed on a busy day is a message lost forever. So:
- * announce on entry into a failing state, then repeat at most once per
+ * announce on entry into a problem, then repeat at most once per
  * `reAlertAfterMs`.
  *
- * A check moving from one failing state to another (`breached` → `error`) is
- * announced as a new event: "the tutorial rate is low" and "we cannot reach the
- * Plan at all" are different problems and the second must not hide behind the
- * first. A check that oscillates *between* those two therefore still speaks
- * every cycle — deliberately, because a source flipping between broken and
- * unreachable is itself news.
+ * "Entry into a problem" means the channel was holding **nothing**. Once it is
+ * holding something, a change of kind (`breached` → `no_data`, `error` →
+ * `breached`) does not restart the clock — it is reported when the window
+ * elapses, in whichever bucket the current verdict belongs to. An earlier
+ * version let every change announce immediately, which reads as reasonable and
+ * is not: a check oscillating between two failing states then produces one
+ * message per cycle forever, which is the muted channel arriving by a different
+ * road. Both `platform.offline_account_share` (`no_data` below its minimum
+ * sample, `breached` above it) and `funnel.tutorial_entry_rate` (`error` on a
+ * stale ETL, `no_data` on a missing denominator) sit near such a boundary.
+ *
+ * The single exception is arriving at `error`, which bypasses the window once.
+ * `error` is the one verdict that means the source itself is gone rather than
+ * reading badly — the three-month blackout of ADR-006 — and it must not wait a
+ * day behind a lesser problem. It cannot loop: after it is announced the channel
+ * holds `error`, and anything else is windowed and therefore never delivered, so
+ * `error` never gets a second first-time.
  */
 export function decideAlerts(input: AlertPolicyInput): AlertDecision {
   const announce: HealthCheckRecord[] = [];
@@ -184,29 +201,30 @@ export function decideAlerts(input: AlertPolicyInput): AlertDecision {
       continue;
     }
 
-    if (record.status === 'no_data') {
-      if (open === null) {
+    if (open === null) {
+      // The channel is holding nothing about this check.
+      if (record.status === 'no_data') {
         // "Sem dados" is not a failure on its own: a ratio without a base is
         // not a low number, it is an unmeasured one. Alerting here is noise.
         suppressed.push({ record, reason: 'not_notifiable' });
-      } else if (open.status === 'no_data') {
-        repeat(open, lostSignal);
       } else {
-        // The check did not get better — we stopped being able to see it.
-        // Announcing "normalizado" here would be a false all-clear.
-        lostSignal.push(record);
+        // Never announced, or failing again after a delivered all-clear.
+        announce.push(record);
       }
       continue;
     }
 
-    // `breached` or `error`.
-    if (open === null || open.status !== record.status) {
-      // Never announced, newly failing, a different failure, or failing again
-      // after an all-clear the channel actually received.
+    if (record.status === 'error' && open.status !== 'error') {
+      // The source is gone, not merely reading badly. See the class doc: this
+      // is the one bypass, and it cannot repeat.
       announce.push(record);
-    } else {
-      repeat(open, announce);
+      continue;
     }
+
+    // A problem is already open. Whatever changed about it, the channel hears
+    // again only when the window elapses — but in the bucket that matches what
+    // is true *now*, so a lost signal is never painted as a recovery.
+    repeat(open, record.status === 'no_data' ? lostSignal : announce);
   }
 
   return { announce, recovered, lostSignal, suppressed };

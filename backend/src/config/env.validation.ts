@@ -148,6 +148,10 @@ export class EnvironmentVariables {
   // um "normalizado" no canal. A falha continua sendo anunciada no primeiro
   // ciclo; so o all-clear espera confirmacao, porque um all-clear errado e pior
   // que um all-clear atrasado.
+  //
+  // Qualquer valor daqui vale: o runner usa este numero como janela da propria
+  // consulta de sequencia, entao nao existe teto escondido no store abaixo do
+  // qual a recuperacao ficaria inalcancavel.
   @IsOptional()
   @IsInt()
   @Min(1)

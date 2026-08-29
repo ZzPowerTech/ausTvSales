@@ -207,10 +207,11 @@ export class TutorialEntryRateCheck implements HealthCheck {
       sourceAge = await this.tutorialFreshness();
       if (sourceAge.problem !== null) {
         // `error`, not `no_data`, and the difference is the whole point:
-        // `NOTIFIABLE_STATUSES` contains `error` and not `no_data`, so a stale
-        // ETL reported as `no_data` would sit in the table unannounced. A
-        // measurement pipeline that has stopped is exactly what has to reach
-        // Discord — it is the failure this epic was built around.
+        // `decideAlerts` announces a first `breached`/`error` on sight, while a
+        // `no_data` on a check with nothing outstanding is suppressed as
+        // `not_notifiable`. A stale ETL filed as `no_data` would therefore sit
+        // in the table unannounced — and a measurement pipeline that has
+        // stopped is exactly what has to reach Discord.
         return backends.map((server) =>
           this.errorFor(server, sourceAge.problem as string),
         );

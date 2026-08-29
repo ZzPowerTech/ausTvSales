@@ -139,13 +139,20 @@ S8.2 se os pré-requisitos dela forem resolvidos.
   algo que ninguém verificou.
   **Falta metade do critério 4:** o caminho **`error`** — fonte que *morre*, não limiar que estoura.
   É outro código e é o que cobre o apagão de três meses. Teste: parar o Plan por um ciclo.
-- **A oscilação dos alertas foi fechada em 2026-08-29.** 51,5% (n=33) → 50,0% (n=32) → 51,6%
-  (n=31) em duas horas: com n≈32 um único jogador virava o alerta, e o limiar de 0,5 caía em cima
-  do valor real. Duas correções, no mesmo PR: o limiar foi **calibrado para 0,65** usando essa
-  própria leitura (share real ~51%, estável), e a política passou a decidir contra **o que o canal
-  foi informado por último**, não contra a linha anterior da tabela — com histerese de 2 ciclos no
-  all-clear. A falha continua saindo no primeiro ciclo; só a recuperação espera. A sequência real
-  das três mensagens vira **uma**, e está fixada em teste.
+- **A oscilação dos alertas foi corrigida em código em 2026-08-29 — ainda não observada em
+  produção.** 51,5% (n=33) → 50,0% (n=32) → 51,6% (n=31) em duas horas: com n≈32 um único jogador
+  virava o alerta, e o limiar de 0,5 caía em cima do valor real. Duas correções, no mesmo PR:
+  - o limiar foi **calibrado para 0,65** usando essa própria leitura (share real ~51%, estável).
+    É isto que silencia a sequência de 2026-08-26: a 0,65 nenhuma das três leituras estoura.
+    O custo está registrado no `.env.example` — a faixa 0,55–0,65 fica cega de propósito;
+  - a política passou a decidir contra **o que o canal foi informado por último**, não contra a
+    linha anterior da tabela, com histerese de 2 ciclos no all-clear e janela de reenvio aplicada
+    também às trocas de tipo de falha (`breached` ↔ `no_data` mandava uma mensagem por ciclo,
+    para sempre). A falha continua saindo no primeiro ciclo; só a recuperação espera.
+
+  O que a mudança de política **não** faz: se a recuperação se sustentar e for entregue, a quebra
+  seguinte é incidente novo e sai. Isso é correto, e é por isso que a calibração é a metade que
+  fecha o caso de 2026-08-26 — as duas juntas, não a política sozinha.
 - **A auditoria de rede da S6.2b nunca foi rodada.** Os scripts, o runbook e o template estão em
   `ops/audit/`; **nenhum relatório preenchido existe**, e o produto da história é o registro, não o
   script. Fechar isso e ler a whitelist do Plan (item abaixo) são a mesma tarefa.

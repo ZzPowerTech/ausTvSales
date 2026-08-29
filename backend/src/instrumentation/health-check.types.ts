@@ -29,12 +29,6 @@ export const HEALTH_CHECK_STATUSES = [
 
 export type HealthCheckStatus = (typeof HEALTH_CHECK_STATUSES)[number];
 
-/** Statuses that must reach Discord. */
-export const NOTIFIABLE_STATUSES: readonly HealthCheckStatus[] = [
-  'breached',
-  'error',
-];
-
 /**
  * The seven checks of spec §6.1, each paired with the disaster it would have
  * caught. The string values are persisted, so they are part of the data contract

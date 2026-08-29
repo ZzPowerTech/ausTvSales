@@ -9,6 +9,14 @@ import type {
   LastAlert,
 } from './health-check.types';
 
+/**
+ * How far back {@link HealthCheckStore.healthyStreak} looks.
+ *
+ * Generous next to any plausible cadence — at 15 minutes it covers ~670 rows per
+ * check — and its only failure direction is holding a recovery back.
+ */
+const STREAK_HORIZON_DAYS = 7;
+
 /** One check verdict, before it is persisted. */
 export interface HealthCheckObservation {
   /** Persisted check name, possibly scoped (`plan.collection_alive:survival`). */
@@ -142,9 +150,20 @@ export class HealthCheckStore {
    * coin flip. This is what lets the policy tell them apart — see
    * `AlertPolicyInput.healthyStreak`.
    *
-   * @param window how many recent rows per check to consider. The streak
-   *   saturates here, which is fine: the policy only compares it against a
-   *   small threshold.
+   * ## Two bounds, both erring toward silence
+   *
+   * The streak saturates at `window`, so the caller must pass at least the
+   * threshold it intends to compare against — otherwise the recovery is starved
+   * forever and, worse, `lastAlert` stays pinned to a failure that was fixed
+   * long ago, so the channel is left believing a solved problem is still open.
+   * The runner passes its own `confirmRecoveryAfter` for exactly this reason.
+   *
+   * Rows older than {@link STREAK_HORIZON_DAYS} are not read at all, which keeps
+   * this from re-ranking an append-only table that has no retention policy. A
+   * check whose rows are all older than the horizon is simply absent from the
+   * result, and absent means streak 0 — held back, never a false all-clear.
+   *
+   * @param window how many recent rows per check to consider.
    */
   async healthyStreak(window = 10): Promise<Map<string, number>> {
     const result = await this.db.execute<{
@@ -161,6 +180,7 @@ export class HealthCheckStore {
             ORDER BY ${healthChecks.checkedAt} DESC, ${healthChecks.id} DESC
           ) AS rn
         FROM ${healthChecks}
+        WHERE ${healthChecks.checkedAt} > now() - ${sql.raw(`interval '${STREAK_HORIZON_DAYS} days'`)}
       ) ranked
       WHERE rn <= ${window}
       ORDER BY check_name, rn
@@ -223,7 +243,11 @@ export class HealthCheckStore {
           isNotNull(healthChecks.alertedAt),
         ),
       )
-      .orderBy(desc(healthChecks.alertedAt))
+      // The tiebreak is not decoration: `markAlerted` stamps every row of a
+      // cycle with the same `now()`, so two observations of one check announced
+      // together tie exactly — and the winner decides which *status* the whole
+      // policy compares against.
+      .orderBy(desc(healthChecks.alertedAt), desc(healthChecks.id))
       .limit(1);
 
     const row = rows[0];

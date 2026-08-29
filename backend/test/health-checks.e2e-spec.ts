@@ -220,6 +220,62 @@ describe('health_checks (e2e)', () => {
     });
   });
 
+  describe('healthyStreak', () => {
+    // A unica cobertura que executa a query de janela de verdade. O unit spec
+    // dela mocka o `db.execute` e monta as linhas ja ordenadas, entao valida o
+    // laco em JS, nao o SQL — um erro no PARTITION BY ou no `rn <= window` nao
+    // seria pego por nada sem este teste.
+
+    /** Grava vereditos em sequencia, um por chamada, do mais antigo ao mais novo. */
+    async function sequence(
+      checkName: string,
+      statuses: ReadonlyArray<'ok' | 'breached' | 'no_data' | 'error'>,
+    ): Promise<void> {
+      for (const status of statuses) {
+        await store.record([
+          { checkName, status, detail: { summary: `verdito ${status}` } },
+        ]);
+      }
+    }
+
+    it('conta os ok consecutivos e para no primeiro veredito ruim', async () => {
+      const check = scopedCheckName(HealthCheckName.CollectionAlive, 'streak');
+      await sequence(check, ['ok', 'breached', 'ok', 'ok']);
+
+      const streaks = await store.healthyStreak();
+
+      expect(streaks.get(check)).toBe(2);
+    });
+
+    it('trata no_data como quebra de sequencia, nao como ok', async () => {
+      const check = scopedCheckName(HealthCheckName.CollectionAlive, 'gap');
+      await sequence(check, ['ok', 'no_data', 'ok']);
+
+      expect((await store.healthyStreak()).get(check)).toBe(1);
+    });
+
+    it('omite o check cujo veredito mais recente nao e ok', async () => {
+      const check = scopedCheckName(HealthCheckName.CollectionAlive, 'down');
+      await sequence(check, ['ok', 'ok', 'breached']);
+
+      expect((await store.healthyStreak()).has(check)).toBe(false);
+    });
+
+    it('satura na janela pedida e mantem os checks independentes', async () => {
+      const capped = scopedCheckName(HealthCheckName.OrphanInstance, 'capped');
+      const other = scopedCheckName(HealthCheckName.OrphanInstance, 'other');
+      await sequence(capped, ['ok', 'ok', 'ok', 'ok']);
+      await sequence(other, ['error']);
+
+      const streaks = await store.healthyStreak(2);
+
+      // A saturacao e o motivo de o runner passar o proprio limiar como janela:
+      // uma janela menor que o limiar jamais o satisfaria.
+      expect(streaks.get(capped)).toBe(2);
+      expect(streaks.has(other)).toBe(false);
+    });
+  });
+
   describe('alert bookkeeping', () => {
     it('marks only the given rows and reports the count', async () => {
       const records = await store.record([

@@ -20,10 +20,17 @@ const DEFAULT_WINDOW_DAYS = 7;
  * verdict.
  *
  * The reading itself is the calibration: the real share is ~51% and stable, so
- * the ceiling belongs above the band, not inside it. 0.65 leaves roughly 14
- * points of headroom — wide enough that ordinary variation is quiet, narrow
- * enough that the bot-registration surge this check exists to catch (which
- * would push the share toward 1.0, not toward 0.55) still trips it.
+ * the ceiling belongs above the band, not inside it. 0.65 leaves ~14 points of
+ * headroom, which buys quiet at a stated cost: **the 0.55–0.65 band is now
+ * deliberately blind.** By the same arithmetic that motivated the change, ~4
+ * extra offline arrivals out of ~32 move the share 13 points, so a real drift
+ * from 51% to 64% passes in silence.
+ *
+ * That trade is taken on the assumption that a bot-registration surge — the
+ * event this check exists to catch — arrives as a large share, not a 13-point
+ * drift. The assumption is untested: no such surge has ever been observed here,
+ * which is why the check was built. If one is ever observed, this number is the
+ * first thing to revisit.
  */
 const DEFAULT_MAX_SHARE = 0.65;
 /** Below this many arrivals the share is noise, not a trend. */

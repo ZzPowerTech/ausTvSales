@@ -328,6 +328,54 @@ describe('HealthCheckRunner', () => {
     });
   });
 
+  describe('recuperacoes seguras', () => {
+    it('conta as recuperacoes seguradas separado do resto da supressao', async () => {
+      // O numero que o docblock de `recovery_unconfirmed` chama de "o numero a
+      // observar" precisa existir em algum lugar observavel. Um
+      // `HEALTH_ALERT_CONFIRM_RECOVERY` alto demais nunca deixa um all-clear
+      // sair, e sem este campo isso nao aparece em lugar nenhum.
+      const store = buildStore();
+      store.lastAlert.mockResolvedValue({
+        status: 'breached',
+        at: new Date('2026-08-22T10:00:00.000Z'),
+      });
+      store.healthyStreak.mockResolvedValue(new Map([['a', 1]]));
+      const { alerter } = buildAlerter();
+      const check = fakeCheck(HealthCheckName.OrphanInstance, () =>
+        Promise.resolve([observation('a', 'ok')]),
+      );
+
+      const summary = await new HealthCheckRunner(
+        store.store,
+        alerter,
+        config(),
+        [check],
+      ).runAll();
+
+      expect(summary.recoveryHeld).toBe(1);
+      expect(summary.recovered).toBe(0);
+    });
+
+    it('pede a sequencia com a janela igual ao limiar configurado', async () => {
+      // Uma janela menor que o limiar satura abaixo dele, e a recuperacao morre
+      // de fome para sempre — com o `lastAlert` preso numa falha ja resolvida.
+      const store = buildStore();
+      const { alerter } = buildAlerter();
+      const check = fakeCheck(HealthCheckName.OrphanInstance, () =>
+        Promise.resolve([observation('a', 'ok')]),
+      );
+
+      await new HealthCheckRunner(
+        store.store,
+        alerter,
+        config({ HEALTH_ALERT_CONFIRM_RECOVERY: 7 }),
+        [check],
+      ).runAll();
+
+      expect(store.healthyStreak).toHaveBeenCalledWith(7);
+    });
+  });
+
   describe('configuracao de re-alerta', () => {
     it('converts HEALTH_ALERT_REALERT_HOURS into the policy window', async () => {
       const store = buildStore();

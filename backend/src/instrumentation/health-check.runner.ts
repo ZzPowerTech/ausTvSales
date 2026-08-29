@@ -34,6 +34,14 @@ export interface HealthCheckRunSummary {
   recovered: number;
   lostSignal: number;
   suppressed: number;
+  /**
+   * Recoveries held back awaiting confirmation.
+   *
+   * Surfaced rather than buried in `suppressed` because it is the number to
+   * watch if `HEALTH_ALERT_CONFIRM_RECOVERY` is ever tuned: a value that keeps
+   * this permanently above zero is a value that never lets an all-clear out.
+   */
+  recoveryHeld: number;
   /** Rows whose notification actually reached Discord and were stamped. */
   alerted: number;
 }
@@ -141,7 +149,11 @@ export class HealthCheckRunner {
 
     // 4. The healthy streak includes the verdict just written, because "has it
     //    been ok for two cycles *including this one*" is the question asked.
-    const healthyStreak = await this.store.healthyStreak();
+    //    The window is the threshold itself: a streak that saturated below it
+    //    could never satisfy it, and the all-clear would starve forever.
+    const healthyStreak = await this.store.healthyStreak(
+      this.confirmRecoveryAfter,
+    );
 
     const decision = decideAlerts({
       observations: records,
@@ -166,6 +178,9 @@ export class HealthCheckRunner {
       recovered: decision.recovered.length,
       lostSignal: decision.lostSignal.length,
       suppressed: decision.suppressed.length,
+      recoveryHeld: decision.suppressed.filter(
+        (item) => item.reason === 'recovery_unconfirmed',
+      ).length,
       alerted,
     };
 
@@ -217,6 +232,7 @@ export class HealthCheckRunner {
       `error=${summary.byStatus.error}`,
       `anunciados=${summary.announced}`,
       `entregues=${summary.alerted}`,
+      `recuperacoes_seguras=${summary.recoveryHeld}`,
     ];
 
     const failing = summary.byStatus.breached + summary.byStatus.error;
@@ -256,6 +272,7 @@ function emptySummary(startedAt: Date, ran: boolean): HealthCheckRunSummary {
     recovered: 0,
     lostSignal: 0,
     suppressed: 0,
+    recoveryHeld: 0,
     alerted: 0,
   };
 }

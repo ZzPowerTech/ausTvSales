@@ -242,21 +242,31 @@ describe('decideAlerts', () => {
       ]);
     });
 
-    it('trata no_data apos falha anunciada como sinal perdido, nao como recuperacao', () => {
+    it('nunca trata no_data apos falha anunciada como recuperacao', () => {
+      // Nao e recuperacao: o check nao voltou ao normal, ele parou de poder ser
+      // medido. Colocar isso no mesmo balde de `recovered` fazia o alerter
+      // publicar um embed verde "normalizado" sobre uma perda de coleta — o
+      // falso all-clear que o ADR-006 existe para impedir. Essa propriedade vale
+      // dentro e fora da janela de reenvio; o que a janela decide e apenas
+      // QUANDO o canal ouve, nunca se a perda vira um all-clear.
       const record = observation(HealthCheckName.TutorialEntryRate, 'no_data');
 
-      const decision = decide({
+      const dentro = decide({
         observations: [record],
         lastAlert: told(record.checkName, 'breached', 2),
       });
 
-      expect(decision.announce).toEqual([]);
-      // Nao e recuperacao: o check nao voltou ao normal, ele parou de poder ser
-      // medido. Colocar isso no mesmo balde de `recovered` fazia o alerter
-      // publicar um embed verde "normalizado" sobre uma perda de coleta — o
-      // falso all-clear que o ADR-006 existe para impedir.
-      expect(decision.recovered).toEqual([]);
-      expect(decision.lostSignal).toEqual([record]);
+      expect(dentro.recovered).toEqual([]);
+      expect(dentro.announce).toEqual([]);
+      expect(dentro.suppressed).toEqual([{ record, reason: 'grouped' }]);
+
+      const fora = decide({
+        observations: [record],
+        lastAlert: told(record.checkName, 'breached', 25),
+      });
+
+      expect(fora.recovered).toEqual([]);
+      expect(fora.lostSignal).toEqual([record]);
     });
 
     it('nao repete o sinal perdido a cada ciclo', () => {
@@ -290,7 +300,9 @@ describe('decideAlerts', () => {
         observations: [back, gone],
         lastAlert: new Map([
           ...told(back.checkName, 'breached', 2),
-          ...told(gone.checkName, 'breached', 2),
+          // Fora da janela, para que a perda de sinal saia neste ciclo em vez de
+          // ficar agrupada — o ponto do teste e o roteamento, nao o tempo.
+          ...told(gone.checkName, 'breached', 25),
         ]),
         healthyStreak: confirmed(back.checkName),
       });
@@ -335,20 +347,16 @@ describe('decideAlerts', () => {
       ]);
     });
 
-    it('colapsa a oscilacao real de 2026-08-26 em uma unica mensagem', () => {
-      // A sequencia observada em producao, a 15 minutos de cadencia:
-      //   19:39  51,5%  17/33  breached
-      //   19:54  50,0%  16/32  ok
-      //   21:24  51,6%  16/31  breached
-      // Nada mudou no servidor: com n≈32 um jogador vira o alerta, e o limiar
-      // caiu em cima do valor real. O canal recebeu tres mensagens.
-      const check = HealthCheckName.OfflineAccountShare;
-      const cycles: Array<{ at: string; status: HealthCheckStatus }> = [
-        { at: '2026-08-26T22:39:00.000Z', status: 'breached' },
-        { at: '2026-08-26T22:54:00.000Z', status: 'ok' },
-        { at: '2026-08-27T00:24:00.000Z', status: 'breached' },
-      ];
-
+    /**
+     * Replays a sequence through the policy the way the runner does, stamping
+     * `lastAlert` only from what the alerter would have delivered.
+     *
+     * Returns the statuses that reached the channel, in order.
+     */
+    function replay(
+      check: string,
+      cycles: ReadonlyArray<{ at: string; status: HealthCheckStatus }>,
+    ): HealthCheckStatus[] {
       let lastAlert: LastAlert | null = null;
       let okStreak = 0;
       const messages: HealthCheckStatus[] = [];
@@ -368,20 +376,91 @@ describe('decideAlerts', () => {
         });
 
         // O runner so carimba `alerted_at` no que o alerter entregou.
-        const published = [
+        for (const sent of [
           ...decision.announce,
           ...decision.recovered,
           ...decision.lostSignal,
-        ];
-        for (const sent of published) {
+        ]) {
           messages.push(sent.status);
           lastAlert = { status: sent.status, at: now };
         }
       }
 
-      // Uma mensagem: a falha das 19:39. O all-clear das 19:54 nao se sustentou,
-      // e a falha das 21:24 e o mesmo incidente que o canal nunca viu fechar.
+      return messages;
+    }
+
+    it('colapsa uma re-quebra logo apos um all-clear que nao se sustentou', () => {
+      // ATENCAO ao que este teste prova e ao que NAO prova.
+      //
+      // Ele NAO e a reconstrucao da producao de 2026-08-26. Aquele dia teve tres
+      // mensagens as 19:39, 19:54 e 21:24, e os seis ciclos entre 19:54 e 21:24
+      // nao foram registrados. Se tiverem sido `ok` — o mais provavel, ja que a
+      // politica antiga teria anunciado qualquer `breached` ali —, a recuperacao
+      // se confirmaria as 20:09 e a quebra das 21:24 seria incidente novo, que
+      // sai. O que de fato cala aquela sequencia e a calibracao do limiar para
+      // 0.65, com a qual nenhuma das tres leituras estoura.
+      //
+      // O que este teste prova e o mecanismo: uma recuperacao que nao se
+      // sustentou nao fecha o incidente, e a quebra seguinte e agrupada.
+      const check = HealthCheckName.OfflineAccountShare;
+
+      const messages = replay(check, [
+        { at: '2026-08-26T22:39:00.000Z', status: 'breached' },
+        { at: '2026-08-26T22:54:00.000Z', status: 'ok' },
+        { at: '2026-08-26T23:09:00.000Z', status: 'breached' },
+      ]);
+
       expect(messages).toEqual(['breached']);
+    });
+
+    it('deixa passar a quebra que vem depois de um all-clear entregue', () => {
+      // O outro lado da moeda, e e o comportamento correto: um check que ficou
+      // comprovadamente bem por horas e entao quebrou e noticia, nao ruido.
+      const check = HealthCheckName.OfflineAccountShare;
+
+      const messages = replay(check, [
+        { at: '2026-08-26T22:39:00.000Z', status: 'breached' },
+        { at: '2026-08-26T22:54:00.000Z', status: 'ok' },
+        { at: '2026-08-26T23:09:00.000Z', status: 'ok' },
+        { at: '2026-08-27T00:24:00.000Z', status: 'breached' },
+      ]);
+
+      expect(messages).toEqual(['breached', 'ok', 'breached']);
+    });
+
+    it('nao deixa a troca de tipo de falha virar uma mensagem por ciclo', () => {
+      // O modo de falha que a versao anterior desta politica tinha: toda troca
+      // de estado com falha anunciava na hora, entao um check oscilando entre
+      // dois estados ruins mandava 96 mensagens por dia, para sempre. O
+      // `platform.offline_account_share` fica exatamente nessa fronteira quando
+      // as chegadas rondam o `PLATFORM_OFFLINE_MIN_SAMPLE`.
+      const check = HealthCheckName.OfflineAccountShare;
+      const cycles: Array<{ at: string; status: HealthCheckStatus }> = [];
+      for (let i = 0; i < 20; i++) {
+        cycles.push({
+          at: new Date(NOW.getTime() + i * 15 * MINUTES).toISOString(),
+          status: i % 2 === 0 ? 'breached' : 'no_data',
+        });
+      }
+
+      // Uma mensagem: a entrada na falha. O resto cabe na janela de reenvio.
+      expect(replay(check, cycles)).toEqual(['breached']);
+    });
+
+    it('deixa o error furar a janela uma vez, e so uma', () => {
+      // Chegar em `error` significa que a fonte sumiu, nao que ela leu mal — e o
+      // apagao de tres meses do ADR-006. Nao pode esperar um dia atras de um
+      // problema menor. Mas tambem nao pode virar um laco.
+      const check = HealthCheckName.CollectionAlive;
+      const cycles: Array<{ at: string; status: HealthCheckStatus }> = [];
+      for (let i = 0; i < 20; i++) {
+        cycles.push({
+          at: new Date(NOW.getTime() + i * 15 * MINUTES).toISOString(),
+          status: i % 2 === 0 ? 'breached' : 'error',
+        });
+      }
+
+      expect(replay(check, cycles)).toEqual(['breached', 'error']);
     });
 
     it('anuncia a falha no primeiro ciclo — a histerese e so da recuperacao', () => {

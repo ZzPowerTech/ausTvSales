@@ -207,9 +207,10 @@ describe('TutorialEntryRateCheck', () => {
     });
 
     it('uses `error` and not `no_data`, because only `error` notifies', async () => {
-      // The distinction is load-bearing: `NOTIFIABLE_STATUSES` holds `error` and
-      // not `no_data`, so a stopped ETL filed as `no_data` would sit in the
-      // table unannounced — the exact silence this epic exists to remove.
+      // The distinction is load-bearing: `decideAlerts` announces a first
+      // `error` on sight and suppresses a `no_data` that has nothing open, so a
+      // stopped ETL filed as `no_data` would sit in the table unannounced — the
+      // exact silence this epic exists to remove.
       const [observation] = await build(
         planWith(overview(100)),
         storeWith({ syncAgeMs: 30 * MS_PER_DAY }),
