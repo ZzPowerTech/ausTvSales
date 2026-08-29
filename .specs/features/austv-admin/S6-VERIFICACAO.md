@@ -140,7 +140,7 @@ aplicação nunca substitui filtro de rede*):
 | Os 7 checks implementados e agendados | 6 classes registradas no token `HEALTH_CHECKS` na data desta auditoria; a **sétima entrou em 2026-08-28** pela S8.0. `HealthCheckScheduler` com intervalo, opt-in e carência no boot | ✅ **fechado**, 6 aqui e 7 desde 28/08 |
 | Falha dispara alerta ativo no Discord | `DiscordAlerter` + `HealthCheckRunner` anunciam `breached` e `error` | ✅ no código |
 | Estado persistido em `health_check`, com histórico | tabela `health_checks` **append-only** (migration `0002`), uma linha por execução, índice `(check_name, checked_at desc)` | ✅ |
-| **Verificado derrubando uma instância de propósito** | — | ❌ **nunca feito** |
+| **Verificado derrubando uma instância de propósito** | alertas reais observados no Discord em 2026-08-26; teste destrutivo ainda não | 🟡 **metade fechada** — ver abaixo |
 | Alerta de tutorial testado com valor forçado | `tutorial-entry-rate.alert.spec.ts`, desde 2026-08-28 | ✅ **fechado na S8.0** — força 12 de 100 e assere sobre o payload do webhook |
 | Alerta repetido é agrupado, não vira flood | `alert-policy` com `HEALTH_ALERT_REALERT_HOURS` (24h) | ✅ no código |
 
@@ -205,12 +205,35 @@ não testado, e a história inteira existe para que o alerta chegue no dia ruim"
 
 O que falta é operacional, e é conhecido:
 
-1. `HEALTH_CHECK_ENABLED=true` num ambiente real (hoje `false` por padrão, deliberadamente).
-2. `DISCORD_ALERT_WEBHOOK_URL` provisionado.
-3. Derrubar uma instância de propósito e confirmar a mensagem no canal.
+1. ✅ `HEALTH_CHECK_ENABLED=true` num ambiente real (era `false` por padrão, deliberadamente).
+2. ✅ `DISCORD_ALERT_WEBHOOK_URL` provisionado.
+3. ⏳ Derrubar uma instância de propósito e confirmar a mensagem no canal.
 
-**Enquanto isso não acontece, toda a camada de saúde — incluindo a S7.1, que a expõe por API — é
-construção sobre uma entrega que ninguém verificou ponta a ponta.**
+> ### ✅ Atualizado em 2026-08-28 — a cadeia funciona em produção
+>
+> O dono mostrou capturas do canal do Discord com alertas reais do
+> `platform.offline_account_share (Survival)`, em 2026-08-26. Isso **derruba a frase que fechava
+> esta seção** — a camada não é mais construção sobre algo que ninguém verificou.
+>
+> **O que as capturas provam, ponta a ponta:**
+>
+> | peça | evidência |
+> |---|---|
+> | agendamento rodando | três ciclos: 19:39, 19:54, 21:24 |
+> | check → persiste → política → alerter | mensagem no canal |
+> | `breached` chega | 🔴 *"1 check(s) em falha"* |
+> | **recuperação chega** | 🟢 *"1 normalizado(s)"* — fechar o ciclo era decisão explícita da `alert-policy` |
+> | agrupamento funciona | não houve uma mensagem por ciclo de 15 min |
+> | **`n` ao lado de todo percentual** | `n=33`, `n=32`, `n=31` — a regra que o projeto mais repete, em produção |
+> | contexto e escape de markdown | `server=Survival · bedrock=8 · offline=17 · janela_dias=7` |
+>
+> **O que ainda falta, e é metade diferente:** tudo acima é o caminho **`breached`**. O critério 4
+> diz *"derrubando uma instância"*, o que exercita o caminho **`error`** — fonte que **morre**. É
+> outro código (`PlanApiError` → veredito `error` → notificável), e é o caminho que cobre o apagão
+> de três meses. Continua sem observação.
+>
+> Versão mais barata do teste: parar o webserver do Plan, ou bloquear a 25504 a partir da VPS, por
+> um ciclo.
 
 ### E os três limiares seguem sem calibração
 

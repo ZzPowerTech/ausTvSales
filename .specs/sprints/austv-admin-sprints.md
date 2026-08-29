@@ -183,9 +183,14 @@ A entrega mais importante do plano. Sem ela, tudo pode parar em silêncio de nov
    construiu a fonte, e o sétimo entrou em **2026-08-28** — este critério fecha retroativamente
 2. [x] Falha dispara **alerta ativo no canal do Discord**, não espera alguém abrir página
 3. [x] Estado de cada check persistido em `health_check`, com histórico
-4. [ ] **Verificado derrubando uma instância de propósito** — o alerta precisa chegar.
-   **Pendente:** exige o agendamento ligado com webhook num ambiente real. É o **último item aberto
-   da S6** e a promessa raiz do épico
+4. [~] **Verificado derrubando uma instância de propósito** — **metade fechada em 2026-08-28.**
+   O agendamento está ligado com webhook em produção, e alertas reais do
+   `platform.offline_account_share` foram observados chegando no canal em 26/08 — `breached`,
+   recuperação, agrupamento e o `n` ao lado do percentual, tudo funcionando.
+
+   **Falta o caminho `error`**, que é o que a redação do critério pede: uma fonte que **morre**, não
+   um limiar que estoura. É outro código e é o que cobre o apagão de três meses. Teste mais barato:
+   parar o webserver do Plan, ou bloquear a 25504 da VPS, por um ciclo
 5. [x] ~~Alerta de taxa de entrada no tutorial testado com valor forçado~~ — **fechado na S8.0** em
    2026-08-28. Não confundir com o critério 4: um prova que a mensagem é construída certo, o outro
    que ela chega
