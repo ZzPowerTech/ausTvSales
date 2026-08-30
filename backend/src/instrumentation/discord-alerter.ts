@@ -9,6 +9,19 @@ const DISCORD_LIMITS = {
   embedFields: 25,
   fieldNameChars: 256,
   fieldValueChars: 1024,
+  /**
+   * The limit that is not per-embed: Discord sums the titles, descriptions,
+   * field names and field values of **every** embed in one message and rejects
+   * the whole request with a 400 above this budget.
+   *
+   * The per-embed cap of 25 fields gives false comfort here. Three buckets of 25
+   * fields is structurally allowed and lands far above 6000 — and the payload
+   * that reaches that size is exactly the one nobody can afford to lose, because
+   * `runChecks` turns an unreachable source into one `error` observation per
+   * check, each carrying an exception message of up to `fieldValueChars`. A
+   * blackout is what makes the message too big to send.
+   */
+  aggregateChars: 6000,
 } as const;
 
 /**
@@ -40,6 +53,27 @@ interface DiscordEmbed {
   fields: DiscordEmbedField[];
   timestamp: string;
 }
+
+/**
+ * One group of observations and the embed that renders it.
+ *
+ * `cutOrder` is the order in which the aggregate budget takes fields away, not
+ * the order the embeds appear in: recoveries are good news and can wait a cycle,
+ * a lost signal is a failure we can no longer see, and an active failure is the
+ * message's whole reason to exist. Display order stays as it reads best.
+ */
+interface AlertBucket {
+  /** Everything the decision put in this bucket, before any cap. */
+  records: readonly HealthCheckRecord[];
+  /** Rendered fields, already capped at `embedFields` — 1:1 with `records`. */
+  fields: DiscordEmbedField[];
+  /** Lower is dropped first when the payload does not fit. */
+  cutOrder: number;
+  build: (fields: DiscordEmbedField[], total: number) => DiscordEmbed;
+}
+
+/** What one POST attempt did, so the caller can tell refusal from silence. */
+type DeliveryOutcome = { ok: true } | { ok: false; status: number | null };
 
 /**
  * Delivers instrumentation-health alerts to Discord (story S6.3, spec §5.3/§6.1).
@@ -99,33 +133,10 @@ export class DiscordAlerter implements OnModuleInit {
    * reached the channel — never that nothing was wrong.
    */
   async publish(decision: AlertDecision): Promise<number[]> {
-    // Slice FIRST, then derive the returned ids from the same slices that became
-    // embed fields.
-    //
-    // The previous version built the embeds from `slice(0, 25)` but returned
-    // every id in the decision. The caller stamps `alerted_at` on what we return,
-    // so with 30 failing checks, 5 were recorded as announced without ever
-    // appearing in the message — and `decideAlerts` then suppressed them as
-    // `grouped` for the whole re-alert window. Broken checks went quiet for a
-    // day while the database claimed they had been reported.
-    const failures = decision.announce.slice(0, DISCORD_LIMITS.embedFields);
-    const recoveries = decision.recovered.slice(0, DISCORD_LIMITS.embedFields);
-    const lost = decision.lostSignal.slice(0, DISCORD_LIMITS.embedFields);
+    const buckets = this.buildBuckets(decision);
+    const total = buckets.reduce((sum, b) => sum + b.records.length, 0);
 
-    const embeds: DiscordEmbed[] = [];
-
-    if (failures.length > 0) {
-      embeds.push(this.buildFailureEmbed(failures, decision.announce.length));
-    }
-    if (recoveries.length > 0) {
-      embeds.push(
-        this.buildRecoveryEmbed(recoveries, decision.recovered.length),
-      );
-    }
-    if (lost.length > 0) {
-      embeds.push(this.buildLostSignalEmbed(lost, decision.lostSignal.length));
-    }
-    if (embeds.length === 0) {
+    if (total === 0) {
       return [];
     }
 
@@ -138,25 +149,90 @@ export class DiscordAlerter implements OnModuleInit {
       return [];
     }
 
-    const delivered = await this.post({
-      content: truncate(buildSummary(decision), DISCORD_LIMITS.contentChars),
+    // Cap FIRST, then derive the returned ids from exactly what was rendered.
+    //
+    // The caller stamps `alerted_at` on what we return here. An id returned for
+    // a field that never made it into the message is recorded as announced
+    // without anyone seeing it, and `decideAlerts` then suppresses it as
+    // `grouped` for the whole re-alert window — a broken check going quiet for a
+    // day while the database claims it was reported. That was the bug behind the
+    // 25-field cap, and the aggregate budget below can drop fields for exactly
+    // the same reason, so it obeys exactly the same rule.
+    const { embeds, shown } = fitWithinBudget(buckets);
+
+    if (embeds.length === 0) {
+      // Structurally reachable only with absurdly long details in every bucket.
+      // Sending the summary alone still beats silence: the count is in it, and
+      // the state is always in /health/instrumentation.
+      this.logger.error(
+        `Nenhum embed coube no orcamento de ${DISCORD_LIMITS.aggregateChars} ` +
+          `caracteres do Discord; enviando apenas o resumo de ${total} ` +
+          'observacao(oes)',
+      );
+    }
+
+    const outcome = await this.post({
+      content: truncate(
+        buildSummary(decision, shown.length),
+        DISCORD_LIMITS.contentChars,
+      ),
       embeds,
       // The single most important field here: it makes every mention inert,
       // whatever the check detail happens to contain.
       allowed_mentions: { parse: [] as string[] },
     });
 
-    if (!delivered) {
+    if (!outcome.ok) {
+      // Said out loud, because `publish` returning `[]` on its own is
+      // indistinguishable from "there was nothing to report".
+      this.logger.error(
+        `Alerta NAO entregue${outcome.status === null ? '' : ` (HTTP ${outcome.status})`}: ` +
+          `${total} observacao(oes) seguem sem carimbo e serao reanunciadas no ` +
+          'proximo ciclo',
+      );
       return [];
     }
 
-    // Only what actually reached the channel. Anything truncated stays unstamped
-    // so the next cycle announces it instead of grouping it away.
-    return [...failures, ...recoveries, ...lost].map((record) => record.id);
+    // Only what actually reached the channel. Anything cut — by the field cap or
+    // by the aggregate budget — stays unstamped so the next cycle announces it
+    // instead of grouping it away.
+    return shown.map((record) => record.id);
+  }
+
+  /** Display order; `cutOrder` decides what the budget takes away first. */
+  private buildBuckets(decision: AlertDecision): AlertBucket[] {
+    const buckets: AlertBucket[] = [
+      {
+        records: decision.announce,
+        fields: [],
+        cutOrder: 3,
+        build: (fields, total) => this.buildFailureEmbed(fields, total),
+      },
+      {
+        records: decision.recovered,
+        fields: [],
+        cutOrder: 1,
+        build: (fields, total) => this.buildRecoveryEmbed(fields, total),
+      },
+      {
+        records: decision.lostSignal,
+        fields: [],
+        cutOrder: 2,
+        build: (fields, total) => this.buildLostSignalEmbed(fields, total),
+      },
+    ];
+
+    for (const bucket of buckets) {
+      bucket.fields = bucket.records
+        .slice(0, DISCORD_LIMITS.embedFields)
+        .map((record) => toField(record));
+    }
+
+    return buckets;
   }
 
   /** POST the payload, retrying once on a rate limit. Never throws. */
-  private async post(payload: unknown): Promise<boolean> {
+  private async post(payload: unknown): Promise<DeliveryOutcome> {
     for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt++) {
       try {
         const response = await fetch(this.webhookUrl as string, {
@@ -167,7 +243,7 @@ export class DiscordAlerter implements OnModuleInit {
         });
 
         if (response.ok) {
-          return true;
+          return { ok: true };
         }
 
         if (response.status === 429 && attempt < MAX_RATE_LIMIT_RETRIES) {
@@ -179,30 +255,45 @@ export class DiscordAlerter implements OnModuleInit {
           continue;
         }
 
+        if (response.status === 400) {
+          // Named apart from the other statuses because it is the one this
+          // module causes. A 400 does not heal on the next cycle: the same
+          // decision rebuilds the same oversized payload and is refused again,
+          // for as long as the outage lasts. If this line ever appears, the
+          // budget below has a hole in it.
+          this.logger.error(
+            'Discord recusou o payload (HTTP 400) — a mensagem estourou algum ' +
+              `limite de formato apesar do orcamento de ${DISCORD_LIMITS.aggregateChars} ` +
+              'caracteres. Isso e um defeito deste modulo, nao uma falha do ' +
+              'Discord, e ele se repete a cada ciclo ate ser corrigido.',
+          );
+          return { ok: false, status: 400 };
+        }
+
         // Status only — the body can echo the payload, and the URL is a secret.
         this.logger.error(
           `Falha ao entregar alerta no Discord: HTTP ${response.status}`,
         );
-        return false;
+        return { ok: false, status: response.status };
       } catch (error) {
         this.logger.error(
           'Falha ao entregar alerta no Discord',
           error instanceof Error ? error.message : String(error),
         );
-        return false;
+        return { ok: false, status: null };
       }
     }
 
-    return false;
+    return { ok: false, status: null };
   }
 
   /**
-   * @param shown records that fit inside the message
+   * @param shown fields that fit inside the message
    * @param total how many there were before truncation — the title states the
    *   real count even when the fields cannot show them all
    */
   private buildFailureEmbed(
-    shown: HealthCheckRecord[],
+    shown: DiscordEmbedField[],
     total: number,
   ): DiscordEmbed {
     return {
@@ -211,19 +302,19 @@ export class DiscordAlerter implements OnModuleInit {
         'A medicao da rede do jogo parou de responder como esperado. ' +
         'Detalhe por check abaixo.',
       color: COLOR_FAILURE,
-      fields: shown.map((record) => toField(record)),
+      fields: shown,
       timestamp: new Date().toISOString(),
     };
   }
 
   private buildRecoveryEmbed(
-    shown: HealthCheckRecord[],
+    shown: DiscordEmbedField[],
     total: number,
   ): DiscordEmbed {
     return {
       title: `🟢 Instrumentacao: ${total} check(s) normalizado(s)`,
       color: COLOR_RECOVERY,
-      fields: shown.map((record) => toField(record)),
+      fields: shown,
       timestamp: new Date().toISOString(),
     };
   }
@@ -236,7 +327,7 @@ export class DiscordAlerter implements OnModuleInit {
    * stopped, because that is what happened.
    */
   private buildLostSignalEmbed(
-    shown: HealthCheckRecord[],
+    shown: DiscordEmbedField[],
     total: number,
   ): DiscordEmbed {
     return {
@@ -246,13 +337,106 @@ export class DiscordAlerter implements OnModuleInit {
         'Isso NAO e recuperacao: a fonte parou de responder, e o problema ' +
         'anterior segue sem poder ser medido.',
       color: COLOR_LOST_SIGNAL,
-      fields: shown.map((record) => toField(record)),
+      fields: shown,
       timestamp: new Date().toISOString(),
     };
   }
 }
 
-function buildSummary(decision: AlertDecision): string {
+/**
+ * Fit the buckets inside Discord's aggregate character budget.
+ *
+ * Returns the embeds to send and, in bucket order, the records whose fields
+ * survived — the two are derived from the same slice on purpose, because the
+ * caller stamps `alerted_at` on what comes back.
+ *
+ * The cut is one field at a time from the lowest `cutOrder` that still has one,
+ * and a bucket emptied by the budget loses its embed entirely: an embed with a
+ * title and no fields still costs characters and reads as if the list were the
+ * whole story. What it was carrying is not lost — the counts stay in every
+ * title and in the summary line.
+ */
+function fitWithinBudget(buckets: readonly AlertBucket[]): {
+  embeds: DiscordEmbed[];
+  shown: HealthCheckRecord[];
+} {
+  const counts = buckets.map((bucket) => bucket.fields.length);
+
+  for (;;) {
+    const embeds = renderEmbeds(buckets, counts);
+    if (aggregateCost(embeds) <= DISCORD_LIMITS.aggregateChars) {
+      const shown = buckets.flatMap((bucket, index) =>
+        bucket.records.slice(0, counts[index]),
+      );
+      return { embeds, shown };
+    }
+
+    const victim = nextToCut(buckets, counts);
+    if (victim === -1) {
+      // Nothing left to give back. Better an embedless summary than a 400.
+      return { embeds: [], shown: [] };
+    }
+    counts[victim] -= 1;
+  }
+}
+
+/** Build the embeds for the first `counts[i]` fields of each bucket. */
+function renderEmbeds(
+  buckets: readonly AlertBucket[],
+  counts: readonly number[],
+): DiscordEmbed[] {
+  return buckets
+    .map((bucket, index) =>
+      counts[index] > 0
+        ? bucket.build(
+            bucket.fields.slice(0, counts[index]),
+            bucket.records.length,
+          )
+        : null,
+    )
+    .filter((embed): embed is DiscordEmbed => embed !== null);
+}
+
+/** Index of the bucket the budget takes the next field from, or -1 if empty. */
+function nextToCut(
+  buckets: readonly AlertBucket[],
+  counts: readonly number[],
+): number {
+  let victim = -1;
+  for (let index = 0; index < buckets.length; index++) {
+    if (counts[index] === 0) {
+      continue;
+    }
+    if (victim === -1 || buckets[index].cutOrder < buckets[victim].cutOrder) {
+      victim = index;
+    }
+  }
+  return victim;
+}
+
+/**
+ * What Discord counts against the 6000: titles, descriptions, field names and
+ * field values of every embed. `timestamp` and `color` are free, `content` has
+ * its own separate budget.
+ */
+function aggregateCost(embeds: readonly DiscordEmbed[]): number {
+  return embeds.reduce(
+    (total, embed) =>
+      total +
+      embed.title.length +
+      (embed.description?.length ?? 0) +
+      embed.fields.reduce(
+        (sum, field) => sum + field.name.length + field.value.length,
+        0,
+      ),
+    0,
+  );
+}
+
+/**
+ * @param shown how many observations actually became fields in this message
+ */
+function buildSummary(decision: AlertDecision, shown: number): string {
   const parts: string[] = [];
   if (decision.announce.length > 0) {
     parts.push(`${decision.announce.length} check(s) em falha`);
@@ -263,10 +447,13 @@ function buildSummary(decision: AlertDecision): string {
   if (decision.lostSignal.length > 0) {
     parts.push(`${decision.lostSignal.length} sem dados`);
   }
+  // Counted from what was rendered, not from the field cap alone, so a field
+  // dropped by the aggregate budget is reported here like any other.
   const overflow =
-    Math.max(0, decision.announce.length - DISCORD_LIMITS.embedFields) +
-    Math.max(0, decision.recovered.length - DISCORD_LIMITS.embedFields) +
-    Math.max(0, decision.lostSignal.length - DISCORD_LIMITS.embedFields);
+    decision.announce.length +
+    decision.recovered.length +
+    decision.lostSignal.length -
+    shown;
   if (overflow > 0) {
     // Silent truncation would read as "that was everything" when it was not.
     parts.push(`${overflow} nao exibido(s) por limite do Discord`);
