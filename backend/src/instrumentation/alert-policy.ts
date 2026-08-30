@@ -23,10 +23,13 @@ export type SuppressionReason =
   /**
    * The check already spent its message budget for this window.
    *
-   * Not silent: while this reason is being produced, a `flapping` notice goes
-   * out whenever the channel would otherwise pass a whole `reAlertAfterMs`
-   * hearing nothing about the check. See
-   * {@link AlertPolicyInput.maxAlertsPerWindow}.
+   * While this reason is being produced, a `flapping` notice goes out
+   * whenever the channel would otherwise pass a whole `reAlertAfterMs`
+   * hearing nothing about the check — **except** on an `ok`, which can
+   * never carry the notice, since it would be stamped `ok` and read as an
+   * all-clear nobody gave. A run of held `ok` observations therefore extends
+   * the quiet until the next non-`ok` one. Counted as `budgetHeld` in the run
+   * summary. See {@link AlertPolicyInput.maxAlertsPerWindow}.
    */
   | 'flapping';
 
@@ -128,8 +131,13 @@ export interface AlertPolicyInput {
    * What keeps a genuine recovery from starving is not a bypass but the free
    * pass above: once the flap's own `ok` messages age out of the window, a
    * confirmed recovery is news again and goes out on its own. The wait is
-   * bounded by `reAlertAfterMs` and is visible as `budgetHeld` in the run
-   * summary.
+   * bounded by `reAlertAfterMs` and shows up as `budgetHeld` in the run
+   * summary — and it is a real cost, measured at up to ~23h of the channel
+   * holding a `breached` over a check that is already healthy, with nothing
+   * said during the wait, because the notice cannot ride an `ok`.
+   *
+   * The reservation reduces false greens rather than removing them, for the
+   * reason given on `deliver`.
    */
   maxAlertsPerWindow: number;
   /**
@@ -249,13 +257,16 @@ export interface AlertPolicyInput {
  * produced.
  *
  * When the budget runs out the check goes quiet about that repetition, and the
- * quiet is announced rather than silent — an unannounced mute is the ADR-006
- * failure wearing the uniform of a fix. The guarantee is stated in terms of what
- * the channel experiences, because that is the thing that can be checked: **a
- * check never goes a whole `reAlertAfterMs` without a message while it is over
- * budget.** If the window passes in silence, the next over-budget observation is
- * published as a `flapping` notice saying the check is oscillating and has been
- * muted.
+ * quiet is announced rather than silent — an unannounced mute is the
+ * ADR-006 failure wearing the uniform of a fix. The guarantee is stated in
+ * terms of what the channel experiences, because that is the thing that can
+ * be checked: once a check has been quiet for `reAlertAfterMs` while over
+ * budget, **the next non-`ok` observation is published** as a `flapping`
+ * notice saying the check is oscillating and has been muted. A run of `ok`
+ * observations on the boundary stretches the quiet by those cycles — the
+ * notice may not be stamped `ok`, or it would read as an all-clear nobody
+ * gave — so the bound is one window plus that run, not one window flat.
+ * Measured at a few cycles over in the worst shapes found, never unbounded.
  *
  * One consequence worth naming, because it is a real cost and not an oversight:
  * inside a window in which the channel has already heard from the check, a
@@ -324,13 +335,21 @@ export function decideAlerts(input: AlertPolicyInput): AlertDecision {
      * Only repetition is gated — see `maxAlertsPerWindow` for why a status the
      * channel has not heard this window must always get through.
      *
-     * A recovery is held one slot earlier than everything else, and that slot is
-     * the whole point: whatever is delivered last defines what the channel
-     * believes while the check is muted. Let an all-clear take the final slot of
-     * a flapping check and the standing state becomes a green banner over
-     * something that is breaching every third cycle — a false all-clear, the one
-     * outcome this layer may never produce. Reserving the last slot for a
-     * problem means the standing state is always the problem.
+     * A recovery is held one slot earlier than everything else, and that slot
+     * is the point: whatever is delivered last defines what the channel
+     * believes while the check is muted. Let an all-clear take the final slot
+     * of a flapping check and the standing state becomes a green banner over
+     * something breaching every third cycle.
+     *
+     * It **reduces** that; it does not eliminate it, and the reason is one
+     * line up. The free pass short-circuits before the limit is consulted, so
+     * a first-of-its-status recovery still takes the last slot — measured,
+     * the reservation cuts false-green cycles by a few percent, not to zero.
+     * The trade is deliberate: the free pass is what keeps a genuine all-clear
+     * from starving, and starving one is worse than a green that a later
+     * failure corrects within the window. It is also inert for
+     * `maxAlertsPerWindow <= 2`, where the free pass already covers every slot
+     * there is.
      */
     const deliver = (bucket: HealthCheckRecord[]): void => {
       const limit =

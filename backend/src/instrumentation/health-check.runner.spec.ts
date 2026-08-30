@@ -366,6 +366,50 @@ describe('HealthCheckRunner', () => {
       expect(summary.recovered).toBe(0);
     });
 
+    it('conta e mostra o que o orcamento segurou, recuperacao inclusive', async () => {
+      // Uma recuperacao segurada pelo orcamento cairia no total generico de
+      // supressoes, que e exatamente o que a separacao do `recovery_unconfirmed`
+      // existe para evitar. Um `HEALTH_ALERT_MAX_PER_WINDOW` que mantenha este
+      // numero acima de zero e um valor que mantem o canal achando que coisas
+      // resolvidas seguem quebradas — entao ele tem de ser visivel.
+      const store = buildStore();
+      store.lastAlert.mockResolvedValue({
+        status: 'breached',
+        at: new Date('2026-08-22T11:00:00.000Z'),
+      });
+      store.healthyStreak.mockResolvedValue(5);
+      store.alertsInWindow.mockResolvedValue(
+        new Map<HealthCheckStatus, number>([
+          ['breached', 2],
+          ['ok', 2],
+        ]),
+      );
+      const log = jest
+        .spyOn(Logger.prototype, 'log')
+        .mockImplementation(() => undefined);
+      const { alerter, publish } = buildAlerter();
+      const check = fakeCheck(HealthCheckName.OrphanInstance, () =>
+        Promise.resolve([observation('a', 'ok')]),
+      );
+
+      const summary = await new HealthCheckRunner(
+        store.store,
+        alerter,
+        config(),
+        [check],
+      ).runAll();
+
+      // A sequencia satisfaz o `confirmRecoveryAfter`, entao nao foi o
+      // `recovery_unconfirmed` que segurou — foi o orcamento.
+      expect(summary.recoveryHeld).toBe(0);
+      expect(summary.budgetHeld).toBe(1);
+      expect(firstArg<AlertDecision>(publish).recovered).toEqual([]);
+      expect(log).toHaveBeenCalledWith(
+        expect.stringContaining('segurados_por_orcamento=1'),
+      );
+      log.mockRestore();
+    });
+
     it('pede a sequencia com a janela igual ao limiar configurado', async () => {
       // Uma janela menor que o limiar satura abaixo dele, e a recuperacao morre
       // de fome para sempre — com o `lastAlert` preso numa falha ja resolvida.

@@ -167,16 +167,19 @@ export class EnvironmentVariables {
   HEALTH_ALERT_CONFIRM_RECOVERY?: number;
 
   // Quantas vezes um check pode se REPETIR por janela de reenvio. Ao estourar,
-  // recebe um aviso de que vai ficar quieto (um por janela enquanto durar) e
-  // para de repetir. E o freio que nao depende de a regra de transicao ter
+  // para de repetir; se a janela inteira for passar calada, a proxima
+  // observacao que nao seja `ok` sai como aviso de silenciamento. E o freio que nao depende de a regra de transicao ter
   // previsto o formato da oscilacao — a regra ja errou duas vezes nisso.
   //
   // Nao barra um status que o canal ainda nao ouviu nesta janela: barrar isso
   // foi como uma versao anterior deste teto segurou a morte de uma fonte por 45
-  // horas. Recuperacao confirmada e barrada — sem isso ela ganha a corrida para
-  // ser a ultima mensagem e o canal fica segurando um verde sobre um check ainda
-  // quebrado; o passe do status-nao-ouvido a libera quando os `ok` da propria
-  // oscilacao saem da janela.
+  // horas. Recuperacao confirmada e barrada um slot antes das demais — sem
+  // isso ela ganha a corrida para ser a ultima mensagem e o canal fica
+  // segurando um verde sobre um check ainda quebrado. REDUZ esse caso, nao o
+  // elimina (o passe do status-nao-ouvido e avaliado antes do limite), e e
+  // inerte para os valores 1 e 2. O mesmo passe libera a recuperacao quando os
+  // `ok` da propria oscilacao saem da janela; a espera aparece no log como
+  // `segurados_por_orcamento`.
   @IsOptional()
   @IsInt()
   @Min(1)
