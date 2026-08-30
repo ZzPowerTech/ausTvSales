@@ -1,4 +1,5 @@
 import { ConfigService } from '@nestjs/config';
+import { NOTIFIABLE_STATUSES } from './health-check.types';
 import { OrphanInstanceCheck } from './orphan-instance.check';
 import type { PlanDatabase, PlanServerRow } from './plan-database';
 import { PlanServersConfig } from './plan-servers.config';
@@ -137,23 +138,44 @@ describe('OrphanInstanceCheck', () => {
     });
   });
 
-  describe('ausencia de dado', () => {
-    it('reports no_data when the catalogue is empty', async () => {
+  describe('catalogo vazio', () => {
+    it('reports error when the catalogue is empty', async () => {
       const [result] = await new OrphanInstanceCheck(
         dbReturning([]),
         serversConfig(REAL_CONFIG),
       ).run();
 
-      // An empty catalogue is the loudest version of this problem, not a pass.
-      expect(result.status).toBe('no_data');
+      // An empty catalogue is the loudest version of this problem, not a pass —
+      // and `no_data` would file the loudest version under the one status that
+      // never reaches Discord.
+      expect(result.status).toBe('error');
     });
 
+    it('files the empty catalogue under a notifiable status', async () => {
+      // The regression this pins. `decideAlerts` suppresses a `no_data` as
+      // `not_notifiable` while nothing is open on the check, so a `plan_servers`
+      // that empties from a clean state produced a row every fifteen minutes and
+      // never one message.
+      const [result] = await new OrphanInstanceCheck(
+        dbReturning([]),
+        serversConfig(REAL_CONFIG),
+      ).run();
+
+      expect(NOTIFIABLE_STATUSES).toContain(result.status);
+    });
+  });
+
+  describe('ausencia de dado', () => {
     it('reports no_data when nothing is configured to compare against', async () => {
       const [result] = await new OrphanInstanceCheck(
         dbReturning(REAL_CATALOGUE),
         serversConfig({}),
       ).run();
 
+      // Stays `no_data`: nothing failed, our own configuration is unset. An
+      // unconfigured staging box must not page the channel every re-alert
+      // window — the same call `InstrumentationHealthService` makes for
+      // `missing` checks.
       expect(result.status).toBe('no_data');
       expect(result.detail.n).toBe(2);
     });

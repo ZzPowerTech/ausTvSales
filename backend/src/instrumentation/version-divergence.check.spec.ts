@@ -1,3 +1,4 @@
+import { NOTIFIABLE_STATUSES } from './health-check.types';
 import type { PlanDatabase, PlanServerRow } from './plan-database';
 import { VersionDivergenceCheck } from './version-divergence.check';
 
@@ -90,16 +91,29 @@ describe('VersionDivergenceCheck', () => {
     });
   });
 
-  describe('ausencia de dado', () => {
-    it('reports no_data when the catalogue is empty', async () => {
+  describe('catalogo vazio', () => {
+    it('reports error, not no_data, when the catalogue is empty', async () => {
       const [result] = await new VersionDivergenceCheck(dbReturning([])).run();
 
-      // An empty catalogue is not agreement. `ok` here would pass the check
-      // precisely when Plan lost track of every instance.
-      expect(result.status).toBe('no_data');
+      // An empty catalogue is not agreement, and `ok` here would pass the check
+      // precisely when Plan lost track of every instance. It is not an empty
+      // window either: `error` is the only verdict that reaches the channel.
+      expect(result.status).toBe('error');
       expect(result.detail.n).toBe(0);
     });
 
+    it('files the empty catalogue under a notifiable status', async () => {
+      // The regression this pins. `decideAlerts` suppresses a `no_data` as
+      // `not_notifiable` while nothing is open on the check, so an emptied
+      // `plan_servers` filed as `no_data` rewrote a row every cycle and never
+      // produced one message.
+      const [result] = await new VersionDivergenceCheck(dbReturning([])).run();
+
+      expect(NOTIFIABLE_STATUSES).toContain(result.status);
+    });
+  });
+
+  describe('ausencia de dado', () => {
     it('reports no_data with a single instance', async () => {
       const [result] = await new VersionDivergenceCheck(
         dbReturning([server('Survival', '5.8 build 3605')]),
@@ -118,6 +132,10 @@ describe('VersionDivergenceCheck', () => {
 
       // Only one server has a version, so there is nothing to compare. Calling
       // that `ok` would claim agreement that was never established.
+      //
+      // Stays `no_data`, unlike the empty catalogue: the source answered with
+      // real servers and the comparison merely has no base. This is the case the
+      // suppression rule in `decideAlerts` was written for.
       expect(result.status).toBe('no_data');
       expect(result.detail.n).toBe(2);
     });

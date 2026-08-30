@@ -442,6 +442,32 @@ Cada check roda periodicamente e **alerta ativamente no Discord** quando falha.
 >    exatamente a mesma população, e a razão pode passar de 100%. Quando passa, o veredito diz isso
 >    em palavras em vez de publicar um percentual arrumadinho.
 
+> ### ⚠️ `no_data` nunca alerta sozinho — logo, fonte vazia é `error` (corrigido em 2026-08-29)
+>
+> `NOTIFIABLE_STATUSES` tem `breached` e `error`, e **não** `no_data`. A política (`decideAlerts`)
+> suprime um `no_data` como `not_notifiable` enquanto não há problema aberto no check — sem
+> temporizador e sem escalonamento. Isso é deliberado: *"sem base"* não é número baixo, e alertar em
+> toda ausência de denominador é o ruído que deixa o canal mudo.
+>
+> A consequência não era: **um check que devolve `no_data` para sempre, a partir de um estado limpo,
+> nunca gerava uma única mensagem** — e três checks usavam `no_data` para dizer algo muito pior que
+> "sem base". `plan_servers` sem nenhum servidor (`orphan_instance`, `version_divergence`) e
+> `plan_users` sem nenhuma linha (`proxy_registration_alive`) **são o desastre da §1**, não uma
+> janela vazia: um inventário não tem janela, e um que volta vazio numa rede viva não respondeu,
+> falhou. Os três passaram a devolver `error`. Buraco pré-existente desde a S6.3, achado numa
+> revisão, nunca observado em produção.
+>
+> **A regra que fica**, e vale para todo check novo: antes de devolver `no_data`, pergunte se esse
+> veredito se repetindo por um mês deveria ser ouvido. Se sim, é `error`. `no_data` fica para a
+> janela que genuinamente veio vazia — amostra pequena demais, versão que o Plan nunca gravou,
+> comparação com um dos lados ausente. O limite é *de quem* é o vazio: `PLAN_SERVERS` não
+> configurada continua `no_data`, porque nada falhou — é a nossa configuração que está em branco, e
+> um ambiente de staging não pode paginar o canal a cada janela de re-alerta. É a mesma calibração
+> que o `InstrumentationHealthService` já faz para os checks `missing`.
+>
+> O `/health/instrumentation` já tratava `no_data` como degradado, mas isso é "ir olhar uma página",
+> que é exatamente a postura que o ADR-006 recusa.
+
 ### 6.2 Camada 2 — Funil em camadas
 
 O funil real tem quatro degraus, e só o terceiro tinha alguma medição:

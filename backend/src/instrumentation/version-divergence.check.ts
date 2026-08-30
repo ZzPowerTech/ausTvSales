@@ -41,12 +41,18 @@ export class VersionDivergenceCheck implements HealthCheck {
     }
 
     if (servers.length === 0) {
-      // An empty catalogue is not agreement. Reporting `ok` here would pass the
-      // check precisely when Plan has lost track of every instance.
+      // An empty catalogue is not agreement, and it is not an empty window
+      // either. Reporting `ok` here would pass the check precisely when Plan has
+      // lost track of every instance — and reporting `no_data` would file that
+      // same event under a status `NOTIFIABLE_STATUSES` excludes, so
+      // `decideAlerts` would suppress it as `not_notifiable` forever while the
+      // row was rewritten every cycle. `error` is what reaches the channel, and
+      // it is the accurate word: the source answered with a universe that cannot
+      // exist on a live network.
       return [
         {
           checkName: this.name,
-          status: 'no_data',
+          status: 'error',
           detail: {
             summary: 'plan_servers nao retornou nenhum servidor',
             n: 0,
@@ -59,6 +65,10 @@ export class VersionDivergenceCheck implements HealthCheck {
     if (versioned.length < 2) {
       // One instance cannot diverge from itself, and a version Plan never
       // recorded is unknown rather than matching.
+      //
+      // Stays `no_data` on purpose, unlike the empty catalogue above: here the
+      // source answered with real servers and the comparison simply has no base.
+      // That is the case the suppression rule was written for.
       return [
         {
           checkName: this.name,
