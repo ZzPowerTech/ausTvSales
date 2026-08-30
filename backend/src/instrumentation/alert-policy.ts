@@ -23,8 +23,9 @@ export type SuppressionReason =
   /**
    * The check already spent its message budget for this window.
    *
-   * The last thing said before this reason starts appearing is the `flapping`
-   * notice, so the channel knows the check went quiet on purpose. See
+   * Not silent: while this reason is being produced, a `flapping` notice goes
+   * out whenever the channel would otherwise pass a whole `reAlertAfterMs`
+   * hearing nothing about the check. See
    * {@link AlertPolicyInput.maxAlertsPerWindow}.
    */
   | 'flapping';
@@ -51,12 +52,13 @@ export interface AlertDecision {
    */
   lostSignal: HealthCheckRecord[];
   /**
-   * Checks that just hit their message budget — one notice, then quiet.
+   * Checks that are over budget and have gone a whole window without a message.
    *
    * A cap without a notice is a silent mute, which is the failure this whole
-   * layer exists to prevent. This bucket is that notice: it is emitted exactly
-   * once, on the observation that crosses the budget, and it says the check is
-   * changing state too often to be reported per event.
+   * layer exists to prevent. This bucket is that notice: it says the check is
+   * changing state too often to be reported per event, and it is emitted
+   * whenever the silence would otherwise reach `reAlertAfterMs` — never on an
+   * `ok`, because a notice stamped `ok` would read as an all-clear nobody gave.
    */
   flapping: HealthCheckRecord[];
   /** Observations deliberately held back, with the reason. */
@@ -101,20 +103,33 @@ export interface AlertPolicyInput {
    * about a source that was gone. The budget had rebuilt ADR-006's silence
    * inside the fix for ADR-006's noise.
    *
-   * So two things are never gated:
-   *
-   * - **A status the channel has not heard this window.** A check that has been
-   *   saying `breached` all day and now says `error` is not repeating itself, it
-   *   is reporting something new, and new is exactly what a budget must let
-   *   through. This is why {@link alertsInWindow} is counted per status.
-   * - **A confirmed recovery.** An all-clear is already gated, by
-   *   `confirmRecoveryAfter`, and it is self-limiting: a recovery needs an open
-   *   problem, and open problems come from failures, which *are* gated. It
-   *   cannot run away, and withholding it is how the channel ends up believing a
-   *   fixed thing is broken.
+   * So a **status the channel has not heard this window** is never gated. A
+   * check that has been saying `breached` all day and now says `error` is not
+   * repeating itself, it is reporting something new, and new is exactly what a
+   * budget must let through. This is why {@link alertsInWindow} is counted per
+   * status rather than totalled.
    *
    * What is left to gate is repetition of something already said, which is what
    * a flap is made of.
+   *
+   * ## The recovery is gated too, one slot earlier than the rest
+   *
+   * The same first version left the all-clear ungated, on the reasoning that
+   * withholding one is how a channel ends up believing a fixed thing is broken.
+   * Measured, it did the opposite: on a flapping check the recoveries arrive as
+   * fast as the failures, so the ungated one won the race to be the **last**
+   * message, and the channel was left holding a green banner over something
+   * breaching every third cycle — then 22 hours of silence, because the failures
+   * after it were over budget. A false all-clear is the one thing this layer may
+   * never produce, so an all-clear is budgeted like everything else, and its
+   * limit is one slot lower so that a problem, never a green, is what the
+   * channel is left holding.
+   *
+   * What keeps a genuine recovery from starving is not a bypass but the free
+   * pass above: once the flap's own `ok` messages age out of the window, a
+   * confirmed recovery is news again and goes out on its own. The wait is
+   * bounded by `reAlertAfterMs` and is visible as `budgetHeld` in the run
+   * summary.
    */
   maxAlertsPerWindow: number;
   /**
@@ -233,12 +248,23 @@ export interface AlertPolicyInput {
  * `maxAlertsPerWindow`, along with the 45-hour silence a version without it
  * produced.
  *
- * When the budget runs out the check gets a `flapping` notice and then goes
- * quiet about that repetition until the window slides far enough to free a slot
- * — quiet **announced**, not quiet silently, because an unannounced mute is the
- * ADR-006 failure wearing the uniform of a fix. How often the notice reappears
- * depends on how the window slides against the oscillation, so the guarantee is
- * "at least once, when the budget is first spent", not a fixed cadence.
+ * When the budget runs out the check goes quiet about that repetition, and the
+ * quiet is announced rather than silent — an unannounced mute is the ADR-006
+ * failure wearing the uniform of a fix. The guarantee is stated in terms of what
+ * the channel experiences, because that is the thing that can be checked: **a
+ * check never goes a whole `reAlertAfterMs` without a message while it is over
+ * budget.** If the window passes in silence, the next over-budget observation is
+ * published as a `flapping` notice saying the check is oscillating and has been
+ * muted.
+ *
+ * One consequence worth naming, because it is a real cost and not an oversight:
+ * inside a window in which the channel has already heard from the check, a
+ * *refinement* of a problem it already knows about can wait. `no_data` → `error`
+ * fifteen minutes later — "cannot measure it" becoming "cannot reach it" — is
+ * held if the budget is spent. The channel is not blind in that case: it was
+ * told fifteen minutes earlier that the check had stopped being measurable,
+ * which is the signal that matters. What may never wait is the *first* time the
+ * channel hears a status, and that is exactly what the free pass protects.
  */
 export function decideAlerts(input: AlertPolicyInput): AlertDecision {
   const announce: HealthCheckRecord[] = [];
@@ -263,30 +289,59 @@ export function decideAlerts(input: AlertPolicyInput): AlertDecision {
     }
 
     /**
+     * Say once per window that this check went quiet, instead of muting it
+     * silently.
+     *
+     * Keyed on the last delivered message rather than on a counter crossing an
+     * exact value. Two earlier versions fired the notice at
+     * `heardAny === maxAlertsPerWindow` exactly and were both wrong: any record
+     * taking a free pass steps the counter over that point without ever testing
+     * it, and the check is then muted with nothing said. A rule that asks "has
+     * the channel heard anything at all from this check in a window?" cannot be
+     * stepped over.
+     *
+     * Never on an `ok`. The notice is stamped with the record's status, and one
+     * stamped `ok` would clear `open` — the channel would hold an all-clear it
+     * was never given, and the recovery waiting for budget could no longer be
+     * recognised as one.
+     */
+    const mute = (): void => {
+      const silentFor =
+        last === null
+          ? Number.POSITIVE_INFINITY
+          : record.checkedAt.getTime() - last.at.getTime();
+
+      if (silentFor >= input.reAlertAfterMs && record.status !== 'ok') {
+        flapping.push(record);
+      } else {
+        suppressed.push({ record, reason: 'flapping' });
+      }
+    };
+
+    /**
      * Route a record the transition rules want delivered.
      *
      * Only repetition is gated — see `maxAlertsPerWindow` for why a status the
      * channel has not heard this window must always get through.
+     *
+     * A recovery is held one slot earlier than everything else, and that slot is
+     * the whole point: whatever is delivered last defines what the channel
+     * believes while the check is muted. Let an all-clear take the final slot of
+     * a flapping check and the standing state becomes a green banner over
+     * something that is breaching every third cycle — a false all-clear, the one
+     * outcome this layer may never produce. Reserving the last slot for a
+     * problem means the standing state is always the problem.
      */
     const deliver = (bucket: HealthCheckRecord[]): void => {
-      if (heardThis === 0 || heardAny < input.maxAlertsPerWindow) {
+      const limit =
+        record.status === 'ok'
+          ? input.maxAlertsPerWindow - 1
+          : input.maxAlertsPerWindow;
+
+      if (heardThis === 0 || heardAny < limit) {
         bucket.push(record);
-      } else if (
-        heardAny === input.maxAlertsPerWindow &&
-        record.status !== 'ok'
-      ) {
-        // Exactly at the budget: say once that the check is going quiet. The
-        // notice is itself delivered and stamped, so `heardAny` passes the
-        // budget and every later repetition takes the branch below — until the
-        // window slides back down and the notice is due again.
-        //
-        // Never on an `ok`. The notice is stamped with the record's status, and
-        // a notice stamped `ok` would clear `open` — the channel would hold an
-        // all-clear it was never given, and the recovery that is waiting for the
-        // budget could then never be recognised as one.
-        flapping.push(record);
       } else {
-        suppressed.push({ record, reason: 'flapping' });
+        mute();
       }
     };
 

@@ -406,14 +406,13 @@ describe('HealthCheckRunner', () => {
       )
         .runAll()
         .then(() => {
-          // 9 mensagens ja ouvidas, teto 3: passou do teto e do proprio aviso,
-          // entao nada sai. Com o teto ignorado, sairia.
+          // 9 mensagens ja ouvidas, teto 3: a falha nao sai como falha. Com o
+          // teto ignorado, ela estaria em `announce`. Sai como aviso de
+          // silenciamento porque este check nunca falou nada antes, entao a
+          // janela inteira passou calada.
           const decision = firstArg<AlertDecision>(publish);
           expect(decision.announce).toEqual([]);
-          expect(decision.flapping).toEqual([]);
-          expect(decision.suppressed).toEqual([
-            expect.objectContaining({ reason: 'flapping' }),
-          ]);
+          expect(decision.flapping).toHaveLength(1);
         });
     });
 

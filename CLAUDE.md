@@ -158,19 +158,24 @@ S8.2 se os pré-requisitos dela forem resolvidos.
   transição raciocina sobre formatos de oscilação e já errou duas vezes nisso — a primeira versão
   deixava `breached` ↔ `no_data` mandar uma mensagem por ciclo para sempre; a segunda ainda deixava
   `breached` → `ok` → `breached` passar, porque uma recuperação confirmada e entregue legitimamente
-  reabre a porta (64/dia por aritmética). O teto não depende de prever o formato.
+  reabre a porta (64/dia; 448 por semana, medido sem o teto). O teto não depende de prever o
+  formato.
 
   O teto conta **repetição**, e só. Um status que o canal não ouviu nesta janela passa sempre —
   barrá-lo foi como a primeira versão do teto segurou a morte de uma fonte por 45 horas, deixando
   um aviso cinza dizendo "calibre o limiar" como última palavra sobre um servidor que tinha
-  sumido. Recuperação confirmada **é** barrada, e por outro motivo: solta, ela ganha a corrida
-  para ser a última mensagem, e o canal fica segurando um "normalizado" sobre um check que quebra
-  a cada três ciclos — falso all-clear, a única coisa que esta camada não pode produzir. O passe
-  do status-não-ouvido a libera quando os `ok` da própria oscilação saem da janela. Os três casos
-  estão fixados em teste. Ao estourar, o check recebe um aviso de que vai ficar quieto — mute sem
+  sumido. Recuperação confirmada **é** barrada, um slot antes das demais, e
+  por outro motivo: solta, ela ganha a corrida para ser a última mensagem, e o canal fica
+  segurando um "normalizado" sobre um check que quebra a cada três ciclos — falso all-clear, a
+  única coisa que esta camada não pode produzir. Reservar o último slot para um problema garante
+  que o estado que o canal segura seja o problema. O passe do status-não-ouvido a libera quando os
+  `ok` da própria oscilação saem da janela, e a espera aparece no log como
+  `segurados_por_orcamento`. Os três casos estão fixados em teste. Ao estourar, o check recebe um aviso de que vai ficar quieto — mute sem
   aviso é indistinguível de check saudável.
 
-  Medido: a oscilação que dava 672 mensagens por semana passa a dar **29**.
+  Medido: a oscilação que dava **448** mensagens por semana passa a dar **27**, e o canal nunca
+  passa uma janela inteira sem notícia de um check que oscila — ou sai uma mensagem de verdade,
+  ou sai o aviso cinza. Quatro formatos de oscilação diferentes estão fixados em teste.
 
   O que a política **não** faz: se a recuperação se sustentar e for entregue, a quebra seguinte é
   incidente novo e sai. Isso é correto. É por isso que a calibração é a metade que fecha o caso de

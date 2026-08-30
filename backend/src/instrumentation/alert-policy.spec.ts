@@ -384,15 +384,15 @@ describe('decideAlerts', () => {
      *
      * Returns the statuses that reached the channel, in order.
      */
-    function replay(
+    function replayDetailed(
       check: string,
       cycles: ReadonlyArray<{ at: string; status: HealthCheckStatus }>,
-    ): string[] {
+    ): Array<{ label: string; at: number }> {
       let lastAlert: LastAlert | null = null;
       let okStreak = 0;
       /** Every message delivered, for recomputing the per-status budget. */
       const delivered: Array<{ at: Date; status: HealthCheckStatus }> = [];
-      const messages: string[] = [];
+      const messages: Array<{ label: string; at: number }> = [];
 
       for (const cycle of cycles) {
         const at = new Date(cycle.at);
@@ -419,24 +419,50 @@ describe('decideAlerts', () => {
         });
 
         // O runner so carimba `alerted_at` no que o alerter entregou — inclusive
-        // o aviso de silenciamento, que e por isso que ele sai uma vez so.
-        for (const sent of [
-          ...decision.announce,
-          ...decision.recovered,
-          ...decision.lostSignal,
-        ]) {
-          messages.push(sent.status);
-          delivered.push({ at, status: sent.status });
-          lastAlert = { status: sent.status, at };
-        }
-        for (const sent of decision.flapping) {
-          messages.push(`flapping:${sent.status}`);
-          delivered.push({ at, status: sent.status });
-          lastAlert = { status: sent.status, at };
+        // o aviso de silenciamento.
+        const sent = [
+          ...decision.announce.map((r) => ({ record: r, label: r.status })),
+          ...decision.recovered.map((r) => ({ record: r, label: r.status })),
+          ...decision.lostSignal.map((r) => ({ record: r, label: r.status })),
+          ...decision.flapping.map((r) => ({
+            record: r,
+            label: `flapping:${r.status}`,
+          })),
+        ];
+        for (const message of sent) {
+          messages.push({ label: message.label, at: at.getTime() });
+          delivered.push({ at, status: message.record.status });
+          lastAlert = { status: message.record.status, at };
         }
       }
 
       return messages;
+    }
+
+    function replay(
+      check: string,
+      cycles: ReadonlyArray<{ at: string; status: HealthCheckStatus }>,
+    ): string[] {
+      return replayDetailed(check, cycles).map((message) => message.label);
+    }
+
+    /**
+     * Longest stretch, in ms, during which the channel heard nothing about a
+     * check that was producing observations the whole time.
+     */
+    function longestSilence(
+      check: string,
+      cycles: ReadonlyArray<{ at: string; status: HealthCheckStatus }>,
+    ): number {
+      const at = replayDetailed(check, cycles).map((message) => message.at);
+      let longest = 0;
+      let previous = new Date(cycles[0].at).getTime();
+      for (const sentAt of at) {
+        longest = Math.max(longest, sentAt - previous);
+        previous = sentAt;
+      }
+      const end = new Date(cycles[cycles.length - 1].at).getTime();
+      return Math.max(longest, end - previous);
     }
 
     it('colapsa uma re-quebra logo apos um all-clear que nao se sustentou', () => {
@@ -533,14 +559,46 @@ describe('decideAlerts', () => {
 
       const messages = replay(check, cycles);
 
-      // Sem orcamento seriam 672 mensagens na semana — 64 por dia, para sempre.
-      // Com ele, 29: pouco mais de quatro por dia, que e o teto pedido.
-      expect(messages).toHaveLength(29);
-      // E o canal e avisado de que ficou quieto de proposito ao menos uma vez —
-      // um mute sem aviso seria indistinguivel de um check saudavel.
-      expect(
-        messages.filter((m) => m.startsWith('flapping:')).length,
-      ).toBeGreaterThanOrEqual(1);
+      // Sem orcamento seriam 448 mensagens na semana — 64 por dia, para sempre.
+      // Com ele, 27: menos de quatro por dia, que e o teto pedido.
+      expect(messages).toHaveLength(27);
+      // E o canal nunca fica uma janela inteira sem noticia deste check enquanto
+      // ele oscila: ou sai uma mensagem de verdade, ou sai o aviso cinza. Um
+      // mute sem aviso seria indistinguivel de um check saudavel.
+      expect(longestSilence(check, cycles)).toBeLessThanOrEqual(RE_ALERT_AFTER);
+    });
+
+    it('nunca fica uma janela inteira calado sobre um check que oscila', () => {
+      // A garantia central do orcamento, medida ponta a ponta em varias formas
+      // de oscilacao. Duas versoes anteriores calavam um check por 22 horas.
+      const shapes: Array<[string, (i: number) => HealthCheckStatus]> = [
+        ['breached/ok', (i) => (i % 3 === 0 ? 'breached' : 'ok')],
+        ['breached/error', (i) => (i % 2 === 0 ? 'breached' : 'error')],
+        ['breached/no_data', (i) => (i % 2 === 0 ? 'breached' : 'no_data')],
+        [
+          'todos',
+          (i) =>
+            (['breached', 'error', 'ok', 'ok', 'breached', 'no_data'] as const)[
+              i % 6
+            ],
+        ],
+      ];
+
+      for (const [name, statusAt] of shapes) {
+        const cycles: Array<{ at: string; status: HealthCheckStatus }> = [];
+        for (let i = 0; i < 7 * 24 * 4; i++) {
+          cycles.push({
+            at: new Date(NOW.getTime() + i * 15 * MINUTES).toISOString(),
+            status: statusAt(i),
+          });
+        }
+
+        expect([
+          name,
+          longestSilence(HealthCheckName.CollectionAlive, cycles) <=
+            RE_ALERT_AFTER,
+        ]).toEqual([name, true]);
+      }
     });
 
     it('nunca deixa um verde ser a ultima palavra sobre um check ainda quebrado', () => {
@@ -651,6 +709,23 @@ describe('decideAlerts', () => {
       expect(cycles[cycles.length - 1].status).toBe('ok');
     });
 
+    it('nao gasta orcamento com um apagao continuo', () => {
+      // O outro extremo, e o caso central do ADR-006: o orcamento nao pode
+      // encurtar a vida de um alerta que ja e raro. Uma semana quebrada sem
+      // parar sao sete lembretes, um por dia, exatamente como antes de existir
+      // orcamento nenhum.
+      const check = HealthCheckName.ProxyRegistrationAlive;
+      const cycles: Array<{ at: string; status: HealthCheckStatus }> = [];
+      for (let i = 0; i < 7 * 24 * 4; i++) {
+        cycles.push({
+          at: new Date(NOW.getTime() + i * 15 * MINUTES).toISOString(),
+          status: 'breached',
+        });
+      }
+
+      expect(replay(check, cycles)).toEqual(Array(7).fill('breached'));
+    });
+
     it('mantem o error limitado mesmo depois de a janela rolar', () => {
       // A versao anterior deste teste rodava 5 horas dentro de uma janela de 24
       // e por isso nao podia falhar, e ainda assertava so um teto frouxo. O
@@ -684,31 +759,73 @@ describe('decideAlerts', () => {
       const repetido = observation(HealthCheckName.OrphanInstance, 'breached');
       const novo = observation(HealthCheckName.OrphanInstance, 'error');
       const gasto = heard(repetido.checkName, { breached: 9 });
+      // O canal ouviu um all-clear ha uma hora, entao nao ha problema aberto: as
+      // duas falhas abaixo entram direto no orcamento, sem passar pela janela.
+      const ouviuHaPouco = told(repetido.checkName, 'ok', 1);
 
       expect(
-        decide({ observations: [repetido], alertsInWindow: gasto }).suppressed,
+        decide({
+          observations: [repetido],
+          lastAlert: ouviuHaPouco,
+          alertsInWindow: gasto,
+        }).suppressed,
       ).toEqual([{ record: repetido, reason: 'flapping' }]);
 
       expect(
-        decide({ observations: [novo], alertsInWindow: gasto }).announce,
+        decide({
+          observations: [novo],
+          lastAlert: ouviuHaPouco,
+          alertsInWindow: gasto,
+        }).announce,
       ).toEqual([novo]);
     });
 
-    it('avisa uma vez ao bater o orcamento, e so uma dentro da janela', () => {
+    it('avisa do silenciamento quando a janela inteira passou calada', () => {
+      // A garantia esta escrita em termos do que o canal vive, nao de um contador
+      // cruzando um valor exato: um check nunca passa uma janela inteira sem
+      // mensagem enquanto esta acima do orcamento. Duas versoes anteriores
+      // disparavam o aviso em `heardAny === max` exato, e qualquer registro que
+      // tomasse o passe livre pulava por cima desse ponto sem nunca testa-lo —
+      // o check era calado sem que nada fosse dito.
       const record = observation(HealthCheckName.OrphanInstance, 'breached');
+      const gasto = heard(record.checkName, { breached: 9 });
 
-      const noLimite = decide({
+      const calouUmDia = decide({
         observations: [record],
-        alertsInWindow: heard(record.checkName, { breached: 4 }),
+        lastAlert: told(record.checkName, 'ok', 25),
+        alertsInWindow: gasto,
       });
-      const depois = decide({
+      const falouHaPouco = decide({
         observations: [record],
-        alertsInWindow: heard(record.checkName, { breached: 5 }),
+        lastAlert: told(record.checkName, 'ok', 1),
+        alertsInWindow: gasto,
       });
 
-      expect(noLimite.flapping).toEqual([record]);
-      expect(depois.flapping).toEqual([]);
-      expect(depois.suppressed).toEqual([{ record, reason: 'flapping' }]);
+      expect(calouUmDia.flapping).toEqual([record]);
+      expect(falouHaPouco.flapping).toEqual([]);
+      expect(falouHaPouco.suppressed).toEqual([{ record, reason: 'flapping' }]);
+    });
+
+    it('nao pode ser pulado por um registro que tomou o passe livre', () => {
+      // A sequencia exata que furava as duas versoes anteriores: um status ainda
+      // nao ouvido chega justamente com o contador no teto, passa livre, e o
+      // contador vai para teto+1 sem nunca ter testado a igualdade. Dai em
+      // diante tudo era suprimido, para sempre, sem aviso nenhum.
+      const record = observation(HealthCheckName.CollectionAlive, 'error');
+
+      const decision = decide({
+        observations: [record],
+        // Contador ja passou do teto, e faz mais de uma janela que o canal nao
+        // ouve nada deste check. `error` ja foi ouvido, entao nao ha passe livre.
+        lastAlert: told(record.checkName, 'error', 30),
+        alertsInWindow: heard(record.checkName, {
+          breached: 3,
+          no_data: 1,
+          error: 1,
+        }),
+      });
+
+      expect(decision.flapping).toEqual([record]);
     });
 
     it('anuncia a falha no primeiro ciclo — a histerese e so da recuperacao', () => {

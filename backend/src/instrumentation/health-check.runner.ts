@@ -53,7 +53,16 @@ export interface HealthCheckRunSummary {
    * this permanently above zero is a value that never lets an all-clear out.
    */
   recoveryHeld: number;
-  /** Checks that hit the message budget and were told so, once. */
+  /**
+   * Observations held back by the message budget, recoveries included.
+   *
+   * Separate from `recoveryHeld` and worth its own field for the same reason:
+   * an all-clear withheld by the budget is invisible in a total, and a value of
+   * `HEALTH_ALERT_MAX_PER_WINDOW` that keeps this permanently above zero is a
+   * value that keeps the channel believing fixed things are broken.
+   */
+  budgetHeld: number;
+  /** Checks that hit the message budget and were told the channel went quiet. */
   flapping: number;
   /** Rows whose notification actually reached Discord and were stamped. */
   alerted: number;
@@ -223,6 +232,9 @@ export class HealthCheckRunner {
       recoveryHeld: decision.suppressed.filter(
         (item) => item.reason === 'recovery_unconfirmed',
       ).length,
+      budgetHeld: decision.suppressed.filter(
+        (item) => item.reason === 'flapping',
+      ).length,
       alerted,
     };
 
@@ -302,6 +314,7 @@ export class HealthCheckRunner {
       `anunciados=${summary.announced}`,
       `entregues=${summary.alerted}`,
       `recuperacoes_seguradas=${summary.recoveryHeld}`,
+      `segurados_por_orcamento=${summary.budgetHeld}`,
       `oscilando=${summary.flapping}`,
     ];
 
@@ -344,6 +357,7 @@ function emptySummary(startedAt: Date, ran: boolean): HealthCheckRunSummary {
     flapping: 0,
     suppressed: 0,
     recoveryHeld: 0,
+    budgetHeld: 0,
     alerted: 0,
   };
 }
