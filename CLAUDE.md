@@ -134,9 +134,12 @@ S8.2 se os pré-requisitos dela forem resolvidos.
   mas nenhum número histórico de rede vai aparecer até lá.
 
 - **O alerta de saúde CHEGA — comprovado em 2026-08-26.** Alertas reais do
-  `platform.offline_account_share` foram observados no canal: `breached`, recuperação, agrupamento e
-  o `n` ao lado do percentual, tudo funcionando em produção. A camada deixou de ser construção sobre
-  algo que ninguém verificou.
+  `platform.offline_account_share` foram observados no canal: `breached`, recuperação e o `n` ao
+  lado do percentual, funcionando em produção. A camada deixou de ser construção sobre algo que
+  ninguém verificou.
+  **Agrupamento não entra nessa lista:** supressão só é observável sabendo que um ciclo produziu
+  falha e nenhuma mensagem saiu, e os ciclos entre 19:54 e 21:24 nunca foram registrados. Três
+  mensagens entregues não são evidência de supressão.
   **Falta metade do critério 4:** o caminho **`error`** — fonte que *morre*, não limiar que estoura.
   É outro código e é o que cobre o apagão de três meses. Teste: parar o Plan por um ciclo.
 - **A oscilação dos alertas foi corrigida em código em 2026-08-29 — ainda não observada em
@@ -146,13 +149,21 @@ S8.2 se os pré-requisitos dela forem resolvidos.
     É isto que silencia a sequência de 2026-08-26: a 0,65 nenhuma das três leituras estoura.
     O custo está registrado no `.env.example` — a faixa 0,55–0,65 fica cega de propósito;
   - a política passou a decidir contra **o que o canal foi informado por último**, não contra a
-    linha anterior da tabela, com histerese de 2 ciclos no all-clear e janela de reenvio aplicada
-    também às trocas de tipo de falha (`breached` ↔ `no_data` mandava uma mensagem por ciclo,
-    para sempre). A falha continua saindo no primeiro ciclo; só a recuperação espera.
+    linha anterior da tabela, com histerese de 2 ciclos no all-clear. A falha sai no primeiro
+    ciclo; só a recuperação espera. Piora (`breached` → `no_data` → `error`) fura a janela;
+    melhora sem chegar a `ok` espera.
 
-  O que a mudança de política **não** faz: se a recuperação se sustentar e for entregue, a quebra
-  seguinte é incidente novo e sai. Isso é correto, e é por isso que a calibração é a metade que
-  fecha o caso de 2026-08-26 — as duas juntas, não a política sozinha.
+  **E um teto duro por cima de tudo isso** (`HEALTH_ALERT_MAX_PER_WINDOW`, padrão 4): a regra de
+  transição raciocina sobre formatos de oscilação e já errou duas vezes nisso — a primeira versão
+  deixava `breached` ↔ `no_data` mandar uma mensagem por ciclo para sempre; a segunda ainda
+  deixava `breached` → `ok` → `breached` passar, porque uma recuperação confirmada e entregue
+  legitimamente reabre a porta (64 mensagens/dia, medido em teste). O teto não depende de prever
+  o formato. Ao batê-lo o check recebe **um** aviso de que vai ficar quieto — mute sem aviso é
+  indistinguível de check saudável — e volta a falar quando a janela rolar.
+
+  O que a política **não** faz: se a recuperação se sustentar e for entregue, a quebra seguinte é
+  incidente novo e sai. Isso é correto. É por isso que a calibração é a metade que fecha o caso de
+  2026-08-26 — as duas juntas, não a política sozinha.
 - **A auditoria de rede da S6.2b nunca foi rodada.** Os scripts, o runbook e o template estão em
   `ops/audit/`; **nenhum relatório preenchido existe**, e o produto da história é o registro, não o
   script. Fechar isso e ler a whitelist do Plan (item abaixo) são a mesma tarefa.

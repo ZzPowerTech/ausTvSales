@@ -19,8 +19,10 @@ const DEFAULT_WINDOW_DAYS = 7;
  * on top of the real distribution, so a single player crossing it flipped the
  * verdict.
  *
- * The reading itself is the calibration: the real share is ~51% and stable, so
- * the ceiling belongs above the band, not inside it. 0.65 leaves ~14 points of
+ * The reading itself is the calibration: the real share is ~51%, so the ceiling
+ * belongs above that, not on top of it. (Three 7-day windows sampled 105 minutes
+ * apart overlap almost entirely, so they pin the level, not its stability over
+ * time — the level is what the threshold needs.) 0.65 leaves ~14 points of
  * headroom, which buys quiet at a stated cost: **the 0.55–0.65 band is now
  * deliberately blind.** By the same arithmetic that motivated the change, ~4
  * extra offline arrivals out of ~32 move the share 13 points, so a real drift

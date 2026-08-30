@@ -220,6 +220,56 @@ describe('health_checks (e2e)', () => {
     });
   });
 
+  describe('alertsInWindow', () => {
+    const DAY_MS = 86_400_000;
+
+    it('conta so o que foi entregue, nao o que foi apenas medido', async () => {
+      const check = scopedCheckName(HealthCheckName.OrphanInstance, 'budget');
+      const rows = await store.record([
+        { checkName: check, status: 'breached', detail: { summary: 'um' } },
+        { checkName: check, status: 'breached', detail: { summary: 'dois' } },
+        { checkName: check, status: 'breached', detail: { summary: 'tres' } },
+      ]);
+      await store.markAlerted([rows[0].id, rows[1].id]);
+
+      // Tres vereditos, duas mensagens. O orcamento e gasto pelo que o canal
+      // ouviu, nao pelo que a tabela guardou.
+      await expect(store.alertsInWindow(check, DAY_MS)).resolves.toBe(2);
+    });
+
+    it('nao conta a mensagem de outro check', async () => {
+      const mine = scopedCheckName(HealthCheckName.OrphanInstance, 'mine');
+      const other = scopedCheckName(HealthCheckName.OrphanInstance, 'other');
+      const rows = await store.record([
+        { checkName: mine, status: 'breached', detail: { summary: 'meu' } },
+        { checkName: other, status: 'breached', detail: { summary: 'dele' } },
+      ]);
+      await store.markAlerted(rows.map((row) => row.id));
+
+      await expect(store.alertsInWindow(mine, DAY_MS)).resolves.toBe(1);
+    });
+
+    it('ignora o que caiu fora da janela', async () => {
+      const check = scopedCheckName(HealthCheckName.OrphanInstance, 'expired');
+      const [row] = await store.record([
+        { checkName: check, status: 'breached', detail: { summary: 'velho' } },
+      ]);
+      await store.markAlerted([row.id]);
+
+      // Janela de um milissegundo: a mensagem acabou de sair e ja esta fora.
+      await expect(store.alertsInWindow(check, 1)).resolves.toBe(0);
+    });
+
+    it('devolve zero para um check que nunca falou', async () => {
+      const check = scopedCheckName(HealthCheckName.OrphanInstance, 'quiet');
+      await store.record([
+        { checkName: check, status: 'ok', detail: { summary: 'ok' } },
+      ]);
+
+      await expect(store.alertsInWindow(check, DAY_MS)).resolves.toBe(0);
+    });
+  });
+
   describe('healthyStreak', () => {
     // A unica cobertura que executa a query de janela de verdade. O unit spec
     // dela mocka o `db.execute` e monta as linhas ja ordenadas, entao valida o

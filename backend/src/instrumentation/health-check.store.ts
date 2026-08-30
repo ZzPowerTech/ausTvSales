@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNotNull, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDB } from '../db/database.module';
 import { healthChecks } from '../db/schema';
 import type {
@@ -130,8 +130,9 @@ export class HealthCheckStore {
    * How many of the most recent verdicts, per check, are consecutively `ok`.
    *
    * Counts backwards from the newest row and stops at the first row that is not
-   * `ok`, so a check that has been healthy for four cycles reports 4 and one
-   * that just turned `ok` after a breach reports 1.
+   * `ok`, saturating at `window` — so with the runner's `window = 2` a check
+   * that has been healthy all week also reports 2, and one that just turned `ok`
+   * after a breach reports 1.
    *
    * `no_data` breaks the streak like a failure does, and that is the point: a
    * cycle in which the check could not be measured is not evidence that it is
@@ -252,6 +253,32 @@ export class HealthCheckStore {
 
     const row = rows[0];
     return row?.alertedAt ? { status: row.status, at: row.alertedAt } : null;
+  }
+
+  /**
+   * How many messages this check has had delivered inside the last `windowMs`.
+   *
+   * Counts stamped rows, not verdicts: the question is how much the channel has
+   * heard about this check recently, which is the only thing a message budget
+   * can sensibly be spent against. Bounded by `alerted_at`, which is stamped by
+   * the database, so the count does not move with the application clock.
+   */
+  async alertsInWindow(checkName: string, windowMs: number): Promise<number> {
+    const rows = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(healthChecks)
+      .where(
+        and(
+          eq(healthChecks.checkName, checkName),
+          isNotNull(healthChecks.alertedAt),
+          gt(
+            healthChecks.alertedAt,
+            sql`now() - make_interval(secs => ${windowMs / 1000})`,
+          ),
+        ),
+      );
+
+    return rows[0]?.count ?? 0;
   }
 
   /**

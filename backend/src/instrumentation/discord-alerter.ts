@@ -21,6 +21,8 @@ const DISCORD_LIMITS = {
 const COLOR_FAILURE = 0xd9_36_3c;
 const COLOR_RECOVERY = 0x2e_8b_57;
 const COLOR_LOST_SIGNAL = 0xd7_8b_1f;
+/** Grey: not a verdict about the game, a verdict about this layer's own noise. */
+const COLOR_FLAPPING = 0x6b_72_80;
 
 /** One retry is enough for a rate limit; beyond that the next cycle covers it. */
 const MAX_RATE_LIMIT_RETRIES = 1;
@@ -111,6 +113,7 @@ export class DiscordAlerter implements OnModuleInit {
     const failures = decision.announce.slice(0, DISCORD_LIMITS.embedFields);
     const recoveries = decision.recovered.slice(0, DISCORD_LIMITS.embedFields);
     const lost = decision.lostSignal.slice(0, DISCORD_LIMITS.embedFields);
+    const flapping = decision.flapping.slice(0, DISCORD_LIMITS.embedFields);
 
     const embeds: DiscordEmbed[] = [];
 
@@ -125,6 +128,9 @@ export class DiscordAlerter implements OnModuleInit {
     if (lost.length > 0) {
       embeds.push(this.buildLostSignalEmbed(lost, decision.lostSignal.length));
     }
+    if (flapping.length > 0) {
+      embeds.push(this.buildFlappingEmbed(flapping, decision.flapping.length));
+    }
     if (embeds.length === 0) {
       return [];
     }
@@ -133,7 +139,8 @@ export class DiscordAlerter implements OnModuleInit {
       this.logger.warn(
         `Alerta suprimido por falta de webhook: ${decision.announce.length} falha(s), ` +
           `${decision.recovered.length} recuperacao(oes), ` +
-          `${decision.lostSignal.length} sem dados`,
+          `${decision.lostSignal.length} sem dados, ` +
+          `${decision.flapping.length} oscilando`,
       );
       return [];
     }
@@ -152,7 +159,9 @@ export class DiscordAlerter implements OnModuleInit {
 
     // Only what actually reached the channel. Anything truncated stays unstamped
     // so the next cycle announces it instead of grouping it away.
-    return [...failures, ...recoveries, ...lost].map((record) => record.id);
+    return [...failures, ...recoveries, ...lost, ...flapping].map(
+      (record) => record.id,
+    );
   }
 
   /** POST the payload, retrying once on a rate limit. Never throws. */
@@ -250,6 +259,33 @@ export class DiscordAlerter implements OnModuleInit {
       timestamp: new Date().toISOString(),
     };
   }
+
+  /**
+   * Checks that hit their message budget and are about to go quiet.
+   *
+   * This embed is the reason the budget is allowed to exist. Capping messages
+   * without saying so would leave the channel quiet about a check that is
+   * misbehaving, which is indistinguishable from a check that is fine — the
+   * exact confusion ADR-006 was written against. So the mute announces itself,
+   * once, and points at where the truth still lives.
+   */
+  private buildFlappingEmbed(
+    shown: HealthCheckRecord[],
+    total: number,
+  ): DiscordEmbed {
+    return {
+      title: `⚪ Instrumentacao: ${total} check(s) oscilando — silenciado(s)`,
+      description:
+        'Estes checks mudaram de estado vezes demais nesta janela e gastaram o ' +
+        'orcamento de mensagens. NAO significa que estao bem: significa que o ' +
+        'alerta por evento parou de informar. O estado atual continua em ' +
+        '/health/instrumentation, e o limiar do check provavelmente precisa de ' +
+        'calibracao.',
+      color: COLOR_FLAPPING,
+      fields: shown.map((record) => toField(record)),
+      timestamp: new Date().toISOString(),
+    };
+  }
 }
 
 function buildSummary(decision: AlertDecision): string {
@@ -263,10 +299,14 @@ function buildSummary(decision: AlertDecision): string {
   if (decision.lostSignal.length > 0) {
     parts.push(`${decision.lostSignal.length} sem dados`);
   }
+  if (decision.flapping.length > 0) {
+    parts.push(`${decision.flapping.length} oscilando (silenciado)`);
+  }
   const overflow =
     Math.max(0, decision.announce.length - DISCORD_LIMITS.embedFields) +
     Math.max(0, decision.recovered.length - DISCORD_LIMITS.embedFields) +
-    Math.max(0, decision.lostSignal.length - DISCORD_LIMITS.embedFields);
+    Math.max(0, decision.lostSignal.length - DISCORD_LIMITS.embedFields) +
+    Math.max(0, decision.flapping.length - DISCORD_LIMITS.embedFields);
   if (overflow > 0) {
     // Silent truncation would read as "that was everything" when it was not.
     parts.push(`${overflow} nao exibido(s) por limite do Discord`);

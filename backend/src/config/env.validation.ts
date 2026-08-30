@@ -158,6 +158,16 @@ export class EnvironmentVariables {
   @Max(20)
   HEALTH_ALERT_CONFIRM_RECOVERY?: number;
 
+  // Teto duro de mensagens por check por janela de reenvio. Ao bater o teto o
+  // check recebe UM aviso de que vai ficar quieto e para de falar ate a janela
+  // rolar. E o freio que nao depende de a regra de transicao ter previsto o
+  // formato da oscilacao — a regra ja errou duas vezes nisso.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  HEALTH_ALERT_MAX_PER_WINDOW?: number;
+
   // --- Plan JSON API (AusTV Admin S6.3, ADR-001/ADR-002) ---
 
   // Base URL of the Plan webserver, e.g. http://198.89.99.229:25504. Per ADR-001

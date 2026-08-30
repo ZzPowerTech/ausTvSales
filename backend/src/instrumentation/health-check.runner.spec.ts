@@ -41,6 +41,7 @@ interface StoreStub {
   store: HealthCheckStore;
   record: jest.Mock;
   lastAlert: jest.Mock;
+  alertsInWindow: jest.Mock;
   healthyStreak: jest.Mock;
   markAlerted: jest.Mock;
 }
@@ -53,6 +54,10 @@ function buildStore(): StoreStub {
   const lastAlert = jest.fn(() => {
     calls.push('lastAlert');
     return Promise.resolve(null);
+  });
+  const alertsInWindow = jest.fn(() => {
+    calls.push('alertsInWindow');
+    return Promise.resolve(0);
   });
   const healthyStreak = jest.fn(() => {
     calls.push('healthyStreak');
@@ -67,11 +72,13 @@ function buildStore(): StoreStub {
     store: {
       record,
       lastAlert,
+      alertsInWindow,
       healthyStreak,
       markAlerted,
     } as unknown as HealthCheckStore,
     record,
     lastAlert,
+    alertsInWindow,
     healthyStreak,
     markAlerted,
   };
@@ -323,7 +330,8 @@ describe('HealthCheckRunner', () => {
       expect(summary.alerted).toBe(2);
 
       const decision = firstArg<AlertDecision>(publish);
-      // breached and error both notify; ok and no_data do not.
+      // Com `lastAlert` vazio, so `breached` e `error` viram mensagem: um `ok`
+      // nao tem nada para fechar e um `no_data` nao tem falha aberta atras dele.
       expect(decision.announce).toHaveLength(2);
     });
   });

@@ -12,6 +12,8 @@ const MINUTES = 60 * 1000;
 const RE_ALERT_AFTER = 24 * HOURS;
 /** Matches `DEFAULT_CONFIRM_RECOVERY` in the runner. */
 const CONFIRM_RECOVERY = 2;
+/** Matches `DEFAULT_MAX_ALERTS_PER_WINDOW` in the runner. */
+const MAX_PER_WINDOW = 4;
 
 let nextId = 1;
 
@@ -49,12 +51,13 @@ function decide(overrides: Partial<AlertPolicyInput>) {
   return decideAlerts({
     observations: [],
     lastAlert: new Map(),
+    alertsInWindow: new Map(),
+    maxAlertsPerWindow: MAX_PER_WINDOW,
     healthyStreak: new Map(),
     // Deliberately the production default rather than 1: a helper that turned
     // the hysteresis off would let every other test pass while the shipped
     // configuration behaved differently.
     confirmRecoveryAfter: CONFIRM_RECOVERY,
-    now: NOW,
     reAlertAfterMs: RE_ALERT_AFTER,
     ...overrides,
   });
@@ -139,10 +142,7 @@ describe('decideAlerts', () => {
       // O cenario real: o Plan do proxy ficou morto de maio a agosto/2026. Um
       // alerta a cada ciclo treinaria a equipe a ignorar o canal, que e o
       // silencio do ADR-006 de novo, so que com barulho.
-      const record = observation(
-        HealthCheckName.ProxyRegistrationAlive,
-        'breached',
-      );
+      const check = HealthCheckName.ProxyRegistrationAlive;
       let announcements = 0;
       let lastAlert: LastAlert = {
         status: 'breached',
@@ -151,18 +151,19 @@ describe('decideAlerts', () => {
 
       // Um ciclo a cada 15 minutos por 3 dias.
       for (let cycle = 0; cycle < 3 * 24 * 4; cycle++) {
-        const now = new Date(NOW.getTime() + cycle * 15 * MINUTES);
+        const at = new Date(NOW.getTime() + cycle * 15 * MINUTES);
         const decision = decideAlerts({
-          observations: [record],
-          lastAlert: new Map([[record.checkName, lastAlert]]),
+          observations: [{ ...observation(check, 'breached'), checkedAt: at }],
+          lastAlert: new Map([[check, lastAlert]]),
+          alertsInWindow: new Map(),
+          maxAlertsPerWindow: MAX_PER_WINDOW,
           healthyStreak: new Map(),
           confirmRecoveryAfter: CONFIRM_RECOVERY,
-          now,
           reAlertAfterMs: RE_ALERT_AFTER,
         });
         if (decision.announce.length > 0) {
           announcements++;
-          lastAlert = { status: 'breached', at: now };
+          lastAlert = { status: 'breached', at };
         }
       }
 
@@ -242,31 +243,37 @@ describe('decideAlerts', () => {
       ]);
     });
 
-    it('nunca trata no_data apos falha anunciada como recuperacao', () => {
+    it('trata no_data apos falha anunciada como sinal perdido, na hora', () => {
       // Nao e recuperacao: o check nao voltou ao normal, ele parou de poder ser
       // medido. Colocar isso no mesmo balde de `recovered` fazia o alerter
       // publicar um embed verde "normalizado" sobre uma perda de coleta — o
-      // falso all-clear que o ADR-006 existe para impedir. Essa propriedade vale
-      // dentro e fora da janela de reenvio; o que a janela decide e apenas
-      // QUANDO o canal ouve, nunca se a perda vira um all-clear.
+      // falso all-clear que o ADR-006 existe para impedir.
+      //
+      // E sai na hora, sem esperar a janela: perder a medicao e uma piora, e
+      // piora fura a janela. Quem limita a oscilacao aqui e o orcamento de
+      // mensagens, nao o adiamento deste aviso.
       const record = observation(HealthCheckName.TutorialEntryRate, 'no_data');
 
-      const dentro = decide({
+      const decision = decide({
         observations: [record],
         lastAlert: told(record.checkName, 'breached', 2),
       });
 
-      expect(dentro.recovered).toEqual([]);
-      expect(dentro.announce).toEqual([]);
-      expect(dentro.suppressed).toEqual([{ record, reason: 'grouped' }]);
+      expect(decision.recovered).toEqual([]);
+      expect(decision.announce).toEqual([]);
+      expect(decision.lostSignal).toEqual([record]);
+    });
 
-      const fora = decide({
+    it('nao repete o sinal perdido quando ele so piora de novo para o mesmo', () => {
+      const record = observation(HealthCheckName.TutorialEntryRate, 'no_data');
+
+      const decision = decide({
         observations: [record],
-        lastAlert: told(record.checkName, 'breached', 25),
+        lastAlert: told(record.checkName, 'no_data', 1),
       });
 
-      expect(fora.recovered).toEqual([]);
-      expect(fora.lostSignal).toEqual([record]);
+      expect(decision.lostSignal).toEqual([]);
+      expect(decision.suppressed).toEqual([{ record, reason: 'grouped' }]);
     });
 
     it('nao repete o sinal perdido a cada ciclo', () => {
@@ -356,33 +363,50 @@ describe('decideAlerts', () => {
     function replay(
       check: string,
       cycles: ReadonlyArray<{ at: string; status: HealthCheckStatus }>,
-    ): HealthCheckStatus[] {
+    ): string[] {
       let lastAlert: LastAlert | null = null;
       let okStreak = 0;
-      const messages: HealthCheckStatus[] = [];
+      /** When each message was delivered, so the budget can be recomputed. */
+      const delivered: Date[] = [];
+      const messages: string[] = [];
 
       for (const cycle of cycles) {
-        const now = new Date(cycle.at);
-        const record = { ...observation(check, cycle.status), checkedAt: now };
+        const at = new Date(cycle.at);
+        const record = { ...observation(check, cycle.status), checkedAt: at };
         okStreak = cycle.status === 'ok' ? okStreak + 1 : 0;
 
         const decision = decideAlerts({
           observations: [record],
           lastAlert: new Map([[check, lastAlert]]),
+          alertsInWindow: new Map([
+            [
+              check,
+              delivered.filter(
+                (sentAt) => at.getTime() - sentAt.getTime() < RE_ALERT_AFTER,
+              ).length,
+            ],
+          ]),
+          maxAlertsPerWindow: MAX_PER_WINDOW,
           healthyStreak: new Map([[check, okStreak]]),
           confirmRecoveryAfter: CONFIRM_RECOVERY,
-          now,
           reAlertAfterMs: RE_ALERT_AFTER,
         });
 
-        // O runner so carimba `alerted_at` no que o alerter entregou.
+        // O runner so carimba `alerted_at` no que o alerter entregou — inclusive
+        // o aviso de silenciamento, que e por isso que ele sai uma vez so.
         for (const sent of [
           ...decision.announce,
           ...decision.recovered,
           ...decision.lostSignal,
         ]) {
           messages.push(sent.status);
-          lastAlert = { status: sent.status, at: now };
+          delivered.push(at);
+          lastAlert = { status: sent.status, at };
+        }
+        for (const sent of decision.flapping) {
+          messages.push(`flapping:${sent.status}`);
+          delivered.push(at);
+          lastAlert = { status: sent.status, at };
         }
       }
 
@@ -443,14 +467,17 @@ describe('decideAlerts', () => {
         });
       }
 
-      // Uma mensagem: a entrada na falha. O resto cabe na janela de reenvio.
-      expect(replay(check, cycles)).toEqual(['breached']);
+      // Duas: a entrada na falha e a piora para "nao da mais para medir". A
+      // volta para `breached` e uma melhora e espera a janela; a ida seguinte
+      // para `no_data` ja nao e piora, porque e disso que o canal foi avisado.
+      expect(replay(check, cycles)).toEqual(['breached', 'no_data']);
     });
 
     it('deixa o error furar a janela uma vez, e so uma', () => {
       // Chegar em `error` significa que a fonte sumiu, nao que ela leu mal — e o
       // apagao de tres meses do ADR-006. Nao pode esperar um dia atras de um
-      // problema menor. Mas tambem nao pode virar um laco.
+      // problema menor. Mas tambem nao pode virar um laco: voltar de `error`
+      // para `breached` e uma melhora, e melhora nao fura janela.
       const check = HealthCheckName.CollectionAlive;
       const cycles: Array<{ at: string; status: HealthCheckStatus }> = [];
       for (let i = 0; i < 20; i++) {
@@ -461,6 +488,68 @@ describe('decideAlerts', () => {
       }
 
       expect(replay(check, cycles)).toEqual(['breached', 'error']);
+    });
+
+    it('cobre uma semana de oscilacao breached/ok com 4 avisos e um silenciamento por dia', () => {
+      // O buraco que a regra de transicao NAO fecha, e a razao de o orcamento
+      // existir. `breached, ok, ok` repetindo confirma uma recuperacao a cada
+      // tres ciclos, entrega o all-clear, e com isso a quebra seguinte volta a
+      // ser "incidente novo" — 64 mensagens por dia, para sempre.
+      const check = HealthCheckName.OfflineAccountShare;
+      const cycles: Array<{ at: string; status: HealthCheckStatus }> = [];
+      const CYCLES_PER_WEEK = 7 * 24 * 4;
+      for (let i = 0; i < CYCLES_PER_WEEK; i++) {
+        cycles.push({
+          at: new Date(NOW.getTime() + i * 15 * MINUTES).toISOString(),
+          status: i % 3 === 0 ? 'breached' : 'ok',
+        });
+      }
+
+      const messages = replay(check, cycles);
+
+      // Orcamento de 4 por janela de 24h, mais o proprio aviso de
+      // silenciamento: 5 mensagens por dia, sete dias.
+      expect(messages).toHaveLength(5 * 7);
+      // E o canal e avisado de que ficou quieto de proposito — um mute sem aviso
+      // seria indistinguivel de um check saudavel.
+      expect(messages.filter((m) => m.startsWith('flapping:'))).toHaveLength(7);
+    });
+
+    it('nao gasta orcamento com um apagao continuo', () => {
+      // O outro extremo: o orcamento nao pode encurtar a vida de um alerta que
+      // ja e raro. Uma semana quebrada sem parar sao sete lembretes, um por dia.
+      const check = HealthCheckName.ProxyRegistrationAlive;
+      const cycles: Array<{ at: string; status: HealthCheckStatus }> = [];
+      for (let i = 0; i < 7 * 24 * 4; i++) {
+        cycles.push({
+          at: new Date(NOW.getTime() + i * 15 * MINUTES).toISOString(),
+          status: 'breached',
+        });
+      }
+
+      expect(replay(check, cycles)).toEqual(Array(7).fill('breached'));
+    });
+
+    it('mantem o error limitado mesmo depois de a janela rolar', () => {
+      // A versao anterior deste teste rodava 5 horas dentro de uma janela de 24
+      // e por isso nao podia falhar. O ponto e justamente o que acontece DEPOIS
+      // que a janela vence e o `lastAlert` volta a ser `breached`: o desvio do
+      // `error` rearma. Ele rearma mesmo — o limite real e o orcamento.
+      const check = HealthCheckName.CollectionAlive;
+      const cycles: Array<{ at: string; status: HealthCheckStatus }> = [];
+      for (let i = 0; i < 7 * 24 * 4; i++) {
+        cycles.push({
+          at: new Date(NOW.getTime() + i * 15 * MINUTES).toISOString(),
+          status: i % 2 === 0 ? 'breached' : 'error',
+        });
+      }
+
+      const messages = replay(check, cycles);
+
+      // Nunca mais que o orcamento mais o aviso, por dia.
+      expect(messages.length).toBeLessThanOrEqual(5 * 7);
+      // E nao vira silencio: o `error` continua chegando.
+      expect(messages).toContain('error');
     });
 
     it('anuncia a falha no primeiro ciclo — a histerese e so da recuperacao', () => {

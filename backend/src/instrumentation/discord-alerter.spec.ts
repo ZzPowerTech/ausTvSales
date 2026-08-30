@@ -43,6 +43,7 @@ function decision(overrides: Partial<AlertDecision> = {}): AlertDecision {
     announce: [],
     recovered: [],
     lostSignal: [],
+    flapping: [],
     suppressed: [],
     ...overrides,
   };
@@ -436,6 +437,49 @@ describe('DiscordAlerter', () => {
       await buildEnabled().publish(decision({ lostSignal: [gone] }));
 
       expect(sentPayload().content).toContain('1 sem dados');
+    });
+  });
+
+  describe('oscilacao (orcamento de mensagens estourado)', () => {
+    it('avisa que vai ficar quieto em vez de so ficar quieto', async () => {
+      // Um mute silencioso e indistinguivel de um check saudavel — a confusao
+      // exata contra a qual o ADR-006 foi escrito. O silenciamento se anuncia.
+      fetchMock.mockResolvedValue(okResponse());
+      const noisy = record('platform.offline_account_share', 'breached');
+
+      await buildEnabled().publish(decision({ flapping: [noisy] }));
+
+      const embed = sentPayload().embeds[0];
+      expect(embed.title).toContain('silenciado');
+      expect(embed.description).toContain('NAO significa que estao bem');
+      // E aponta para onde a verdade continua disponivel.
+      expect(embed.description).toContain('/health/instrumentation');
+      // Nem verde nem vermelho: nao e um veredito sobre o jogo.
+      expect(embed.color).not.toBe(0x2e8b57);
+      expect(embed.color).not.toBe(0xd9363c);
+    });
+
+    it('entrega o id do aviso para o carimbo, para nao repeti-lo', async () => {
+      // Se este id nao voltasse, o aviso nunca seria carimbado, o orcamento
+      // nunca passaria do teto e o "vou ficar quieto" sairia a cada ciclo — o
+      // silenciamento viraria a propria oscilacao.
+      fetchMock.mockResolvedValue(okResponse());
+      const noisy = record('platform.offline_account_share', 'breached');
+
+      const delivered = await buildEnabled().publish(
+        decision({ flapping: [noisy] }),
+      );
+
+      expect(delivered).toEqual([noisy.id]);
+    });
+
+    it('conta a oscilacao no resumo', async () => {
+      fetchMock.mockResolvedValue(okResponse());
+      const noisy = record('platform.offline_account_share', 'breached');
+
+      await buildEnabled().publish(decision({ flapping: [noisy] }));
+
+      expect(sentPayload().content).toContain('1 oscilando (silenciado)');
     });
   });
 

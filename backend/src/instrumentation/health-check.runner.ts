@@ -20,6 +20,14 @@ const DEFAULT_REALERT_HOURS = 24;
  * `AlertPolicyInput.confirmRecoveryAfter`.
  */
 const DEFAULT_CONFIRM_RECOVERY = 2;
+/**
+ * Hard ceiling on messages per check per re-alert window.
+ *
+ * Loose on purpose: one real incident can want "quebrou", "piorou", "perdeu
+ * sinal" and "normalizado" inside a day. A check that flaps burns this in an
+ * hour, gets one `flapping` notice, and goes quiet until the window rolls.
+ */
+const DEFAULT_MAX_ALERTS_PER_WINDOW = 4;
 const MS_PER_HOUR = 3_600_000;
 
 /** What one cycle did. Returned for logging, and for the S7.1 `health` module. */
@@ -42,6 +50,8 @@ export interface HealthCheckRunSummary {
    * this permanently above zero is a value that never lets an all-clear out.
    */
   recoveryHeld: number;
+  /** Checks that hit the message budget and were told so, once. */
+  flapping: number;
   /** Rows whose notification actually reached Discord and were stamped. */
   alerted: number;
 }
@@ -73,6 +83,7 @@ export class HealthCheckRunner {
   private readonly logger = new Logger(HealthCheckRunner.name);
   private readonly reAlertAfterMs: number;
   private readonly confirmRecoveryAfter: number;
+  private readonly maxAlertsPerWindow: number;
 
   /**
    * Guards against overlapping cycles.
@@ -96,6 +107,9 @@ export class HealthCheckRunner {
     this.confirmRecoveryAfter =
       config.get<number>('HEALTH_ALERT_CONFIRM_RECOVERY') ??
       DEFAULT_CONFIRM_RECOVERY;
+    this.maxAlertsPerWindow =
+      config.get<number>('HEALTH_ALERT_MAX_PER_WINDOW') ??
+      DEFAULT_MAX_ALERTS_PER_WINDOW;
   }
 
   async runAll(): Promise<HealthCheckRunSummary> {
@@ -147,6 +161,21 @@ export class HealthCheckRunner {
       ),
     );
 
+    // 3b. How much each check has already said in this window, for the message
+    //     budget. Counted from stamped rows, so it measures what the channel
+    //     actually heard rather than what was decided.
+    const alertsInWindow = new Map(
+      await Promise.all(
+        names.map(
+          async (name) =>
+            [
+              name,
+              await this.store.alertsInWindow(name, this.reAlertAfterMs),
+            ] as [string, number],
+        ),
+      ),
+    );
+
     // 4. The healthy streak includes the verdict just written, because "has it
     //    been ok for two cycles *including this one*" is the question asked.
     //    The window is the threshold itself: a streak that saturated below it
@@ -158,9 +187,10 @@ export class HealthCheckRunner {
     const decision = decideAlerts({
       observations: records,
       lastAlert,
+      alertsInWindow,
+      maxAlertsPerWindow: this.maxAlertsPerWindow,
       healthyStreak,
       confirmRecoveryAfter: this.confirmRecoveryAfter,
-      now: new Date(),
       reAlertAfterMs: this.reAlertAfterMs,
     });
 
@@ -177,6 +207,7 @@ export class HealthCheckRunner {
       announced: decision.announce.length,
       recovered: decision.recovered.length,
       lostSignal: decision.lostSignal.length,
+      flapping: decision.flapping.length,
       suppressed: decision.suppressed.length,
       recoveryHeld: decision.suppressed.filter(
         (item) => item.reason === 'recovery_unconfirmed',
@@ -232,7 +263,8 @@ export class HealthCheckRunner {
       `error=${summary.byStatus.error}`,
       `anunciados=${summary.announced}`,
       `entregues=${summary.alerted}`,
-      `recuperacoes_seguras=${summary.recoveryHeld}`,
+      `recuperacoes_seguradas=${summary.recoveryHeld}`,
+      `oscilando=${summary.flapping}`,
     ];
 
     const failing = summary.byStatus.breached + summary.byStatus.error;
@@ -271,6 +303,7 @@ function emptySummary(startedAt: Date, ran: boolean): HealthCheckRunSummary {
     announced: 0,
     recovered: 0,
     lostSignal: 0,
+    flapping: 0,
     suppressed: 0,
     recoveryHeld: 0,
     alerted: 0,

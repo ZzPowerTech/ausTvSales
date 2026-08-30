@@ -112,7 +112,8 @@ const MS_PER_HOUR = 3_600_000;
  *
  * So the freshness of the ETL is checked **before** the ratio is computed, and a
  * stale source produces `error` naming the ETL, never `breached` naming the
- * tutorial. `error` rather than `no_data` because only `error` is notifiable: a
+ * tutorial. `error` rather than `no_data` because a `no_data` on a check with
+ * nothing outstanding is never announced: a
  * measurement pipeline that has stopped has to reach Discord, which is the
  * failure this whole epic was built around.
  *

@@ -1,4 +1,8 @@
-import type { HealthCheckRecord, LastAlert } from './health-check.types';
+import type {
+  HealthCheckRecord,
+  HealthCheckStatus,
+  LastAlert,
+} from './health-check.types';
 
 /** Why an observation that could have notified was not announced. */
 export type SuppressionReason =
@@ -15,7 +19,15 @@ export type SuppressionReason =
    * holding an all-clear back, which is the number to watch if
    * `confirmRecoveryAfter` is ever tuned.
    */
-  | 'recovery_unconfirmed';
+  | 'recovery_unconfirmed'
+  /**
+   * The check already spent its message budget for this window.
+   *
+   * The last thing said before this reason starts appearing is the `flapping`
+   * notice, so the channel knows the check went quiet on purpose. See
+   * {@link AlertPolicyInput.maxAlertsPerWindow}.
+   */
+  | 'flapping';
 
 export interface SuppressedObservation {
   record: HealthCheckRecord;
@@ -38,6 +50,15 @@ export interface AlertDecision {
    * rule that a collection gap is never rendered as a healthy value.
    */
   lostSignal: HealthCheckRecord[];
+  /**
+   * Checks that just hit their message budget — one notice, then quiet.
+   *
+   * A cap without a notice is a silent mute, which is the failure this whole
+   * layer exists to prevent. This bucket is that notice: it is emitted exactly
+   * once, on the observation that crosses the budget, and it says the check is
+   * changing state too often to be reported per event.
+   */
+  flapping: HealthCheckRecord[];
   /** Observations deliberately held back, with the reason. */
   suppressed: SuppressedObservation[];
 }
@@ -54,11 +75,34 @@ export interface AlertPolicyInput {
    * whole fix.
    */
   lastAlert: ReadonlyMap<string, LastAlert | null>;
-  now: Date;
+  /**
+   * How many messages each check has already had delivered inside the current
+   * `reAlertAfterMs`. From `HealthCheckStore.alertsInWindow()`.
+   */
+  alertsInWindow: ReadonlyMap<string, number>;
+  /**
+   * Hard ceiling on messages per check per `reAlertAfterMs`.
+   *
+   * The transition rules below bound the *common* oscillations, but they bound
+   * them by reasoning about shapes, and a shape nobody thought of is exactly how
+   * this layer got a three-message flap in production. This is the backstop that
+   * does not depend on being clever: whatever the check does, it cannot exceed
+   * this many messages in a window.
+   *
+   * It is deliberately loose. A real incident wants room for "broke", "got
+   * worse", "lost signal" and "normalizado" inside one day; a flapping check
+   * burns the budget in an hour and then says so once and stops.
+   */
+  maxAlertsPerWindow: number;
   /**
    * How long a check must stay in the same announced state before it is
    * repeated. Guards against a three-month outage producing one message per
    * cycle.
+   *
+   * Elapsed time is measured between `alerted_at` and the observation's own
+   * `checked_at`, both stamped by Postgres. Comparing a database timestamp
+   * against the application clock would reintroduce exactly the skew the store
+   * avoids by not stamping `checked_at` itself.
    */
   reAlertAfterMs: number;
   /**
@@ -123,45 +167,51 @@ export interface AlertPolicyInput {
  *
  * The bound on that is worth stating precisely, because it is narrower than it
  * sounds: if the healthy stretch in the middle lasts long enough for the
- * recovery to be *confirmed and delivered*, the next breach is a genuinely new
- * incident and does announce. That is correct — a check that was demonstrably
- * fine for hours and then broke is news. What this removes is the sub-window
- * flap, where the all-clear never held.
+ * recovery to be *confirmed and delivered*, the next breach is a new incident
+ * and does announce. What this removes is the sub-window flap, where the
+ * all-clear never held.
+ *
+ * "Long enough" is `confirmRecoveryAfter` cycles — **thirty minutes** at the
+ * shipped default, not hours. That is short enough for `breached → ok → ok`
+ * repeating to re-open the door every third cycle, which is why the message cap
+ * below is not optional decoration.
  *
  * It also removes a hazard rather than adding one: the runner no longer has to
  * read the previous state *before* inserting the new rows, an ordering whose
  * inversion would have silenced the whole layer while looking healthy.
  *
- * ## Every repeat is bounded, including the changes of kind
+ * ## Two independent bounds on how much a check can say
  *
  * Alerting on every cycle of a long outage trains the team to mute the channel,
  * which reproduces ADR-006's silence with extra noise. Alerting only on the
- * transition means a message missed on a busy day is a message lost forever. So:
- * announce on entry into a problem, then repeat at most once per
- * `reAlertAfterMs`.
+ * transition means a message missed on a busy day is a message lost forever.
  *
- * "Entry into a problem" means the channel was holding **nothing**. Once it is
- * holding something, a change of kind (`breached` → `no_data`, `error` →
- * `breached`) does not restart the clock — it is reported when the window
- * elapses, in whichever bucket the current verdict belongs to. An earlier
- * version let every change announce immediately, which reads as reasonable and
- * is not: a check oscillating between two failing states then produces one
- * message per cycle forever, which is the muted channel arriving by a different
- * road. Both `platform.offline_account_share` (`no_data` below its minimum
- * sample, `breached` above it) and `funnel.tutorial_entry_rate` (`error` on a
- * stale ETL, `no_data` on a missing denominator) sit near such a boundary.
+ * The first bound is the re-alert window: while the channel is holding a problem
+ * about a check, the same problem is repeated at most once per `reAlertAfterMs`.
+ * The one thing that skips the window is a problem getting **worse** —
+ * `breached` → `no_data` → `error`, in that order of severity. "The tutorial
+ * rate is low", "we can no longer measure it at all" and "the source is gone"
+ * are three different problems, and the later ones must not wait a day behind
+ * the earlier one. Getting *better* without reaching `ok` (`error` → `breached`)
+ * does wait: the channel already knows there is a problem.
  *
- * The single exception is arriving at `error`, which bypasses the window once.
- * `error` is the one verdict that means the source itself is gone rather than
- * reading badly — the three-month blackout of ADR-006 — and it must not wait a
- * day behind a lesser problem. It cannot loop: after it is announced the channel
- * holds `error`, and anything else is windowed and therefore never delivered, so
- * `error` never gets a second first-time.
+ * The second bound is {@link AlertPolicyInput.maxAlertsPerWindow}, and it exists
+ * because the first one reasons about shapes. Enumerating oscillations and
+ * proving each is bounded is how this policy has already been wrong twice: the
+ * original version let every state change announce (a check flipping between two
+ * failing states then spoke every cycle, forever), and the version that fixed
+ * that still let `breached` → `ok` → `breached` through, because a confirmed and
+ * delivered recovery legitimately re-opens the door. The cap does not care what
+ * shape the flap has. When it is reached the check gets one `flapping` notice
+ * and then goes quiet until the window rolls — quiet **announced**, not quiet
+ * silently, because an unannounced mute is the ADR-006 failure wearing the
+ * uniform of a fix.
  */
 export function decideAlerts(input: AlertPolicyInput): AlertDecision {
   const announce: HealthCheckRecord[] = [];
   const recovered: HealthCheckRecord[] = [];
   const lostSignal: HealthCheckRecord[] = [];
+  const flapping: HealthCheckRecord[] = [];
   const suppressed: SuppressedObservation[] = [];
 
   for (const record of input.observations) {
@@ -171,12 +221,28 @@ export function decideAlerts(input: AlertPolicyInput): AlertDecision {
       last !== null && last.status !== 'ok' ? last : null;
 
     /**
-     * Repeat of an identical announced state: say it again only once the
-     * re-alert window has elapsed.
+     * Route a record that the transition rules want delivered, unless the check
+     * has already spent its budget for this window.
      */
-    const repeat = (since: LastAlert, bucket: HealthCheckRecord[]): void => {
-      if (input.now.getTime() - since.at.getTime() >= input.reAlertAfterMs) {
+    const deliver = (bucket: HealthCheckRecord[]): void => {
+      const spent = input.alertsInWindow.get(record.checkName) ?? 0;
+      if (spent < input.maxAlertsPerWindow) {
         bucket.push(record);
+      } else if (spent === input.maxAlertsPerWindow) {
+        // Exactly at the budget: say once that the check is going quiet. This
+        // notice is itself delivered and stamped, so `spent` passes the budget
+        // and every later observation takes the branch below.
+        flapping.push(record);
+      } else {
+        suppressed.push({ record, reason: 'flapping' });
+      }
+    };
+
+    /** Deliver only once `reAlertAfterMs` has passed since the last message. */
+    const repeat = (since: LastAlert, bucket: HealthCheckRecord[]): void => {
+      const elapsed = record.checkedAt.getTime() - since.at.getTime();
+      if (elapsed >= input.reAlertAfterMs) {
+        deliver(bucket);
       } else {
         suppressed.push({ record, reason: 'grouped' });
       }
@@ -192,7 +258,7 @@ export function decideAlerts(input: AlertPolicyInput): AlertDecision {
       ) {
         // Closing the loop matters: without it, the only way to learn that an
         // outage ended is to go look, which is the habit this epic removes.
-        recovered.push(record);
+        deliver(recovered);
       } else {
         // Healthy, but not for long enough to be believed yet. Held rather than
         // announced — see `confirmRecoveryAfter` for the reading behind it.
@@ -209,23 +275,38 @@ export function decideAlerts(input: AlertPolicyInput): AlertDecision {
         suppressed.push({ record, reason: 'not_notifiable' });
       } else {
         // Never announced, or failing again after a delivered all-clear.
-        announce.push(record);
+        deliver(announce);
       }
       continue;
     }
 
-    if (record.status === 'error' && open.status !== 'error') {
-      // The source is gone, not merely reading badly. See the class doc: this
-      // is the one bypass, and it cannot repeat.
-      announce.push(record);
+    const bucket = record.status === 'no_data' ? lostSignal : announce;
+
+    if (SEVERITY[record.status] > SEVERITY[open.status]) {
+      // The problem got worse. Never waits — see the class doc.
+      deliver(bucket);
       continue;
     }
 
-    // A problem is already open. Whatever changed about it, the channel hears
-    // again only when the window elapses — but in the bucket that matches what
-    // is true *now*, so a lost signal is never painted as a recovery.
-    repeat(open, record.status === 'no_data' ? lostSignal : announce);
+    // Same problem, or a lesser one. The channel hears again when the window
+    // rolls, in the bucket that matches what is true *now*, so a lost signal is
+    // never painted as a recovery.
+    repeat(open, bucket);
   }
 
-  return { announce, recovered, lostSignal, suppressed };
+  return { announce, recovered, lostSignal, flapping, suppressed };
 }
+
+/**
+ * How bad each verdict is, for deciding what may skip the re-alert window.
+ *
+ * `ok` is present only so the table is total; a record with `ok` never reaches
+ * the comparison. The order among the rest is the one the alerter's colours
+ * already imply: measured-and-bad, then not-measurable, then source-gone.
+ */
+const SEVERITY: Record<HealthCheckStatus, number> = {
+  ok: 0,
+  breached: 1,
+  no_data: 2,
+  error: 3,
+};
