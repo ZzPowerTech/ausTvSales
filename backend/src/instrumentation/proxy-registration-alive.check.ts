@@ -70,15 +70,22 @@ export class ProxyRegistrationAliveCheck implements HealthCheck {
     if (arrivals.lastRegisteredAt === null) {
       // An empty identity table is not "nobody arrived recently" — it is a
       // network with no history at all, which on a live server means the read
-      // found the wrong database.
+      // found the wrong database. That is §1's founding disaster verbatim: the
+      // production Plan on SQLite while the MySQL being queried was half empty.
+      //
+      // So `error`, not `no_data`. `NOTIFIABLE_STATUSES` excludes `no_data`, and
+      // `decideAlerts` suppresses one as `not_notifiable` while nothing is open
+      // on the check — meaning the single verdict that would have named the
+      // SQLite disaster is the one that never reaches Discord. `no_data` is for
+      // a window that came back empty; an identity table has no window.
       return [
         {
           checkName: this.name,
-          status: 'no_data',
+          status: 'error',
           detail: {
             summary:
-              'plan_users nao tem nenhum registro — sem base para avaliar ' +
-              'liveness do proxy',
+              'plan_users nao tem nenhum registro — a leitura provavelmente ' +
+              'encontrou o banco errado',
             n: arrivals.total,
           },
         },

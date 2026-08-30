@@ -1,4 +1,5 @@
 import { ConfigService } from '@nestjs/config';
+import { NOTIFIABLE_STATUSES } from './health-check.types';
 import type { NetworkArrivals, PlanDatabase } from './plan-database';
 import { ProxyRegistrationAliveCheck } from './proxy-registration-alive.check';
 
@@ -122,17 +123,30 @@ describe('ProxyRegistrationAliveCheck', () => {
     });
   });
 
-  describe('ausencia de dado', () => {
-    it('reports no_data on an empty identity table', async () => {
+  describe('tabela de identidade vazia', () => {
+    it('reports error on an empty identity table', async () => {
       const [result] = await new ProxyRegistrationAliveCheck(
         dbReturning({ total: 0, lastRegisteredAt: null }),
         config(),
       ).run();
 
       // Not "nobody arrived recently" — a live network with no history at all
-      // means the read found the wrong database.
-      expect(result.status).toBe('no_data');
+      // means the read found the wrong database, which is §1's founding
+      // disaster verbatim.
+      expect(result.status).toBe('error');
       expect(result.detail.n).toBe(0);
+    });
+
+    it('files the empty table under a notifiable status', async () => {
+      // The regression this pins. Filed as `no_data`, the single verdict that
+      // would have named the SQLite disaster was suppressed as `not_notifiable`
+      // on every cycle, forever, because nothing was ever open on the check.
+      const [result] = await new ProxyRegistrationAliveCheck(
+        dbReturning({ total: 0, lastRegisteredAt: null }),
+        config(),
+      ).run();
+
+      expect(NOTIFIABLE_STATUSES).toContain(result.status);
     });
   });
 

@@ -68,6 +68,25 @@ export interface AlertPolicyInput {
  * treated as a new event: "the tutorial rate is low" and "we cannot reach the
  * Plan at all" are different problems and the second must not hide behind the
  * first.
+ *
+ * ## `no_data` never announces on its own, and that is a contract on the checks
+ *
+ * A `no_data` observation with nothing open on the check is suppressed as
+ * `not_notifiable`, with no timer and no escalation. That is intentional —
+ * "sem base" is not a low number, and announcing every absent denominator is
+ * the noise that turns the channel mute — but it means a check that returns
+ * `no_data` forever, starting from a clean state, **never produces a single
+ * message**.
+ *
+ * So the burden sits on the check, not here: a source that comes back empty
+ * when it *cannot* be empty is `error`, not `no_data`. `plan_servers` with no
+ * servers and `plan_users` with no rows are not empty windows, they are failed
+ * reads, and all three checks that touch them say so. `no_data` is reserved for
+ * a window that genuinely had nothing in it — too small a sample, a version
+ * Plan never recorded, a comparison with one side missing.
+ *
+ * Before moving a check to `no_data`, ask whether that verdict repeating for a
+ * month should be heard. If yes, it is `error`.
  */
 export function decideAlerts(input: AlertPolicyInput): AlertDecision {
   const announce: HealthCheckRecord[] = [];
