@@ -234,12 +234,11 @@ export interface AlertPolicyInput {
  * produced.
  *
  * When the budget runs out the check gets a `flapping` notice and then goes
- * quiet about that repetition until the window rolls — quiet **announced**, not
- * quiet silently, because an unannounced mute is the ADR-006 failure wearing the
- * uniform of a fix. The notice reappears once per window while the oscillation
- * lasts, which is the honest cadence: "still flapping, still muted" is worth
- * saying daily, and saying it only once would leave a week-long flap looking
- * like a week-long silence.
+ * quiet about that repetition until the window slides far enough to free a slot
+ * — quiet **announced**, not quiet silently, because an unannounced mute is the
+ * ADR-006 failure wearing the uniform of a fix. How often the notice reappears
+ * depends on how the window slides against the oscillation, so the guarantee is
+ * "at least once, when the budget is first spent", not a fixed cadence.
  */
 export function decideAlerts(input: AlertPolicyInput): AlertDecision {
   const announce: HealthCheckRecord[] = [];
@@ -272,11 +271,19 @@ export function decideAlerts(input: AlertPolicyInput): AlertDecision {
     const deliver = (bucket: HealthCheckRecord[]): void => {
       if (heardThis === 0 || heardAny < input.maxAlertsPerWindow) {
         bucket.push(record);
-      } else if (heardAny === input.maxAlertsPerWindow) {
+      } else if (
+        heardAny === input.maxAlertsPerWindow &&
+        record.status !== 'ok'
+      ) {
         // Exactly at the budget: say once that the check is going quiet. The
         // notice is itself delivered and stamped, so `heardAny` passes the
         // budget and every later repetition takes the branch below — until the
         // window slides back down and the notice is due again.
+        //
+        // Never on an `ok`. The notice is stamped with the record's status, and
+        // a notice stamped `ok` would clear `open` — the channel would hold an
+        // all-clear it was never given, and the recovery that is waiting for the
+        // budget could then never be recognised as one.
         flapping.push(record);
       } else {
         suppressed.push({ record, reason: 'flapping' });
@@ -304,10 +311,16 @@ export function decideAlerts(input: AlertPolicyInput): AlertDecision {
         // Closing the loop matters: without it, the only way to learn that an
         // outage ended is to go look, which is the habit this epic removes.
         //
-        // Not routed through `deliver`: an all-clear is never withheld by a
-        // budget. It is already gated by `confirmRecoveryAfter` and cannot run
-        // away, because it needs an open problem and open problems are gated.
-        recovered.push(record);
+        // Budgeted like everything else, and the reason is the flap: a check
+        // that oscillates produces all-clears as fast as it produces failures,
+        // and an ungated one wins the race to be the **last** message. The
+        // channel is then left holding a green banner over a check that is
+        // breaching every third cycle — a false all-clear, which is the one
+        // outcome this layer may never produce. What protects the real recovery
+        // is not a bypass but the free pass on `heardThis === 0`: once the
+        // flap's own `ok` messages age out of the window, the next confirmed
+        // recovery is news again and goes out.
+        deliver(recovered);
       } else {
         // Healthy, but not for long enough to be believed yet. Held rather than
         // announced — see `confirmRecoveryAfter` for the reading behind it.

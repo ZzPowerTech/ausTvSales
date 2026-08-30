@@ -297,10 +297,10 @@ describe('health_checks (e2e)', () => {
   });
 
   describe('healthyStreak', () => {
-    // A unica cobertura que executa a query de janela de verdade. O unit spec
-    // dela mocka o `db.execute` e monta as linhas ja ordenadas, entao valida o
-    // laco em JS, nao o SQL — um erro no PARTITION BY ou no `rn <= window` nao
-    // seria pego por nada sem este teste.
+    // A unica cobertura que executa a leitura contra Postgres de verdade. O unit
+    // spec mocka o builder e monta as linhas ja ordenadas, entao valida o laco de
+    // contagem, nao o SQL — um erro na ordenacao ou no LIMIT nao seria pego por
+    // nada sem este teste.
 
     /** Grava vereditos em sequencia, um por chamada, do mais antigo ao mais novo. */
     async function sequence(

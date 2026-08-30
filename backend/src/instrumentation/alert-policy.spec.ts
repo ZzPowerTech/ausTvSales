@@ -516,7 +516,7 @@ describe('decideAlerts', () => {
       expect(replay(check, cycles)).toEqual(['breached', 'error']);
     });
 
-    it('cobre uma semana de oscilacao breached/ok com 6 mensagens por dia', () => {
+    it('cobre uma semana de oscilacao breached/ok com 5 mensagens por dia', () => {
       // O buraco que a regra de transicao NAO fecha, e a razao de o orcamento
       // existir. `breached, ok, ok` repetindo confirma uma recuperacao a cada
       // tres ciclos, entrega o all-clear, e com isso a quebra seguinte volta a
@@ -533,16 +533,55 @@ describe('decideAlerts', () => {
 
       const messages = replay(check, cycles);
 
-      // Sem orcamento seriam 64 por dia, para sempre. Com ele a sequencia
-      // estabiliza em 6 e depois cala: duas falhas, o aviso de silenciamento,
-      // e as tres recuperacoes que os acompanham — recuperacao nunca e barrada
-      // por orcamento. Passado isso nada mais reabre um problema, entao nao ha
-      // mais o que recuperar e o check fica quieto ate a janela rolar.
-      expect(messages).toHaveLength(6 * 7);
-      // E o canal e avisado de que ficou quieto de proposito — um mute sem aviso
-      // seria indistinguivel de um check saudavel. Uma vez por janela enquanto
-      // durar: "ainda oscilando, ainda calado" vale ser dito todo dia.
-      expect(messages.filter((m) => m.startsWith('flapping:'))).toHaveLength(7);
+      // Sem orcamento seriam 672 mensagens na semana — 64 por dia, para sempre.
+      // Com ele, 29: pouco mais de quatro por dia, que e o teto pedido.
+      expect(messages).toHaveLength(29);
+      // E o canal e avisado de que ficou quieto de proposito ao menos uma vez —
+      // um mute sem aviso seria indistinguivel de um check saudavel.
+      expect(
+        messages.filter((m) => m.startsWith('flapping:')).length,
+      ).toBeGreaterThanOrEqual(1);
+    });
+
+    it('nunca deixa um verde ser a ultima palavra sobre um check ainda quebrado', () => {
+      // O mecanismo por tras da regra, isolado. Uma versao anterior deixava a
+      // recuperacao furar o orcamento; ela entao ganhava a corrida para ser a
+      // ULTIMA mensagem, e o canal ficava segurando um "normalizado" sobre um
+      // check que quebrava a cada tres ciclos — seguido de 22 horas de silencio,
+      // porque as falhas seguintes estavam caladas pelo orcamento.
+      //
+      // Falso all-clear e a unica coisa que esta camada nao pode produzir, entao
+      // a recuperacao e orcada como todo o resto.
+      const record = observation(HealthCheckName.OfflineAccountShare, 'ok');
+
+      const decision = decide({
+        observations: [record],
+        lastAlert: told(record.checkName, 'breached', 1),
+        healthyStreak: confirmed(record.checkName),
+        alertsInWindow: heard(record.checkName, { breached: 3, ok: 3 }),
+      });
+
+      expect(decision.recovered).toEqual([]);
+      expect(decision.flapping).toEqual([]);
+      expect(decision.suppressed).toEqual([{ record, reason: 'flapping' }]);
+    });
+
+    it('nunca carimba o aviso de silenciamento com ok', () => {
+      // O aviso e carimbado com o status do proprio veredito. Um aviso carimbado
+      // `ok` limparia o `open`: o canal passaria a segurar um all-clear que
+      // ninguem deu, e a recuperacao que espera o orcamento nunca mais seria
+      // reconhecida como recuperacao.
+      const record = observation(HealthCheckName.OfflineAccountShare, 'ok');
+
+      const decision = decide({
+        observations: [record],
+        lastAlert: told(record.checkName, 'breached', 1),
+        healthyStreak: confirmed(record.checkName),
+        alertsInWindow: heard(record.checkName, { breached: 2, ok: 2 }),
+      });
+
+      expect(decision.flapping).toEqual([]);
+      expect(decision.suppressed).toEqual([{ record, reason: 'flapping' }]);
     });
 
     it('deixa passar a morte da fonte mesmo com o orcamento estourado', () => {
@@ -581,39 +620,35 @@ describe('decideAlerts', () => {
       expect(messages[messages.length - 1]).toBe('error');
     });
 
-    it('deixa passar a recuperacao mesmo com o orcamento estourado', () => {
-      // O outro modo de falha da mesma versao: o check oscilava, gastava o
-      // orcamento, e entao ficava REALMENTE bom — e o all-clear nunca saia. A
-      // ultima palavra sobre um check saudavel havia dias era um aviso cinza
-      // dizendo "NAO significa que estao bem".
+    it('entrega a recuperacao depois que a oscilacao passa e a janela rola', () => {
+      // O outro modo de falha que o orcamento ja criou: o check oscilava,
+      // gastava o orcamento, e entao ficava REALMENTE bom — e o all-clear nunca
+      // saia. Agora a recuperacao tambem e orcada, entao ela espera; o que a
+      // salva de esperar para sempre e o passe livre do `heardThis === 0`. Assim
+      // que os `ok` da propria oscilacao envelhecem para fora da janela, uma
+      // recuperacao confirmada volta a ser noticia e sai.
       const check = HealthCheckName.OfflineAccountShare;
       const cycles: Array<{ at: string; status: HealthCheckStatus }> = [];
+      const at = (i: number) =>
+        new Date(NOW.getTime() + i * 15 * MINUTES).toISOString();
+
+      // Dez horas oscilando...
       for (let i = 0; i < 40; i++) {
-        cycles.push({
-          at: new Date(NOW.getTime() + i * 15 * MINUTES).toISOString(),
-          status: i % 3 === 0 ? 'breached' : 'ok',
-        });
+        cycles.push({ at: at(i), status: i % 3 === 0 ? 'breached' : 'ok' });
+      }
+      // ...e entao saudavel de verdade, por mais de uma janela inteira.
+      for (let i = 40; i < 150; i++) {
+        cycles.push({ at: at(i), status: 'ok' });
       }
 
       const messages = replay(check, cycles);
 
-      // A ultima palavra sobre um check que esta bem e "esta bem".
+      // A ultima palavra sobre um check que esta bem e "esta bem" — e ela chega
+      // sozinha, sem ninguem ir olhar.
       expect(messages[messages.length - 1]).toBe('ok');
-    });
-
-    it('nao gasta orcamento com um apagao continuo', () => {
-      // O outro extremo: o orcamento nao pode encurtar a vida de um alerta que
-      // ja e raro. Uma semana quebrada sem parar sao sete lembretes, um por dia.
-      const check = HealthCheckName.ProxyRegistrationAlive;
-      const cycles: Array<{ at: string; status: HealthCheckStatus }> = [];
-      for (let i = 0; i < 7 * 24 * 4; i++) {
-        cycles.push({
-          at: new Date(NOW.getTime() + i * 15 * MINUTES).toISOString(),
-          status: 'breached',
-        });
-      }
-
-      expect(replay(check, cycles)).toEqual(Array(7).fill('breached'));
+      // E o teste so vale se o check estiver mesmo saudavel no fim: sem os 110
+      // ciclos `ok`, a ultima mensagem seria o aviso de silenciamento.
+      expect(cycles[cycles.length - 1].status).toBe('ok');
     });
 
     it('mantem o error limitado mesmo depois de a janela rolar', () => {

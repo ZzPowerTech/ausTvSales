@@ -143,6 +143,14 @@ export const healthChecks = pgTable(
       table.checkName,
       table.checkedAt.desc(),
     ),
+    // Serves the alert budget: "how much has this check said in the last N
+    // hours", which filters on `alerted_at` and so cannot use the index above.
+    // Partial because the overwhelming majority of rows are never announced —
+    // on a healthy week every row has `alerted_at` null — so the index stays a
+    // tiny fraction of the table it sits on.
+    index('health_checks_name_alerted_at_idx')
+      .on(table.checkName, table.alertedAt.desc())
+      .where(sql`${table.alertedAt} IS NOT NULL`),
     // `no_data` and `error` exist as first-class states on purpose. A gap in
     // collection must never be recorded as `ok` (false confidence) nor as a zero
     // reading (a fabricated measurement) — the two failure modes ADR-006 targets.

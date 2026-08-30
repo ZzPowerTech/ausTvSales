@@ -121,13 +121,18 @@ export class EnvironmentVariables {
   // itself the credential — anyone holding it can post to the channel — so it is
   // injected as a deploy secret and never logged, not even redacted.
   //
-  // Optional in every environment **for now**, and validated only for shape when
-  // present. Making it required in production here would be a deploy-ordering
-  // trap: this slice ships the alerter, but nothing schedules a check yet, so the
-  // container would refuse to boot for no gain. The slice that starts the
-  // scheduler is the one that must promote this to required-in-production —
-  // running checks that silently cannot alert is exactly the ADR-006 failure.
-  // Until then, DiscordAlerter warns loudly at boot when it is unset.
+  // Optional in every environment, validated only for shape when present — and
+  // that is now a **known gap**, not a deliberate staging. The original comment
+  // here said the scheduler did not exist yet and that the slice shipping it
+  // would promote this to required-in-production. `HealthCheckScheduler` shipped,
+  // and has been running in production since at least 2026-08-26; the promotion
+  // never happened.
+  //
+  // So production can boot with checks measuring, persisting, and never saying
+  // anything, and the only signal is one `logger.warn` from DiscordAlerter at
+  // boot. That is the ADR-006 failure with an easy-to-miss receipt. Treat the
+  // variable as mandatory by hand until a `@ValidateIf` on
+  // NODE_ENV=production && HEALTH_CHECK_ENABLED makes it so.
   @IsOptional()
   @IsUrl(
     { require_tld: true, require_protocol: true, protocols: ['https'] },
@@ -166,9 +171,12 @@ export class EnvironmentVariables {
   // para de repetir. E o freio que nao depende de a regra de transicao ter
   // previsto o formato da oscilacao — a regra ja errou duas vezes nisso.
   //
-  // Nao barra nem um status que o canal ainda nao ouviu nesta janela, nem uma
-  // recuperacao confirmada: barrar esses foi como uma versao anterior deste teto
-  // segurou um `error` por 45 horas e um all-clear para sempre.
+  // Nao barra um status que o canal ainda nao ouviu nesta janela: barrar isso
+  // foi como uma versao anterior deste teto segurou a morte de uma fonte por 45
+  // horas. Recuperacao confirmada e barrada — sem isso ela ganha a corrida para
+  // ser a ultima mensagem e o canal fica segurando um verde sobre um check ainda
+  // quebrado; o passe do status-nao-ouvido a libera quando os `ok` da propria
+  // oscilacao saem da janela.
   @IsOptional()
   @IsInt()
   @Min(1)

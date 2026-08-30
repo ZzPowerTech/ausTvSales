@@ -21,11 +21,14 @@ const DEFAULT_REALERT_HOURS = 24;
  */
 const DEFAULT_CONFIRM_RECOVERY = 2;
 /**
- * Hard ceiling on messages per check per re-alert window.
+ * How often a check may repeat itself per re-alert window.
  *
- * Loose on purpose: one real incident can want "quebrou", "piorou", "perdeu
- * sinal" and "normalizado" inside a day. A check that flaps burns this in an
- * hour, gets one `flapping` notice, and goes quiet until the window rolls.
+ * Not a ceiling on messages: a status the channel has not heard this window is
+ * never gated, so a real incident can still say "quebrou", "piorou" and "perdeu
+ * sinal" on top of the budget. What is gated is saying the same thing again —
+ * which is what a flap is made of. Loose on purpose; a flapping check burns it
+ * in an hour, gets a `flapping` notice, and goes quiet until the window rolls.
+ * See `AlertPolicyInput.maxAlertsPerWindow`.
  */
 const DEFAULT_MAX_ALERTS_PER_WINDOW = 4;
 const MS_PER_HOUR = 3_600_000;

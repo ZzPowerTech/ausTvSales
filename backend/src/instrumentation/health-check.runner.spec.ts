@@ -42,8 +42,9 @@ interface StoreStub {
   store: HealthCheckStore;
   record: jest.Mock;
   lastAlert: jest.Mock;
-  alertsInWindow: jest.Mock;
-  healthyStreak: jest.Mock;
+  alertsInWindow: jest.Mock<Promise<Map<HealthCheckStatus, number>>, unknown[]>;
+  /** Typed: an untyped mock let a `Map` stand in for the `number` it returns. */
+  healthyStreak: jest.Mock<Promise<number>, unknown[]>;
   markAlerted: jest.Mock;
 }
 
@@ -348,7 +349,7 @@ describe('HealthCheckRunner', () => {
         status: 'breached',
         at: new Date('2026-08-22T10:00:00.000Z'),
       });
-      store.healthyStreak.mockResolvedValue(new Map([['a', 1]]));
+      store.healthyStreak.mockResolvedValue(1);
       const { alerter } = buildAlerter();
       const check = fakeCheck(HealthCheckName.OrphanInstance, () =>
         Promise.resolve([observation('a', 'ok')]),

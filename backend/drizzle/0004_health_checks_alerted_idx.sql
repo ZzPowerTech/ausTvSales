@@ -1,0 +1,1 @@
+CREATE INDEX "health_checks_name_alerted_at_idx" ON "health_checks" USING btree ("check_name","alerted_at" DESC NULLS LAST) WHERE "health_checks"."alerted_at" IS NOT NULL;
