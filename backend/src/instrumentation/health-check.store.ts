@@ -9,14 +9,6 @@ import type {
   LastAlert,
 } from './health-check.types';
 
-/**
- * How far back {@link HealthCheckStore.healthyStreak} looks.
- *
- * Generous next to any plausible cadence — at 15 minutes it covers ~670 rows per
- * check — and its only failure direction is holding a recovery back.
- */
-const STREAK_HORIZON_DAYS = 7;
-
 /** One check verdict, before it is persisted. */
 export interface HealthCheckObservation {
   /** Persisted check name, possibly scoped (`plan.collection_alive:survival`). */
@@ -127,12 +119,11 @@ export class HealthCheckStore {
   }
 
   /**
-   * How many of the most recent verdicts, per check, are consecutively `ok`.
+   * How many of this check's most recent verdicts are consecutively `ok`.
    *
-   * Counts backwards from the newest row and stops at the first row that is not
-   * `ok`, saturating at `window` — so with the runner's `window = 2` a check
-   * that has been healthy all week also reports 2, and one that just turned `ok`
-   * after a breach reports 1.
+   * Reads the newest `window` rows and counts from the top until one is not
+   * `ok`, so a check that just turned `ok` after a breach reports 1 and one that
+   * has been healthy for longer than the window reports `window`.
    *
    * `no_data` breaks the streak like a failure does, and that is the point: a
    * cycle in which the check could not be measured is not evidence that it is
@@ -151,59 +142,39 @@ export class HealthCheckStore {
    * coin flip. This is what lets the policy tell them apart — see
    * `AlertPolicyInput.healthyStreak`.
    *
-   * ## Two bounds, both erring toward silence
+   * ## One small query per check, deliberately
    *
-   * The streak saturates at `window`, so the caller must pass at least the
-   * threshold it intends to compare against — otherwise the recovery is starved
-   * forever and, worse, `lastAlert` stays pinned to a failure that was fixed
-   * long ago, so the channel is left believing a solved problem is still open.
-   * The runner passes its own `confirmRecoveryAfter` for exactly this reason.
+   * The obvious alternative is a single `row_number()` partitioned over the
+   * whole table. That was the first implementation and it had two problems: it
+   * re-ranked an append-only table with no retention policy on every cycle, and
+   * the bound added to fix that — "ignore rows older than seven days" — was a
+   * hidden ceiling. With a legal `HEALTH_CHECK_INTERVAL_MINUTES=1440` and a
+   * legal `HEALTH_ALERT_CONFIRM_RECOVERY=8`, the threshold sits beyond that
+   * horizon and no all-clear can ever be announced — exactly the starvation the
+   * `window` parameter exists to prevent, reintroduced through the back door.
+   * A handful of index-backed top-N reads cost less than being clever, and have
+   * no ceiling to forget about.
    *
-   * Rows older than {@link STREAK_HORIZON_DAYS} are not read at all, which keeps
-   * this from re-ranking an append-only table that has no retention policy. A
-   * check whose rows are all older than the horizon is simply absent from the
-   * result, and absent means streak 0 — held back, never a false all-clear.
-   *
-   * @param window how many recent rows per check to consider.
+   * @param window how many recent rows to read. The streak saturates here, so
+   *   the caller must pass at least the threshold it will compare against.
    */
-  async healthyStreak(window = 10): Promise<Map<string, number>> {
-    const result = await this.db.execute<{
-      check_name: string;
-      status: HealthCheckStatus;
-      rn: number;
-    }>(sql`
-      SELECT check_name, status, rn FROM (
-        SELECT
-          ${healthChecks.checkName} AS check_name,
-          ${healthChecks.status}    AS status,
-          row_number() OVER (
-            PARTITION BY ${healthChecks.checkName}
-            ORDER BY ${healthChecks.checkedAt} DESC, ${healthChecks.id} DESC
-          ) AS rn
-        FROM ${healthChecks}
-        WHERE ${healthChecks.checkedAt} > now() - ${sql.raw(`interval '${STREAK_HORIZON_DAYS} days'`)}
-      ) ranked
-      WHERE rn <= ${window}
-      ORDER BY check_name, rn
-    `);
+  async healthyStreak(checkName: string, window: number): Promise<number> {
+    const rows = await this.db
+      .select({ status: healthChecks.status })
+      .from(healthChecks)
+      .where(eq(healthChecks.checkName, checkName))
+      .orderBy(desc(healthChecks.checkedAt), desc(healthChecks.id))
+      .limit(window);
 
-    const streaks = new Map<string, number>();
-    const broken = new Set<string>();
-
-    for (const row of result.rows) {
-      // Rows arrive newest-first per check. Once a non-`ok` verdict appears,
-      // the streak for that check is closed and later (older) rows are ignored.
-      if (broken.has(row.check_name)) {
-        continue;
-      }
+    let streak = 0;
+    for (const row of rows) {
       if (row.status !== 'ok') {
-        broken.add(row.check_name);
-        continue;
+        break;
       }
-      streaks.set(row.check_name, (streaks.get(row.check_name) ?? 0) + 1);
+      streak += 1;
     }
 
-    return streaks;
+    return streak;
   }
 
   /** Recent verdicts of one check, newest first. */
@@ -256,16 +227,28 @@ export class HealthCheckStore {
   }
 
   /**
-   * How many messages this check has had delivered inside the last `windowMs`.
+   * What this check has told the channel inside the last `windowMs`, by status.
    *
    * Counts stamped rows, not verdicts: the question is how much the channel has
-   * heard about this check recently, which is the only thing a message budget
-   * can sensibly be spent against. Bounded by `alerted_at`, which is stamped by
-   * the database, so the count does not move with the application clock.
+   * actually heard, which is the only thing a message budget can sensibly be
+   * spent against. Bounded by `alerted_at`, stamped by the database, so the
+   * count does not move with the application clock.
+   *
+   * Broken down by status rather than totalled because the policy has to tell
+   * apart two things a single number cannot: repeating something the channel
+   * already heard this window, and saying something it has **not** heard at all.
+   * Only the first is noise. Totalling them is how an earlier version of the
+   * budget managed to silence a dead source for 45 hours.
    */
-  async alertsInWindow(checkName: string, windowMs: number): Promise<number> {
+  async alertsInWindow(
+    checkName: string,
+    windowMs: number,
+  ): Promise<Map<HealthCheckStatus, number>> {
     const rows = await this.db
-      .select({ count: sql<number>`count(*)::int` })
+      .select({
+        status: healthChecks.status,
+        count: sql<number>`count(*)::int`,
+      })
       .from(healthChecks)
       .where(
         and(
@@ -276,9 +259,10 @@ export class HealthCheckStore {
             sql`now() - make_interval(secs => ${windowMs / 1000})`,
           ),
         ),
-      );
+      )
+      .groupBy(healthChecks.status);
 
-    return rows[0]?.count ?? 0;
+    return new Map(rows.map((row) => [row.status, row.count]));
   }
 
   /**

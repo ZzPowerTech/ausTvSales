@@ -76,22 +76,45 @@ export interface AlertPolicyInput {
    */
   lastAlert: ReadonlyMap<string, LastAlert | null>;
   /**
-   * How many messages each check has already had delivered inside the current
-   * `reAlertAfterMs`. From `HealthCheckStore.alertsInWindow()`.
+   * What each check has already told the channel inside the current
+   * `reAlertAfterMs`, counted by status. From
+   * `HealthCheckStore.alertsInWindow()`.
    */
-  alertsInWindow: ReadonlyMap<string, number>;
+  alertsInWindow: ReadonlyMap<string, ReadonlyMap<HealthCheckStatus, number>>;
   /**
-   * Hard ceiling on messages per check per `reAlertAfterMs`.
+   * Ceiling on how often a check may **repeat itself** inside one
+   * `reAlertAfterMs`.
    *
-   * The transition rules below bound the *common* oscillations, but they bound
-   * them by reasoning about shapes, and a shape nobody thought of is exactly how
-   * this layer got a three-message flap in production. This is the backstop that
-   * does not depend on being clever: whatever the check does, it cannot exceed
-   * this many messages in a window.
+   * The transition rules bound the oscillations somebody thought of, and a shape
+   * nobody thought of is exactly how this layer got a three-message flap in
+   * production — twice. So there is a backstop that does not depend on being
+   * clever.
    *
-   * It is deliberately loose. A real incident wants room for "broke", "got
-   * worse", "lost signal" and "normalizado" inside one day; a flapping check
-   * burns the budget in an hour and then says so once and stops.
+   * ## What it must never gate, and why
+   *
+   * A budget is a way of going quiet, and going quiet is the failure this whole
+   * layer exists to prevent. A first version of this counted every message and
+   * gated every message; replayed against a check that flapped and then *died*,
+   * it withheld the `error` for **45 hours** and, in a variant where the check
+   * flapped and then stayed healthy, withheld the all-clear forever — leaving a
+   * grey "this check is oscillating, calibrate its threshold" as the last word
+   * about a source that was gone. The budget had rebuilt ADR-006's silence
+   * inside the fix for ADR-006's noise.
+   *
+   * So two things are never gated:
+   *
+   * - **A status the channel has not heard this window.** A check that has been
+   *   saying `breached` all day and now says `error` is not repeating itself, it
+   *   is reporting something new, and new is exactly what a budget must let
+   *   through. This is why {@link alertsInWindow} is counted per status.
+   * - **A confirmed recovery.** An all-clear is already gated, by
+   *   `confirmRecoveryAfter`, and it is self-limiting: a recovery needs an open
+   *   problem, and open problems come from failures, which *are* gated. It
+   *   cannot run away, and withholding it is how the channel ends up believing a
+   *   fixed thing is broken.
+   *
+   * What is left to gate is repetition of something already said, which is what
+   * a flap is made of.
    */
   maxAlertsPerWindow: number;
   /**
@@ -201,11 +224,22 @@ export interface AlertPolicyInput {
  * original version let every state change announce (a check flipping between two
  * failing states then spoke every cycle, forever), and the version that fixed
  * that still let `breached` → `ok` → `breached` through, because a confirmed and
- * delivered recovery legitimately re-opens the door. The cap does not care what
- * shape the flap has. When it is reached the check gets one `flapping` notice
- * and then goes quiet until the window rolls — quiet **announced**, not quiet
- * silently, because an unannounced mute is the ADR-006 failure wearing the
- * uniform of a fix.
+ * delivered recovery legitimately re-opens the door.
+ *
+ * The budget does not care what shape the flap has. It counts **repetition** —
+ * saying again, this window, something the channel already heard this window —
+ * and nothing else: a status not yet heard and a confirmed recovery always go
+ * out. That distinction is load-bearing and is documented on
+ * `maxAlertsPerWindow`, along with the 45-hour silence a version without it
+ * produced.
+ *
+ * When the budget runs out the check gets a `flapping` notice and then goes
+ * quiet about that repetition until the window rolls — quiet **announced**, not
+ * quiet silently, because an unannounced mute is the ADR-006 failure wearing the
+ * uniform of a fix. The notice reappears once per window while the oscillation
+ * lasts, which is the honest cadence: "still flapping, still muted" is worth
+ * saying daily, and saying it only once would leave a week-long flap looking
+ * like a week-long silence.
  */
 export function decideAlerts(input: AlertPolicyInput): AlertDecision {
   const announce: HealthCheckRecord[] = [];
@@ -220,18 +254,29 @@ export function decideAlerts(input: AlertPolicyInput): AlertDecision {
     const open: LastAlert | null =
       last !== null && last.status !== 'ok' ? last : null;
 
+    const heard = input.alertsInWindow.get(record.checkName);
+    /** Messages of this exact status the channel already heard this window. */
+    const heardThis = heard?.get(record.status) ?? 0;
+    /** Messages of any status the channel already heard this window. */
+    let heardAny = 0;
+    for (const count of heard?.values() ?? []) {
+      heardAny += count;
+    }
+
     /**
-     * Route a record that the transition rules want delivered, unless the check
-     * has already spent its budget for this window.
+     * Route a record the transition rules want delivered.
+     *
+     * Only repetition is gated — see `maxAlertsPerWindow` for why a status the
+     * channel has not heard this window must always get through.
      */
     const deliver = (bucket: HealthCheckRecord[]): void => {
-      const spent = input.alertsInWindow.get(record.checkName) ?? 0;
-      if (spent < input.maxAlertsPerWindow) {
+      if (heardThis === 0 || heardAny < input.maxAlertsPerWindow) {
         bucket.push(record);
-      } else if (spent === input.maxAlertsPerWindow) {
-        // Exactly at the budget: say once that the check is going quiet. This
-        // notice is itself delivered and stamped, so `spent` passes the budget
-        // and every later observation takes the branch below.
+      } else if (heardAny === input.maxAlertsPerWindow) {
+        // Exactly at the budget: say once that the check is going quiet. The
+        // notice is itself delivered and stamped, so `heardAny` passes the
+        // budget and every later repetition takes the branch below — until the
+        // window slides back down and the notice is due again.
         flapping.push(record);
       } else {
         suppressed.push({ record, reason: 'flapping' });
@@ -258,7 +303,11 @@ export function decideAlerts(input: AlertPolicyInput): AlertDecision {
       ) {
         // Closing the loop matters: without it, the only way to learn that an
         // outage ended is to go look, which is the habit this epic removes.
-        deliver(recovered);
+        //
+        // Not routed through `deliver`: an all-clear is never withheld by a
+        // budget. It is already gated by `confirmRecoveryAfter` and cannot run
+        // away, because it needs an open problem and open problems are gated.
+        recovered.push(record);
       } else {
         // Healthy, but not for long enough to be believed yet. Held rather than
         // announced — see `confirmRecoveryAfter` for the reading behind it.

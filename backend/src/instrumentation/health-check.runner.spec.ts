@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { AlertDecision } from './alert-policy';
 import type { DiscordAlerter } from './discord-alerter';
@@ -57,11 +58,11 @@ function buildStore(): StoreStub {
   });
   const alertsInWindow = jest.fn(() => {
     calls.push('alertsInWindow');
-    return Promise.resolve(0);
+    return Promise.resolve(new Map<HealthCheckStatus, number>());
   });
   const healthyStreak = jest.fn(() => {
     calls.push('healthyStreak');
-    return Promise.resolve(new Map<string, number>());
+    return Promise.resolve(0);
   });
   const markAlerted = jest.fn((ids: number[]) => {
     calls.push('markAlerted');
@@ -380,7 +381,89 @@ describe('HealthCheckRunner', () => {
         [check],
       ).runAll();
 
-      expect(store.healthyStreak).toHaveBeenCalledWith(7);
+      expect(store.healthyStreak).toHaveBeenCalledWith('a', 7);
+    });
+
+    it('leva o teto de mensagens configurado ate a politica', () => {
+      // Sem isto, `HEALTH_ALERT_MAX_PER_WINDOW` podia ser lido, guardado e nunca
+      // usado, e o teste que existia passaria igual — ele so checava que o
+      // alerter tinha sido chamado.
+      const store = buildStore();
+      store.alertsInWindow.mockResolvedValue(
+        new Map<HealthCheckStatus, number>([['breached', 9]]),
+      );
+      const { alerter, publish } = buildAlerter();
+      const check = fakeCheck(HealthCheckName.OrphanInstance, () =>
+        Promise.resolve([observation('a', 'breached')]),
+      );
+
+      return new HealthCheckRunner(
+        store.store,
+        alerter,
+        config({ HEALTH_ALERT_MAX_PER_WINDOW: 3 }),
+        [check],
+      )
+        .runAll()
+        .then(() => {
+          // 9 mensagens ja ouvidas, teto 3: passou do teto e do proprio aviso,
+          // entao nada sai. Com o teto ignorado, sairia.
+          const decision = firstArg<AlertDecision>(publish);
+          expect(decision.announce).toEqual([]);
+          expect(decision.flapping).toEqual([]);
+          expect(decision.suppressed).toEqual([
+            expect.objectContaining({ reason: 'flapping' }),
+          ]);
+        });
+    });
+
+    it('conta o orcamento na mesma janela do reenvio', () => {
+      const store = buildStore();
+      const { alerter } = buildAlerter();
+      const check = fakeCheck(HealthCheckName.OrphanInstance, () =>
+        Promise.resolve([observation('a', 'breached')]),
+      );
+
+      return new HealthCheckRunner(
+        store.store,
+        alerter,
+        config({ HEALTH_ALERT_REALERT_HOURS: 3 }),
+        [check],
+      )
+        .runAll()
+        .then(() => {
+          expect(store.alertsInWindow).toHaveBeenCalledWith('a', 3 * 3_600_000);
+        });
+    });
+  });
+
+  describe('nome de check repetido no mesmo ciclo', () => {
+    it('descarta a segunda observacao e grita', () => {
+      // Duas linhas com o mesmo `check_name` num ciclo sao sempre erro de
+      // configuracao (nome repetido em PLAN_SERVERS) e corrompem tres coisas de
+      // uma vez: o desempate do `latestAll`, a contagem da sequencia saudavel, e
+      // o orcamento — que pularia de dois em dois e poderia passar direto pelo
+      // ponto em que o aviso de silenciamento sai, calando o check sem avisar.
+      const store = buildStore();
+      const { alerter } = buildAlerter();
+      const error = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+      const check = fakeCheck(HealthCheckName.CollectionAlive, () =>
+        Promise.resolve([
+          observation('plan.collection_alive:survival', 'breached'),
+          observation('plan.collection_alive:survival', 'ok'),
+        ]),
+      );
+
+      return new HealthCheckRunner(store.store, alerter, config(), [check])
+        .runAll()
+        .then((summary) => {
+          expect(summary.observations).toBe(1);
+          expect(error).toHaveBeenCalledWith(
+            expect.stringContaining('duas observacoes no mesmo ciclo'),
+          );
+          error.mockRestore();
+        });
     });
   });
 

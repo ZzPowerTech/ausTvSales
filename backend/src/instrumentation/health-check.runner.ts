@@ -171,7 +171,7 @@ export class HealthCheckRunner {
             [
               name,
               await this.store.alertsInWindow(name, this.reAlertAfterMs),
-            ] as [string, number],
+            ] as [string, Map<HealthCheckStatus, number>],
         ),
       ),
     );
@@ -180,8 +180,16 @@ export class HealthCheckRunner {
     //    been ok for two cycles *including this one*" is the question asked.
     //    The window is the threshold itself: a streak that saturated below it
     //    could never satisfy it, and the all-clear would starve forever.
-    const healthyStreak = await this.store.healthyStreak(
-      this.confirmRecoveryAfter,
+    const healthyStreak = new Map(
+      await Promise.all(
+        names.map(
+          async (name) =>
+            [
+              name,
+              await this.store.healthyStreak(name, this.confirmRecoveryAfter),
+            ] as [string, number],
+        ),
+      ),
     );
 
     const decision = decideAlerts({
@@ -229,17 +237,44 @@ export class HealthCheckRunner {
    */
   private async runChecks(): Promise<HealthCheckObservation[]> {
     const observations: HealthCheckObservation[] = [];
+    const seen = new Set<string>();
+
+    /**
+     * Append one observation, refusing a name already produced this cycle.
+     *
+     * Two rows sharing a `check_name` and a cycle are always a configuration
+     * bug — a duplicated entry in `PLAN_SERVERS` is the way it happens — and
+     * they corrupt three things at once: `latestAll` picks between them by
+     * tiebreak, `healthyStreak` counts one cycle twice, and the alert budget
+     * jumps by two, which can step straight over the point where the `flapping`
+     * notice fires and mute a check with nothing ever said. Logged at error
+     * level because the fix is in the environment, not here.
+     */
+    const add = (observation: HealthCheckObservation): void => {
+      if (seen.has(observation.checkName)) {
+        this.logger.error(
+          `Check ${observation.checkName} produziu duas observacoes no mesmo ` +
+            'ciclo — a segunda foi descartada. Provavel nome repetido em ' +
+            'PLAN_SERVERS; corrija, porque isso corrompe o historico.',
+        );
+        return;
+      }
+      seen.add(observation.checkName);
+      observations.push(observation);
+    };
 
     for (const check of this.checks) {
       try {
-        observations.push(...(await check.run()));
+        for (const observation of await check.run()) {
+          add(observation);
+        }
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         this.logger.error(`Check ${check.name} lancou excecao: ${reason}`);
         // Becomes a notifiable `error` verdict rather than a gap in the record.
         // A check that vanishes from the history is indistinguishable from one
         // that never existed, which is precisely the blindness of ADR-006.
-        observations.push({
+        add({
           checkName: check.name,
           status: 'error',
           detail: {

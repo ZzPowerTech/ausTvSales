@@ -42,6 +42,30 @@ function told(
   ]);
 }
 
+/** Count delivered messages by status, the way the store's query does. */
+function tally(
+  sent: ReadonlyArray<{ status: HealthCheckStatus }>,
+): Map<HealthCheckStatus, number> {
+  const counts = new Map<HealthCheckStatus, number>();
+  for (const message of sent) {
+    counts.set(message.status, (counts.get(message.status) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/** What the channel heard from `checkName` this window, by status. */
+function heard(
+  checkName: string,
+  counts: Partial<Record<HealthCheckStatus, number>>,
+): Map<string, Map<HealthCheckStatus, number>> {
+  return new Map([
+    [
+      checkName,
+      new Map(Object.entries(counts) as Array<[HealthCheckStatus, number]>),
+    ],
+  ]);
+}
+
 /** A streak that satisfies {@link CONFIRM_RECOVERY} for one check. */
 function confirmed(checkName: string): Map<string, number> {
   return new Map([[checkName, CONFIRM_RECOVERY]]);
@@ -366,8 +390,8 @@ describe('decideAlerts', () => {
     ): string[] {
       let lastAlert: LastAlert | null = null;
       let okStreak = 0;
-      /** When each message was delivered, so the budget can be recomputed. */
-      const delivered: Date[] = [];
+      /** Every message delivered, for recomputing the per-status budget. */
+      const delivered: Array<{ at: Date; status: HealthCheckStatus }> = [];
       const messages: string[] = [];
 
       for (const cycle of cycles) {
@@ -381,9 +405,11 @@ describe('decideAlerts', () => {
           alertsInWindow: new Map([
             [
               check,
-              delivered.filter(
-                (sentAt) => at.getTime() - sentAt.getTime() < RE_ALERT_AFTER,
-              ).length,
+              tally(
+                delivered.filter(
+                  (sent) => at.getTime() - sent.at.getTime() < RE_ALERT_AFTER,
+                ),
+              ),
             ],
           ]),
           maxAlertsPerWindow: MAX_PER_WINDOW,
@@ -400,12 +426,12 @@ describe('decideAlerts', () => {
           ...decision.lostSignal,
         ]) {
           messages.push(sent.status);
-          delivered.push(at);
+          delivered.push({ at, status: sent.status });
           lastAlert = { status: sent.status, at };
         }
         for (const sent of decision.flapping) {
           messages.push(`flapping:${sent.status}`);
-          delivered.push(at);
+          delivered.push({ at, status: sent.status });
           lastAlert = { status: sent.status, at };
         }
       }
@@ -490,7 +516,7 @@ describe('decideAlerts', () => {
       expect(replay(check, cycles)).toEqual(['breached', 'error']);
     });
 
-    it('cobre uma semana de oscilacao breached/ok com 4 avisos e um silenciamento por dia', () => {
+    it('cobre uma semana de oscilacao breached/ok com 6 mensagens por dia', () => {
       // O buraco que a regra de transicao NAO fecha, e a razao de o orcamento
       // existir. `breached, ok, ok` repetindo confirma uma recuperacao a cada
       // tres ciclos, entrega o all-clear, e com isso a quebra seguinte volta a
@@ -507,12 +533,72 @@ describe('decideAlerts', () => {
 
       const messages = replay(check, cycles);
 
-      // Orcamento de 4 por janela de 24h, mais o proprio aviso de
-      // silenciamento: 5 mensagens por dia, sete dias.
-      expect(messages).toHaveLength(5 * 7);
+      // Sem orcamento seriam 64 por dia, para sempre. Com ele a sequencia
+      // estabiliza em 6 e depois cala: duas falhas, o aviso de silenciamento,
+      // e as tres recuperacoes que os acompanham — recuperacao nunca e barrada
+      // por orcamento. Passado isso nada mais reabre um problema, entao nao ha
+      // mais o que recuperar e o check fica quieto ate a janela rolar.
+      expect(messages).toHaveLength(6 * 7);
       // E o canal e avisado de que ficou quieto de proposito — um mute sem aviso
-      // seria indistinguivel de um check saudavel.
+      // seria indistinguivel de um check saudavel. Uma vez por janela enquanto
+      // durar: "ainda oscilando, ainda calado" vale ser dito todo dia.
       expect(messages.filter((m) => m.startsWith('flapping:'))).toHaveLength(7);
+    });
+
+    it('deixa passar a morte da fonte mesmo com o orcamento estourado', () => {
+      // O modo de falha que a primeira versao do orcamento criou: o check
+      // oscilava, gastava o orcamento, e entao a fonte MORRIA — e o `error`
+      // ficava 45 horas sem sair, porque o orcamento contava tudo junto. O canal
+      // passava dois dias com um aviso cinza dizendo "calibre o limiar" sobre um
+      // servidor que tinha sumido.
+      //
+      // `error` e um status que o canal nao ouviu nesta janela, e status nao
+      // ouvido nunca e barrado.
+      const check = HealthCheckName.CollectionAlive;
+      const cycles: Array<{ at: string; status: HealthCheckStatus }> = [];
+      for (let i = 0; i < 40; i++) {
+        cycles.push({
+          at: new Date(NOW.getTime() + i * 15 * MINUTES).toISOString(),
+          status: i % 3 === 0 ? 'breached' : 'ok',
+        });
+      }
+      // A fonte morre e nao volta.
+      const deathIndex = cycles.length;
+      for (let i = 0; i < 8; i++) {
+        cycles.push({
+          at: new Date(
+            NOW.getTime() + (deathIndex + i) * 15 * MINUTES,
+          ).toISOString(),
+          status: 'error',
+        });
+      }
+
+      const messages = replay(check, cycles);
+
+      // O `error` sai, e sai no primeiro ciclo em que aparece.
+      expect(messages).toContain('error');
+      expect(messages.filter((m) => m === 'error')).toHaveLength(1);
+      expect(messages[messages.length - 1]).toBe('error');
+    });
+
+    it('deixa passar a recuperacao mesmo com o orcamento estourado', () => {
+      // O outro modo de falha da mesma versao: o check oscilava, gastava o
+      // orcamento, e entao ficava REALMENTE bom — e o all-clear nunca saia. A
+      // ultima palavra sobre um check saudavel havia dias era um aviso cinza
+      // dizendo "NAO significa que estao bem".
+      const check = HealthCheckName.OfflineAccountShare;
+      const cycles: Array<{ at: string; status: HealthCheckStatus }> = [];
+      for (let i = 0; i < 40; i++) {
+        cycles.push({
+          at: new Date(NOW.getTime() + i * 15 * MINUTES).toISOString(),
+          status: i % 3 === 0 ? 'breached' : 'ok',
+        });
+      }
+
+      const messages = replay(check, cycles);
+
+      // A ultima palavra sobre um check que esta bem e "esta bem".
+      expect(messages[messages.length - 1]).toBe('ok');
     });
 
     it('nao gasta orcamento com um apagao continuo', () => {
@@ -532,24 +618,62 @@ describe('decideAlerts', () => {
 
     it('mantem o error limitado mesmo depois de a janela rolar', () => {
       // A versao anterior deste teste rodava 5 horas dentro de uma janela de 24
-      // e por isso nao podia falhar. O ponto e justamente o que acontece DEPOIS
-      // que a janela vence e o `lastAlert` volta a ser `breached`: o desvio do
-      // `error` rearma. Ele rearma mesmo — o limite real e o orcamento.
+      // e por isso nao podia falhar, e ainda assertava so um teto frouxo. O
+      // ponto e o que acontece DEPOIS que a janela vence e o `lastAlert` volta a
+      // ser `breached`: o desvio do `error` rearma. Ele rearma mesmo — o limite
+      // real e o orcamento, e a sequencia exata fica fixada aqui.
       const check = HealthCheckName.CollectionAlive;
       const cycles: Array<{ at: string; status: HealthCheckStatus }> = [];
-      for (let i = 0; i < 7 * 24 * 4; i++) {
+      for (let i = 0; i < 3 * 24 * 4; i++) {
         cycles.push({
           at: new Date(NOW.getTime() + i * 15 * MINUTES).toISOString(),
           status: i % 2 === 0 ? 'breached' : 'error',
         });
       }
 
-      const messages = replay(check, cycles);
+      // Dia 1: entra em falha e piora para `error`. Depois cala — voltar de
+      // `error` para `breached` e melhora, e melhora nao fura janela. O que o
+      // canal ouve a cada janela que rola e o lembrete do estado que o proprio
+      // canal esta segurando, `error`, e nao a oscilacao por baixo dele.
+      expect(replay(check, cycles)).toEqual([
+        'breached',
+        'error',
+        'error',
+        'error',
+      ]);
+    });
 
-      // Nunca mais que o orcamento mais o aviso, por dia.
-      expect(messages.length).toBeLessThanOrEqual(5 * 7);
-      // E nao vira silencio: o `error` continua chegando.
-      expect(messages).toContain('error');
+    it('barra a repeticao mas nunca o que o canal ainda nao ouviu', () => {
+      // O coracao da regra do orcamento, isolado: mesmo com o orcamento
+      // estourado varias vezes, um status novo passa.
+      const repetido = observation(HealthCheckName.OrphanInstance, 'breached');
+      const novo = observation(HealthCheckName.OrphanInstance, 'error');
+      const gasto = heard(repetido.checkName, { breached: 9 });
+
+      expect(
+        decide({ observations: [repetido], alertsInWindow: gasto }).suppressed,
+      ).toEqual([{ record: repetido, reason: 'flapping' }]);
+
+      expect(
+        decide({ observations: [novo], alertsInWindow: gasto }).announce,
+      ).toEqual([novo]);
+    });
+
+    it('avisa uma vez ao bater o orcamento, e so uma dentro da janela', () => {
+      const record = observation(HealthCheckName.OrphanInstance, 'breached');
+
+      const noLimite = decide({
+        observations: [record],
+        alertsInWindow: heard(record.checkName, { breached: 4 }),
+      });
+      const depois = decide({
+        observations: [record],
+        alertsInWindow: heard(record.checkName, { breached: 5 }),
+      });
+
+      expect(noLimite.flapping).toEqual([record]);
+      expect(depois.flapping).toEqual([]);
+      expect(depois.suppressed).toEqual([{ record, reason: 'flapping' }]);
     });
 
     it('anuncia a falha no primeiro ciclo — a histerese e so da recuperacao', () => {

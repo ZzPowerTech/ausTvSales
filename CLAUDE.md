@@ -145,7 +145,8 @@ S8.2 se os pré-requisitos dela forem resolvidos.
 - **A oscilação dos alertas foi corrigida em código em 2026-08-29 — ainda não observada em
   produção.** 51,5% (n=33) → 50,0% (n=32) → 51,6% (n=31) em duas horas: com n≈32 um único jogador
   virava o alerta, e o limiar de 0,5 caía em cima do valor real. Duas correções, no mesmo PR:
-  - o limiar foi **calibrado para 0,65** usando essa própria leitura (share real ~51%, estável).
+  - o limiar foi **calibrado para 0,65** usando essa própria leitura (nível real ~51% — as três
+    leituras são janelas de 7 dias tomadas em 105 minutos, então fixam o nível, não a estabilidade).
     É isto que silencia a sequência de 2026-08-26: a 0,65 nenhuma das três leituras estoura.
     O custo está registrado no `.env.example` — a faixa 0,55–0,65 fica cega de propósito;
   - a política passou a decidir contra **o que o canal foi informado por último**, não contra a
@@ -153,13 +154,19 @@ S8.2 se os pré-requisitos dela forem resolvidos.
     ciclo; só a recuperação espera. Piora (`breached` → `no_data` → `error`) fura a janela;
     melhora sem chegar a `ok` espera.
 
-  **E um teto duro por cima de tudo isso** (`HEALTH_ALERT_MAX_PER_WINDOW`, padrão 4): a regra de
+  **E um teto por cima de tudo isso** (`HEALTH_ALERT_MAX_PER_WINDOW`, padrão 4): a regra de
   transição raciocina sobre formatos de oscilação e já errou duas vezes nisso — a primeira versão
-  deixava `breached` ↔ `no_data` mandar uma mensagem por ciclo para sempre; a segunda ainda
-  deixava `breached` → `ok` → `breached` passar, porque uma recuperação confirmada e entregue
-  legitimamente reabre a porta (64 mensagens/dia, medido em teste). O teto não depende de prever
-  o formato. Ao batê-lo o check recebe **um** aviso de que vai ficar quieto — mute sem aviso é
-  indistinguível de check saudável — e volta a falar quando a janela rolar.
+  deixava `breached` ↔ `no_data` mandar uma mensagem por ciclo para sempre; a segunda ainda deixava
+  `breached` → `ok` → `breached` passar, porque uma recuperação confirmada e entregue legitimamente
+  reabre a porta (64/dia por aritmética; o teste fixa o resultado **com** o teto, em 6/dia). O teto
+  não depende de prever o formato.
+
+  O teto conta **repetição**, e só. Um status que o canal não ouviu nesta janela e uma recuperação
+  confirmada passam sempre — barrar esses dois foi como a primeira versão do teto segurou um
+  `error` por 45 horas e um all-clear para sempre, deixando um aviso cinza dizendo "calibre o
+  limiar" como última palavra sobre um servidor que tinha sumido. Os dois casos estão fixados em
+  teste. Ao estourar, o check recebe um aviso de que vai ficar quieto — mute sem aviso é
+  indistinguível de check saudável — repetido uma vez por janela enquanto a oscilação durar.
 
   O que a política **não** faz: se a recuperação se sustentar e for entregue, a quebra seguinte é
   incidente novo e sai. Isso é correto. É por isso que a calibração é a metade que fecha o caso de

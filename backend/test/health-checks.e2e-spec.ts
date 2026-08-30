@@ -234,7 +234,9 @@ describe('health_checks (e2e)', () => {
 
       // Tres vereditos, duas mensagens. O orcamento e gasto pelo que o canal
       // ouviu, nao pelo que a tabela guardou.
-      await expect(store.alertsInWindow(check, DAY_MS)).resolves.toBe(2);
+      await expect(store.alertsInWindow(check, DAY_MS)).resolves.toEqual(
+        new Map([['breached', 2]]),
+      );
     });
 
     it('nao conta a mensagem de outro check', async () => {
@@ -246,7 +248,9 @@ describe('health_checks (e2e)', () => {
       ]);
       await store.markAlerted(rows.map((row) => row.id));
 
-      await expect(store.alertsInWindow(mine, DAY_MS)).resolves.toBe(1);
+      await expect(store.alertsInWindow(mine, DAY_MS)).resolves.toEqual(
+        new Map([['breached', 1]]),
+      );
     });
 
     it('ignora o que caiu fora da janela', async () => {
@@ -257,7 +261,7 @@ describe('health_checks (e2e)', () => {
       await store.markAlerted([row.id]);
 
       // Janela de um milissegundo: a mensagem acabou de sair e ja esta fora.
-      await expect(store.alertsInWindow(check, 1)).resolves.toBe(0);
+      await expect(store.alertsInWindow(check, 1)).resolves.toEqual(new Map());
     });
 
     it('devolve zero para um check que nunca falou', async () => {
@@ -266,7 +270,29 @@ describe('health_checks (e2e)', () => {
         { checkName: check, status: 'ok', detail: { summary: 'ok' } },
       ]);
 
-      await expect(store.alertsInWindow(check, DAY_MS)).resolves.toBe(0);
+      await expect(store.alertsInWindow(check, DAY_MS)).resolves.toEqual(
+        new Map(),
+      );
+    });
+
+    it('separa por status, que e o que distingue repeticao de noticia', async () => {
+      // A quebra por status e o que impede o orcamento de calar um `error` so
+      // porque o check ja falou muito `breached` — o silencio de 45 horas que a
+      // primeira versao do orcamento produzia.
+      const check = scopedCheckName(HealthCheckName.OrphanInstance, 'mixed');
+      const rows = await store.record([
+        { checkName: check, status: 'breached', detail: { summary: 'um' } },
+        { checkName: check, status: 'breached', detail: { summary: 'dois' } },
+        { checkName: check, status: 'error', detail: { summary: 'morreu' } },
+      ]);
+      await store.markAlerted(rows.map((row) => row.id));
+
+      await expect(store.alertsInWindow(check, DAY_MS)).resolves.toEqual(
+        new Map([
+          ['breached', 2],
+          ['error', 1],
+        ]),
+      );
     });
   });
 
@@ -292,37 +318,44 @@ describe('health_checks (e2e)', () => {
       const check = scopedCheckName(HealthCheckName.CollectionAlive, 'streak');
       await sequence(check, ['ok', 'breached', 'ok', 'ok']);
 
-      const streaks = await store.healthyStreak();
-
-      expect(streaks.get(check)).toBe(2);
+      await expect(store.healthyStreak(check, 10)).resolves.toBe(2);
     });
 
     it('trata no_data como quebra de sequencia, nao como ok', async () => {
       const check = scopedCheckName(HealthCheckName.CollectionAlive, 'gap');
       await sequence(check, ['ok', 'no_data', 'ok']);
 
-      expect((await store.healthyStreak()).get(check)).toBe(1);
+      await expect(store.healthyStreak(check, 10)).resolves.toBe(1);
     });
 
-    it('omite o check cujo veredito mais recente nao e ok', async () => {
+    it('devolve zero quando o veredito mais recente nao e ok', async () => {
       const check = scopedCheckName(HealthCheckName.CollectionAlive, 'down');
       await sequence(check, ['ok', 'ok', 'breached']);
 
-      expect((await store.healthyStreak()).has(check)).toBe(false);
+      await expect(store.healthyStreak(check, 10)).resolves.toBe(0);
     });
 
-    it('satura na janela pedida e mantem os checks independentes', async () => {
+    it('satura na janela pedida', async () => {
       const capped = scopedCheckName(HealthCheckName.OrphanInstance, 'capped');
-      const other = scopedCheckName(HealthCheckName.OrphanInstance, 'other');
       await sequence(capped, ['ok', 'ok', 'ok', 'ok']);
-      await sequence(other, ['error']);
-
-      const streaks = await store.healthyStreak(2);
 
       // A saturacao e o motivo de o runner passar o proprio limiar como janela:
       // uma janela menor que o limiar jamais o satisfaria.
-      expect(streaks.get(capped)).toBe(2);
-      expect(streaks.has(other)).toBe(false);
+      await expect(store.healthyStreak(capped, 2)).resolves.toBe(2);
+    });
+
+    it('nao ve o historico de outro check', async () => {
+      const mine = scopedCheckName(HealthCheckName.OrphanInstance, 'sane');
+      const other = scopedCheckName(HealthCheckName.OrphanInstance, 'noisy');
+      await sequence(mine, ['ok', 'ok']);
+      await sequence(other, ['error']);
+
+      await expect(store.healthyStreak(mine, 10)).resolves.toBe(2);
+      await expect(store.healthyStreak(other, 10)).resolves.toBe(0);
+    });
+
+    it('devolve zero para um check que nunca rodou', async () => {
+      await expect(store.healthyStreak('nao.existe', 10)).resolves.toBe(0);
     });
   });
 

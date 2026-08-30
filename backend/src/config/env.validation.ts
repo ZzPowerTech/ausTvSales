@@ -150,18 +150,25 @@ export class EnvironmentVariables {
   // que um all-clear atrasado.
   //
   // Qualquer valor daqui vale: o runner usa este numero como janela da propria
-  // consulta de sequencia, entao nao existe teto escondido no store abaixo do
-  // qual a recuperacao ficaria inalcancavel.
+  // consulta de sequencia, e a consulta le exatamente essa quantidade de linhas
+  // do check, sem corte por tempo. Um teto escondido no store — a versao
+  // anterior ignorava linhas com mais de 7 dias — tornaria a recuperacao
+  // inalcancavel para qualquer par (intervalo x limiar) que passasse do
+  // horizonte, e os dois sao configuraveis ate valores que passam.
   @IsOptional()
   @IsInt()
   @Min(1)
   @Max(20)
   HEALTH_ALERT_CONFIRM_RECOVERY?: number;
 
-  // Teto duro de mensagens por check por janela de reenvio. Ao bater o teto o
-  // check recebe UM aviso de que vai ficar quieto e para de falar ate a janela
-  // rolar. E o freio que nao depende de a regra de transicao ter previsto o
-  // formato da oscilacao — a regra ja errou duas vezes nisso.
+  // Quantas vezes um check pode se REPETIR por janela de reenvio. Ao estourar,
+  // recebe um aviso de que vai ficar quieto (um por janela enquanto durar) e
+  // para de repetir. E o freio que nao depende de a regra de transicao ter
+  // previsto o formato da oscilacao — a regra ja errou duas vezes nisso.
+  //
+  // Nao barra nem um status que o canal ainda nao ouviu nesta janela, nem uma
+  // recuperacao confirmada: barrar esses foi como uma versao anterior deste teto
+  // segurou um `error` por 45 horas e um all-clear para sempre.
   @IsOptional()
   @IsInt()
   @Min(1)
@@ -325,9 +332,11 @@ export class EnvironmentVariables {
   PLATFORM_OFFLINE_WINDOW_DAYS?: number;
 
   // Teto da fracao de java_offline entre as chegadas da janela, de 0 a 1.
-  // Calibrado em 2026-08-29 contra a leitura de producao de 2026-08-26 (share
-  // real ~51%, estavel): o padrao de 0.65 deixa folga acima da banda. O valor
-  // anterior, 0.5, caia exatamente em cima dela e oscilava a cada jogador.
+  // Calibrado em 2026-08-29 contra a leitura de producao de 2026-08-26 (nivel
+  // real ~51%): o padrao de 0.65 deixa folga acima do nivel medido. O valor
+  // anterior, 0.5, caia exatamente em cima dele e oscilava a cada jogador.
+  // As tres leituras sao janelas de 7 dias tomadas em 105 minutos e se sobrepoem
+  // quase inteiras — elas fixam o NIVEL, nao a estabilidade ao longo do tempo.
   @IsOptional()
   @IsNumber()
   @Min(0)

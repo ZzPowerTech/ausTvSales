@@ -175,83 +175,55 @@ describe('HealthCheckStore', () => {
   });
 
   describe('healthyStreak', () => {
-    /** Rows as the query returns them: newest first within each check. */
-    function ranked(rows: Array<[string, string]>): {
-      rows: Array<{ check_name: string; status: string; rn: number }>;
-    } {
-      const seen: Record<string, number> = {};
-      return {
-        rows: rows.map(([check_name, status]) => {
-          seen[check_name] = (seen[check_name] ?? 0) + 1;
-          return { check_name, status, rn: seen[check_name] };
-        }),
-      };
+    // A query em si e coberta contra Postgres de verdade no e2e. O que se testa
+    // aqui e a contagem, que e onde mora a regra do projeto: `no_data` quebra a
+    // sequencia igual a uma falha, porque um ciclo que nao pode ser medido nao
+    // e prova de que o check esta bem.
+
+    /** Rows as the query returns them: newest first. */
+    function newestFirst(statuses: string[]) {
+      return chain(statuses.map((status) => ({ status }))).proxy;
     }
 
     it('conta os ok consecutivos a partir do mais recente', async () => {
-      db.execute.mockResolvedValue(
-        ranked([
-          ['a', 'ok'],
-          ['a', 'ok'],
-          ['a', 'ok'],
-        ]),
-      );
+      db.select.mockReturnValue(newestFirst(['ok', 'ok', 'ok']));
 
-      await expect(store.healthyStreak()).resolves.toEqual(new Map([['a', 3]]));
+      await expect(store.healthyStreak('a', 10)).resolves.toBe(3);
     });
 
     it('para no primeiro veredito de falha', async () => {
-      db.execute.mockResolvedValue(
-        ranked([
-          ['a', 'ok'],
-          ['a', 'breached'],
-          ['a', 'ok'],
-        ]),
-      );
+      db.select.mockReturnValue(newestFirst(['ok', 'breached', 'ok']));
 
-      await expect(store.healthyStreak()).resolves.toEqual(new Map([['a', 1]]));
+      await expect(store.healthyStreak('a', 10)).resolves.toBe(1);
     });
 
     it('trata no_data como quebra de sequencia, nao como ok', async () => {
-      // Um ciclo que nao pode ser medido nao e prova de que o check esta bem.
-      db.execute.mockResolvedValue(
-        ranked([
-          ['a', 'ok'],
-          ['a', 'no_data'],
-          ['a', 'ok'],
-        ]),
-      );
+      db.select.mockReturnValue(newestFirst(['ok', 'no_data', 'ok']));
 
-      await expect(store.healthyStreak()).resolves.toEqual(new Map([['a', 1]]));
+      await expect(store.healthyStreak('a', 10)).resolves.toBe(1);
     });
 
-    it('omite um check cujo veredito mais recente nao e ok', async () => {
-      db.execute.mockResolvedValue(
-        ranked([
-          ['a', 'breached'],
-          ['a', 'ok'],
-        ]),
-      );
+    it('devolve zero quando o veredito mais recente nao e ok', async () => {
+      db.select.mockReturnValue(newestFirst(['breached', 'ok']));
 
-      await expect(store.healthyStreak()).resolves.toEqual(new Map());
+      await expect(store.healthyStreak('a', 10)).resolves.toBe(0);
     });
 
-    it('mantem cada check independente', async () => {
-      db.execute.mockResolvedValue(
-        ranked([
-          ['a', 'ok'],
-          ['a', 'ok'],
-          ['b', 'error'],
-          ['c', 'ok'],
-        ]),
-      );
+    it('devolve zero para um check sem historico', async () => {
+      db.select.mockReturnValue(newestFirst([]));
 
-      await expect(store.healthyStreak()).resolves.toEqual(
-        new Map([
-          ['a', 2],
-          ['c', 1],
-        ]),
-      );
+      await expect(store.healthyStreak('a', 10)).resolves.toBe(0);
+    });
+
+    it('pede ao banco exatamente a janela recebida', async () => {
+      const { proxy, calls } = chain([]);
+      db.select.mockReturnValue(proxy);
+
+      await store.healthyStreak('a', 3);
+
+      // Se o LIMIT nao acompanhasse a janela, a sequencia saturaria no valor
+      // errado e a recuperacao poderia nunca ser alcancavel.
+      expect(calls.limit.mock.calls[0][0]).toBe(3);
     });
   });
 
