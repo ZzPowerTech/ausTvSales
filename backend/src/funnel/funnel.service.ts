@@ -86,9 +86,11 @@ export interface FunnelSourceState {
    * more natural one for the word "unbounded", which is exactly why it is spelt
    * out here.
    *
-   * `plan_users` lost the proxy's history in the 2026-08-20 unification, so it
-   * is only a few days deep. Buckets before this are `null` with a reason, never
-   * a measured zero — see `PlanDatabase.earliestArrivalAt`. In monthly
+   * How deep `plan_users` actually goes is measured, not assumed: this field
+   * is `PlanDatabase.earliestArrivalAt`'s answer, and the shallow-history
+   * belief recorded in `HANDOFF.md` was an inference nobody had checked
+   * against it. Buckets before this point are `null` with a reason, never a
+   * measured zero. In monthly
    * granularity a **partially** covered month counts as uncovered: a month total
    * cannot be assembled from part of a month.
    */
@@ -493,10 +495,17 @@ interface NetworkCounts {
  * ## Why `MIN(registered)` is a truncation point, not a first event
  *
  * The two readings lead to opposite code, and mixing them is how this shipped
- * broken twice. `PlanDatabase.earliestArrivalAt` settles it: the proxy's records
- * *did not come across* in the 2026-08-20 unification, so the oldest row is
- * where the old database was cut off — **not** the moment the first player ever
- * arrived. Everything before it existed and is missing.
+ * broken twice. `MIN(registered)` is read as a **truncation point**: the oldest
+ * row is where the imported history was cut off, not the moment the first
+ * player ever arrived.
+ *
+ * That reading is a deliberate safety choice, not an established fact. If the
+ * history is in fact complete, treating its first row as a cut costs one
+ * partial bucket at the very start; if it is truncated and we read the first
+ * row as a first event, every bucket before it becomes a fabricated zero. The
+ * asymmetry decides it. What is *not* claimed here is which of the two the
+ * database actually holds — nobody has compared this value against the old
+ * database.
  *
  * So if the cut lands at 15:00, that day is nine hours of a twenty-four hour
  * bucket, and counting it whole is a partial denominator against a whole-day

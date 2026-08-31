@@ -115,23 +115,38 @@ provar que o alerta chega. Ver o bloco abaixo — a distinção importa mais que
 **AusTV Admin S8 — S8.0 e S8.1 entregues; S8.2 não iniciada.** A fonte do tutorial existe
 ([ADR-0004](.specs/decisions/ADR-0004-fonte-dados-tutorial.md): ETL noturno sobre
 `Quests/playerdata`), o 7º check da §6.1 fechou o conjunto, e o módulo `funnel` publica três dos
-quatro degraus. **O `[CORTE]` foi exercido:** a S8.2 (retenção por coorte) move para a S9 — não por
-capacidade, mas porque tem três pré-requisitos abertos, e o primeiro é ler o `/v1/retention` antes
-de abrir a exceção 1 do ADR-002. Detalhe no plano de sprints.
+quatro degraus. **O `[CORTE]` foi exercido:** a S8.2 (retenção por coorte) moveu para a S9 —
+não por capacidade, mas por três pré-requisitos abertos, o primeiro deles ler o `/v1/retention`
+antes de abrir a exceção 1 do ADR-002.
 
-**Próxima: Sprint 9** — módulo `economy` (S9.1) e relatório periódico no Discord (S9.2), mais a
-S8.2 se os pré-requisitos dela forem resolvidos.
+**Os três pré-requisitos eram o mesmo, e ele caiu em 2026-08-29.** A leitura foi feita: a S8.2 não
+precisa da exceção 1, não precisa de SQL e não precisa do `DESCRIBE plan_sessions`. Está
+destravada; o que ela carrega agora é uma ressalva de rótulo, não um bloqueio. Detalhe no plano de
+sprints.
+
+**Próxima: Sprint 9** — módulo `economy` (S9.1), relatório periódico no Discord (S9.2) e a
+**S8.2**, agora sem pré-requisito pendente.
 
 **Em aberto, e vale mais que sprint:**
 
-- **Duas leituras de minutos destravam a S8.2, e ninguém as fez.** `curl` no `/v1/retention` (pode
-  **eliminar** a exceção 1 do ADR-002 inteira — e não olhar antes de abrir uma exceção é
-  literalmente o erro que já custou a exceção 2) e `DESCRIBE plan_sessions` (nenhuma coluna dessa
-  tabela está registrada em lugar nenhum). Exigem acesso à produção.
-- **`plan_users` tem dias de profundidade, não meses.** O histórico do proxy não veio na unificação
-  de 2026-08-20, então o degrau de rede do funil só fala do presente e a primeira coorte de D30 só
-  existe em **2026-09-19**. O funil já trata isso — bucket sem cobertura sai `null`, nunca zero —
-  mas nenhum número histórico de rede vai aparecer até lá.
+- **✅ As duas leituras foram feitas em 2026-08-29, e destravaram a S8.2.** O `/v1/retention`
+  devolve 5565 linhas com `playerUUID`, `registerDate`, `lastSeenDate`, `playtime` e
+  `timeDifference` — coorte e plataforma saem daí, então **a premissa da exceção 1 do ADR-002
+  caiu** e o `DESCRIBE plan_sessions` deixou de importar. O `/v1/networkMetadata` lista as
+  instâncias mas **não traz `plan_version`**: a exceção 2 fica de pé para o `version_divergence`,
+  com justificativa reescrita.
+  **A exceção 1 ficou sem justificativa nenhuma e ninguém a fechou** — fechar é decisão do dono.
+  **A ressalva que a S8.2 tem de carregar:** `lastSeenDate` mede intervalo de sobrevivência, não
+  retorno no dia N. Publicar é aceitável; publicar sem o rótulo é o erro de denominador de novo.
+- **A profundidade de `plan_users` nunca foi medida, e a checagem está pronta.** Este item dizia
+  "dias, não meses" como fato; era inferência a partir da perda do histórico do proxy. Uma leitura
+  do `/v1/retention` em 2026-08-29 mostrou 26 meses de `registerDate`, mas isso **não** resolve a
+  questão: o endpoint serve por servidor ou por rede, não foi registrado qual foi pedido, e o Plan
+  guarda registro em duas tabelas.
+  **`PlanDatabase.earliestArrivalAt()` é `SELECT MIN(registered) FROM plan_users` e o
+  `/funnel/monthly` publica a resposta como `coversFrom`.** Um `curl` autenticado fecha a questão —
+  e até lá a data de **2026-09-19** que circulava não tem base, porque vinha da mesma inferência.
+  O funil continua tratando bucket sem cobertura como `null`, nunca zero — isso não muda.
 
 - **O alerta de saúde CHEGA — comprovado em 2026-08-26.** Alertas reais do
   `platform.offline_account_share` foram observados no canal: `breached`, recuperação e o `n` ao

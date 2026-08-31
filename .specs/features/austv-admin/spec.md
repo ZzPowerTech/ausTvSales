@@ -88,8 +88,30 @@ documentadas e isoladas em módulo próprio**, sempre em usuário **read-only**:
 
 | # | escopo | tabelas | por quê a API não serve |
 |---|---|---|---|
-| 1 | Coorte histórica (§6.2, S8.2) | `plan_users`, `plan_user_info`, `plan_sessions` | agregação por coorte × plataforma não existe em nenhum endpoint — *(2026-08-26: `/v1/retention` é candidato **não avaliado**; mesma classe de afirmação de ausência que caiu na exceção 2. Ver [`HANDOFF.md`](HANDOFF.md))* |
-| 2 | **Inventário de instâncias e chegadas de rede (§6.1, S6.3)** — *aprovada em 2026-08-23; **premissa desmentida em 2026-08-26**, ver nota abaixo* | **`plan_servers` e `plan_users`** | ~~o Plan não expõe lista de servidores~~ — **falso**: `/v1/servers` e `/v1/networkOverview` dão 404 por serem nomes errados; o endpoint documentado é **`/v1/networkMetadata`**. A parte sobre chegadas de rede não foi reavaliada |
+| 1 | Coorte histórica (§6.2, S8.2) | `plan_users`, `plan_user_info`, `plan_sessions` | ~~agregação por coorte × plataforma não existe em nenhum endpoint~~ — **premissa derrubada em 2026-08-29**, e **nenhuma justificativa a substitui**. Ver a nota abaixo |
+| 2 | **Inventário de instâncias e chegadas de rede (§6.1, S6.3)** — *aprovada em 2026-08-23; **premissa desmentida em 2026-08-26**, corpo lido em 2026-08-29* | **`plan_servers` e `plan_users`** | ~~o Plan não expõe lista de servidores~~ — **falso**: `/v1/networkMetadata` lista as instâncias. Mas o corpo **não traz `plan_version`**, e nenhum outro endpoint traz: `version_divergence` fica, `orphan_instance` pode sair. Justificativa reescrita abaixo. A parte sobre chegadas de rede não foi reavaliada |
+
+#### Exceção 1 — sem justificativa desde 2026-08-29
+
+A exceção foi aberta com um único argumento: *"agregação por coorte × plataforma não existe
+em nenhum endpoint"*. O corpo do `/v1/retention` foi lido e traz `registerDate` (coorte) e
+`playerUUID` (plataforma, pelo ADR-003). O argumento caiu, e **nada foi escrito no lugar**.
+
+Pelo próprio ADR-002, uma exceção numerada precisa carregar uma justificativa escrita. Esta
+não carrega mais, e a regra que este documento aplica à exceção 2 quatro parágrafos abaixo
+— *uma exceção que sobrevive porque ninguém reescreveu o motivo é como esta aqui foi
+aberta* — vale igual para esta.
+
+**Estado:** autoriza `plan_users`, `plan_user_info` e `plan_sessions`, e **nenhum código a
+usa** — a S8.2, única história que dependia dela, sai do endpoint. Fechá-la é decisão do
+dono, porque foi ele quem a abriu; até lá ela fica registrada aqui como o que é: uma
+autorização de pé sem motivo de pé.
+
+> **A ressalva que sobra, e não é sobre acesso:** `lastSeenDate` dá o **intervalo de
+> sobrevivência**, não o retorno no dia N. Entregar retenção por intervalo, rotulada como
+> tal, é melhor que abrir três tabelas para entregar a outra — mas é uma métrica
+> diferente, e chamar uma de outra seria o erro de denominador que já custou uma linha do
+> DoD da S8.
 
 #### Exceção 2 — inventário de instâncias (2026-08-23)
 
@@ -174,24 +196,29 @@ tabela de identidade — das mais estáveis do schema do Plan.
 > Plan não expunha a lista. Os dois nomes estavam errados. **Esta exceção foi aberta com o argumento
 > de que não havia alternativa, e havia.**
 >
-> **O que isso não decide:** se o `networkMetadata` traz `plan_version` por instância. O check
-> `plan.version_divergence` precisa disso, e sem verificar o corpo a exceção não pode ser fechada —
-> ela apenas perdeu o motivo alegado. O mesmo vale para a metade de `plan_users`: o
-> `/v1/playersTable` documenta `registered` por jogador, mas ninguém conferiu se serve.
+> **Corpo lido em 2026-08-29, e o resultado parte a exceção em duas.** O `/v1/networkMetadata`
+> enumera as instâncias da rede e **não** carrega `plan_version`. Nenhum outro endpoint do
+> OpenAPI carrega.
 >
-> **Sem decisão tomada.** Enquanto a exceção estiver de pé, o `PlanDatabase` mantém credencial de
-> MySQL e uma conexão que o ADR-002 existe para evitar.
+> - **`plan.orphan_instance`** reconcilia duas *listas*, e o endpoint serve essa lista. Esta
+>   metade **poderia** sair do SQL — mas não é decisão tomada: o argumento estrutural
+>   registrado abaixo (sob 403 na API, os checks que leem SQL continuam respondendo) não foi
+>   respondido por nada que os dois corpos mostraram. E o gatilho original pedia
+>   `plan_version` **e recência por instância**; só a primeira foi verificada.
+> - **`plan.version_divergence`** precisa da versão por instância. Esta metade **fica**, e a
+>   exceção fica com ela.
 >
-> Contra isso pesa um argumento **estrutural** — e a palavra importa: sob 403 na API, os três checks
-> que leem o `PlanDatabase` continuariam respondendo **pela topologia do código**, não por
-> observação. **Ninguém executou os checks durante o 403**, e não se sabe sequer se a VPS foi
-> afetada: o 403 foi visto de uma máquina residencial. Fechar a exceção sem substituir a fonte
-> plausivelmente trocaria dívida de acoplamento por perda de cobertura; "plausivelmente" é o
-> quanto a evidência sustenta.
+> Então: a exceção 2 **continua de pé com uma justificativa nova**, e a antiga ("não há
+> endpoint de catálogo") está morta. As duas coisas são diferentes e é importante que este
+> documento diga as duas — uma exceção que sobrevive porque ninguém reescreveu o motivo é
+> como esta aqui foi aberta.
 >
-> **Gatilho de reavaliação:** ler o corpo de `/v1/networkMetadata` e confirmar se traz `plan_version`
-> e recência por instância. Antes disso não há decisão a tomar. Detalhe no
-> [`HANDOFF.md`](HANDOFF.md).
+> **O custo enquanto isso:** as duas metades compartilham o `PlanDatabase`, então a
+> credencial de MySQL e a conexão que o ADR-002 existe para evitar continuam de pé mesmo
+> depois de o `orphan_instance` migrar. Fechar de verdade exige as duas metades.
+>
+> A outra metade citada aqui — se o `/v1/playersTable` serve `plan_users.registered` —
+> **segue não verificada**. Detalhe no [`HANDOFF.md`](HANDOFF.md).
 >
 > Erro de método, do mesmo tipo que este projeto já registrou quatro vezes: **concluir ausência a
 > partir de uma busca que não achou**, em vez de consultar a fonte que enumera. A fonte existia em
