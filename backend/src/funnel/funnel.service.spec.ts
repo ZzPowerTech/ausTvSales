@@ -103,6 +103,79 @@ function countOf(
 }
 
 describe('FunnelService', () => {
+  describe('the reason for a bucket cannot contradict its count', () => {
+    it('gives no reason at all for a bucket that has a number', async () => {
+      // `reasonFor` used to answer "a consulta falhou" for any covered bucket,
+      // and was harmless only because `series()` happened to ask for the count
+      // first. A sentence that is false on the branch it is written on is one
+      // careless call from being published.
+      const service = new FunnelService(
+        planDbWith({
+          arrivals: [{ uuid: PREMIUM, registeredAt: MARCH_10_NOON }],
+        }),
+        tutorialWith({}),
+      );
+
+      const series = await service.series(
+        FunnelGranularity.Daily,
+        '2026-03-10',
+        '2026-03-10',
+      );
+
+      const survival = countOf(series.buckets[0], FunnelStep.Survival);
+      expect(survival?.value).toBe(1);
+      // Measured, so the union has no `unavailableReason` branch at all.
+      expect(
+        (survival as { unavailableReason?: string }).unavailableReason,
+      ).toBeUndefined();
+    });
+
+    it('names the coverage floor, not a failure, before the source starts', async () => {
+      const service = new FunnelService(
+        planDbWith({
+          arrivals: [],
+          earliestAt: Date.parse('2026-03-11T00:00:00-03:00'),
+        }),
+        tutorialWith({}),
+      );
+
+      const series = await service.series(
+        FunnelGranularity.Daily,
+        '2026-03-10',
+        '2026-03-11',
+      );
+
+      const before = countOf(series.buckets[0], FunnelStep.Survival);
+      expect(before?.value).toBeNull();
+      const reason = (before as { unavailableReason?: string })
+        .unavailableReason;
+      // The distinction the per-bucket reason exists for: this bucket is
+      // outside the source's reach, which is not the source having failed.
+      expect(reason).toContain('anterior ao inicio da cobertura');
+      expect(reason).not.toContain('falhou');
+      expect(reason).toContain('2026-03-11');
+    });
+
+    it('says the query failed only when it actually failed', async () => {
+      const service = new FunnelService(
+        planDbWith({ throws: true }),
+        tutorialWith({}),
+      );
+
+      const series = await service.series(
+        FunnelGranularity.Daily,
+        '2026-03-10',
+        '2026-03-10',
+      );
+
+      const survival = countOf(series.buckets[0], FunnelStep.Survival);
+      expect(survival?.value).toBeNull();
+      expect(
+        (survival as { unavailableReason?: string }).unavailableReason,
+      ).toContain('falhou');
+    });
+  });
+
   describe('the step `plan_users` feeds — relabelled 2026-08-31', () => {
     it('never publishes a number for `rede`, whatever the source returns', async () => {
       // The regression this whole change exists for. `plan_users` is the

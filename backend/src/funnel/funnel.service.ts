@@ -197,14 +197,16 @@ export class FunnelService {
     ]);
 
     const buckets = bucketKeys.map((key) => {
-      const arrivals = survival.countFor(key);
       return buildBucket(key, {
         // No source for the proxy's population; the reason is attached by
         // `buildBucket` from `NETWORK_STEP_UNAVAILABLE`.
         network: null,
-        survival: arrivals,
-        survivalUnavailableReason:
-          arrivals === null ? survival.reasonFor(key) : undefined,
+        survival: survival.countFor(key),
+        // No `arrivals === null` guard here any more, and its absence is the
+        // fix: `reasonFor` is a string exactly when `countFor` is null, so the
+        // two cannot disagree and the caller cannot ask in an order that
+        // produces a wrong sentence.
+        survivalUnavailableReason: survival.reasonFor(key) ?? undefined,
         tutorialEntered: tutorial.enteredByBucket.get(key) ?? tutorial.missing,
         tutorialCompleted:
           tutorial.completedByBucket.get(key) ?? tutorial.missing,
@@ -346,7 +348,16 @@ export class FunnelService {
           coversFromKey === null
             ? SOURCE_COVERS_NOTHING
             : covers(key)
-              ? SOURCE_QUERY_FAILED
+              ? // Covered, and the query answered: this bucket HAS a number, so
+                // there is no reason to give. `null` rather than a sentence,
+                // because every sentence available here would be false — the
+                // first version returned "a consulta falhou" and was safe only
+                // because `series()` happened to ask in the right order.
+                // `proxy-registration-alive.check.ts` records what that costs
+                // when the guard is one careless call away: the channel was told
+                // every fifteen minutes that the read had "probably found the
+                // wrong database", about a perfectly healthy Plan.
+                null
               : `${SOURCE_BEFORE_COVERAGE} A cobertura comeca em ${coversFromKey}.`,
         state: {
           name: 'plan_users',
@@ -529,14 +540,22 @@ interface SurvivalCounts {
    */
   countFor(bucketKey: string): number | null;
   /**
-   * Why that bucket is null. Only consulted when `countFor` returned null.
+   * Why that bucket is null, or `null` when it is not.
    *
-   * Per bucket for the same reason, and it is not decoration: inside one
-   * successful read, "the source does not reach back this far" and "the query
-   * failed" are opposite diagnoses, and a response-level label prints the wrong
-   * one for every bucket it does not describe.
+   * Per bucket, and it is not decoration: inside one successful read, "the
+   * source does not reach back this far" and "the query failed" are opposite
+   * diagnoses, and a response-level label would print the wrong one for every
+   * bucket it does not describe.
+   *
+   * **The invariant, and it is the point of returning `null` here:**
+   * `reasonFor(k)` is a string exactly when `countFor(k)` is `null`. The two
+   * are derived from the same `covers` decision, so they cannot disagree, and a
+   * caller that asks in the wrong order gets nothing rather than a wrong
+   * sentence. The previous shape returned "a consulta falhou" for a bucket the
+   * query had answered — unreachable, but only because the one caller checked
+   * the count first.
    */
-  reasonFor(bucketKey: string): string;
+  reasonFor(bucketKey: string): string | null;
   state: FunnelSourceState;
 }
 

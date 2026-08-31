@@ -532,6 +532,48 @@ Cada check roda periodicamente e **alerta ativamente no Discord** quando falha.
 > resumo em `down` para sempre — o oposto de silêncio. Registrado, ele escreve um veredito fresco
 > por ciclo cujo conteúdo inteiro é o motivo de não poder medir.
 >
+> ### 🔴 `no_data` sozinho não bastava — corrigido no mesmo PR, achado em revisão
+>
+> A primeira versão desta mudança afirmava que *"`no_data` nunca notifica"*. **Isso só vale a partir
+> de um estado limpo.** Os dois consumidores de um veredito assumem que um estado não-`ok`
+> eventualmente se resolve, e este nunca se resolve:
+>
+> 1. **Alerta diário, para sempre.** `decideAlerts` suprime um `no_data` como `not_notifiable`
+>    apenas enquanto o canal não está segurando nada sobre o check. Com qualquer alerta não-`ok`
+>    aberto — um `error` antigo de um soluço do MySQL que nunca recebeu recuperação confirmada — a
+>    política caía em `repeat`, que entrega assim que `reAlertAfterMs` vence e **a cada janela
+>    depois disso**, porque a saída é um registro `ok` que este check não produz mais. O teto por
+>    janela também não segurava: `no_data` é o único status que ele emite, então toda janela nova
+>    lhe dava o passe livre de "status não ouvido".
+> 2. **`degraded` para sempre.** `resolveStatus` devolve `degraded` sempre que algum check está
+>    `no_data`, então o agregado do `/health/instrumentation` nunca mais leria `ok` — e, pior, um
+>    **segundo** check piorando não o moveria mais. Um status que não pode se mexer parou de
+>    carregar informação: é o desastre fundador deste épico vestindo amarelo em vez de verde.
+>
+> **A saída foi um conceito novo, `ACCEPTED_BLIND_SPOTS`** (em `health-check.types.ts`), consultado
+> pelos dois consumidores. Um membro do conjunto:
+>
+> - **nunca notifica** — nem na primeira vez, nem quando a janela vira, e não importa o que o canal
+>   está segurando (supressão com motivo próprio, `accepted_blind_spot`, para que o quanto da camada
+>   foi desligado seja contável);
+> - **fica de fora de `counts`, de `failing` e do `status` agregado**, e é publicado por nome no
+>   campo novo **`blindSpots`** do `/health/instrumentation`. Fora do veredito, **não** do payload:
+>   ponto cego que some se lê como tudo bem, que é o erro que esta camada inteira existe para evitar;
+> - **continua em `total`, em `reporting` e na janela de frescor** — está registrado, escrevendo
+>   linha por ciclo, e se parar de escrever ainda cai em `staleChecks`.
+>
+> **O custo, que não está escondido:** a supressão é incondicional, então um check que entra no
+> conjunto enquanto o canal segura um `breached` ou `error` deixa essa mensagem como última palavra,
+> sem nota de encerramento. É deliberado — a alternativa é uma regra de "entrega exatamente uma vez,
+> depois nunca", e as regras de transição do `decideAlerts` já erraram duas vezes raciocinando sobre
+> formatos. Uma falha velha engana na direção segura; carimbar um `ok` para limpar o canal é a única
+> coisa que esta camada não pode fazer.
+>
+> **A régua para entrar no conjunto:** *nenhuma fonte alcançável por este sistema responde à
+> pergunta*, e isso está escrito em algum lugar durável. Não serve para check barulhento, mal
+> calibrado ou inconveniente — silenciar um desses é como o canal emudece sobre algo real. Sair do
+> conjunto é sempre seguro: o check volta a alertar.
+>
 > **O que custa:** os ~54% deixaram de ser vigiados. Isso é perda real, e não rebaixamento de um
 > sinal existente — nunca foram vigiados, porque este check não os enxergava. Restaurar exige uma
 > contagem de chegadas **no proxy**; o banco antigo é candidato, e `/v1/networkMetadata` e

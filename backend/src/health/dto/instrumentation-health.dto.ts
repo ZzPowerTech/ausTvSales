@@ -138,6 +138,21 @@ export class InstrumentationSummaryDto {
   @ApiProperty({
     type: [String],
     description:
+      'Checks que NAO CONSEGUEM medir, por decisao registrada — a fonte que ' +
+      'responderia a pergunta nao existe em lugar nenhum que este sistema ' +
+      'alcance. Ficam de fora de `counts`, de `failing` e do `status` ' +
+      'agregado, porque um check que devolve `no_data` para sempre fixaria o ' +
+      'agregado em `degraded` e o status pararia de carregar informacao. ' +
+      'Continuam em `total` e no calculo de frescor: estao registrados e ' +
+      'escrevendo linha por ciclo. Sao publicados aqui, e nao omitidos, ' +
+      'porque ponto cego que some do payload se le como tudo bem. O motivo de ' +
+      'cada um esta no `detail.summary` do proprio check.',
+  })
+  blindSpots!: string[];
+
+  @ApiProperty({
+    type: [String],
+    description:
       'Checks registrados que nunca gravaram veredito nenhum. Nao aparecem em ' +
       '`total` nem em `counts` porque nao existe linha deles — e ausencia se le ' +
       'como tudo bem. Mesma forma do proprio check `plan.orphan_instance`: ' +

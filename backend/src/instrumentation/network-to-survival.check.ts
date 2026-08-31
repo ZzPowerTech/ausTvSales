@@ -49,9 +49,7 @@ export const RATIO_STRUCTURALLY_BLIND =
  * `no_data`, because §6.1's rule is *whose* emptiness it is: `error` is for a
  * source that failed, `no_data` for a window that genuinely came back empty or a
  * comparison missing a side. Nothing here failed — we do not have a source for
- * the denominator, the same category as `PLAN_SERVERS` being unconfigured. And
- * `no_data` never notifies, so the channel is not paged every fifteen minutes
- * about a gap that is already written down.
+ * the denominator, the same category as `PLAN_SERVERS` being unconfigured.
  *
  * **Not retired**, though retiring it was the alternative. Deregistering it
  * would drop it out of the registry that `InstrumentationHealthService` compares
@@ -59,6 +57,28 @@ export const RATIO_STRUCTURALLY_BLIND =
  * the summary at `down` forever — the opposite of quiet. Kept registered, it
  * writes a fresh verdict every cycle whose entire content is the reason it
  * cannot measure. A check saying "não sei" out loud is the point of the layer.
+ *
+ * ## ⚠️ `no_data` alone was not enough, and this shipped believing it was
+ *
+ * That version said here that "`no_data` never notifies, so the channel is not
+ * paged". **That is true only from a clean slate**, and review caught it before
+ * it ran. Both consumers of a verdict assume a non-`ok` state eventually clears,
+ * and this one never does:
+ *
+ * - `decideAlerts` suppresses a `no_data` as `not_notifiable` only while the
+ *   channel is holding nothing about the check. With any open non-`ok` alert —
+ *   a past `error` from a MySQL blip that never got a confirmed recovery — it
+ *   fell through to `repeat` and delivered once per `reAlertAfterMs`, **forever**,
+ *   because the exit is an `ok` record this check can no longer produce. The
+ *   per-window budget did not contain it either: `no_data` is the only status it
+ *   emits, so every fresh window handed it the free pass.
+ * - `resolveStatus` returns `degraded` while any check is `no_data`, so
+ *   `/health/instrumentation` could never read `ok` again — and, worse, a second
+ *   check going bad no longer moved it.
+ *
+ * The fix is not in this file: this check is a member of
+ * {@link ACCEPTED_BLIND_SPOTS}, which both consumers now consult. That set is
+ * where the reasoning lives, and adding a name to it is a decision with a bar.
  *
  * ## What it costs, and what it will take to restore
  *

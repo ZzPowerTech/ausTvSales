@@ -9,6 +9,7 @@ import {
 } from '../instrumentation/health-check.scheduler';
 import { HealthCheckStore } from '../instrumentation/health-check.store';
 import {
+  isAcceptedBlindSpot,
   parseCheckName,
   type HealthCheckRecord,
   type HealthCheckStatus,
@@ -84,6 +85,23 @@ export const MISSED_CYCLES_BEFORE_STALE = 2;
  *
  * Same shape as the `plan.orphan_instance` check itself: a thing that should be
  * reporting and is not.
+ *
+ * ## A check that can never measure is excluded from the verdict, not hidden
+ *
+ * `resolveStatus` reports `degraded` while any check is `no_data`, which is right
+ * for a window that came back empty and wrong for a check whose source does not
+ * exist. `funnel.network_to_survival` is the second kind: it returns `no_data`
+ * every cycle, forever, so before this exclusion the aggregate could never read
+ * `ok` again — and, worse, a **second** check going bad would not have moved it.
+ * A status pinned at one value has stopped carrying information, which is the
+ * failure of this epic wearing a yellow light instead of a green one.
+ *
+ * So the records of {@link ACCEPTED_BLIND_SPOTS} are left out of `counts` and
+ * `failing`, and published by name in `blindSpots` instead. Left out, **not
+ * dropped**: a blind spot missing from the payload altogether would read as
+ * fine, which is the mistake the paragraph above this one exists to prevent.
+ * They stay in `total`, in `reporting` and in the staleness window, because they
+ * genuinely are registered, reporting and fresh.
  */
 @Injectable()
 export class InstrumentationHealthService {
@@ -101,7 +119,18 @@ export class InstrumentationHealthService {
       schedule.intervalMinutes * MISSED_CYCLES_BEFORE_STALE;
     const cutoff = staleCutoff(schedule, staleAfterMinutes, now);
 
-    const counts = tally(records.map((record) => record.status));
+    // Partitioned before anything is tallied. A blind spot is a check that
+    // cannot measure by decision, not a check that is failing, and counting it
+    // as either would make this endpoint answer a question nobody asked.
+    const measuring = records.filter(
+      (record) => !isAcceptedBlindSpot(record.checkName),
+    );
+    const blindSpots = records
+      .filter((record) => isAcceptedBlindSpot(record.checkName))
+      .map((record) => record.checkName)
+      .sort();
+
+    const counts = tally(measuring.map((record) => record.status));
     const staleChecks = records
       .filter((record) => isStale(record.checkedAt, cutoff))
       .map((record) => record.checkName)
@@ -113,11 +142,16 @@ export class InstrumentationHealthService {
     const { newest, oldest } = bounds(records);
 
     return {
-      status: resolveStatus(records.length, stale, counts, {
+      status: resolveStatus(measuring.length, stale, counts, {
         missing: missing.length,
         // Base names, not rows: one registered check emits several scoped
         // observations, so counting rows here would compare two different
         // things and fire the majority rule at the wrong moment.
+        //
+        // Every record, blind spots included: this counter answers "how much of
+        // the registry is writing rows at all", and a blind spot writes them.
+        // Excluding it here would push the majority rule toward `down` for a
+        // check that is behaving exactly as intended.
         reporting: new Set(
           records.map((record) => parseCheckName(record.checkName).name),
         ).size,
@@ -127,11 +161,12 @@ export class InstrumentationHealthService {
       oldestCheckedAt: oldest?.toISOString() ?? null,
       total: records.length,
       counts,
-      failing: records
+      failing: measuring
         .filter((record) => record.status !== 'ok')
         .map((record) => record.checkName)
         .sort(),
       staleChecks,
+      blindSpots,
       missing,
       schedule: { ...schedule, staleAfterMinutes },
     };
