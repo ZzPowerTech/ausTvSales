@@ -261,8 +261,14 @@ export interface AlertPolicyInput {
  * ADR-006 failure wearing the uniform of a fix. The guarantee is stated in
  * terms of what the channel experiences, because that is the thing that can
  * be checked: once a check has been quiet for `reAlertAfterMs` while over
- * budget, **the next non-`ok` observation is published** as a `flapping`
- * notice saying the check is oscillating and has been muted. A run of `ok`
+ * budget, the next non-`ok` observation is **put in the `flapping` bucket** as
+ * a notice saying the check is oscillating and has been muted.
+ *
+ * "Put in the bucket", not "published": this function decides, it does not
+ * deliver. `DiscordAlerter` gives `flapping` the lowest cut priority, so on a
+ * payload large enough to need trimming the notice is the first thing dropped,
+ * and it is re-produced every cycle while the overflow lasts. The channel still
+ * learns from the summary line that a check was muted; it does not learn which. A run of `ok`
  * observations on the boundary stretches the quiet by those cycles — the
  * notice may not be stamped `ok`, or it would read as an all-clear nobody
  * gave — so the bound is one window plus that run, not one window flat.

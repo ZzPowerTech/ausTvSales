@@ -67,9 +67,8 @@ export class OrphanInstanceCheck implements HealthCheck {
       //
       // An empty catalogue means Plan lost track of every instance — the
       // loudest possible version of the problem this check exists to find. But
-      // `NOTIFIABLE_STATUSES` holds `breached` and `error` and **not**
-      // `no_data`, and `decideAlerts` suppresses a `no_data` as
-      // `not_notifiable` whenever nothing is already open on the check. So a
+      // `decideAlerts` suppresses a `no_data` as `not_notifiable` whenever
+      // nothing is already open on the check, with no timer. So a
       // catalogue that empties from a clean state filed as `no_data` produces a
       // row every fifteen minutes and never one message — silence over the
       // exact disaster of ADR-006.

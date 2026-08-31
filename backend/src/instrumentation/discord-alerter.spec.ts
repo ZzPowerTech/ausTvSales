@@ -481,25 +481,32 @@ describe('DiscordAlerter', () => {
       // embed passam folgado dos 6000 somados. O Discord responde 400, o
       // alerter desiste, e o proximo ciclo remonta o mesmo payload — silencio
       // permanente exatamente no maior apagao possivel.
-      await buildEnabled().publish(decision({ announce: blackoutRecords(25) }));
+      const delivered = await buildEnabled().publish(
+        decision({ announce: blackoutRecords(25) }),
+      );
 
       expect(aggregateChars(sentPayload())).toBeLessThanOrEqual(6000);
+      expect(delivered.length).toBeGreaterThan(0);
     });
 
     it('cabe no limite agregado com os tres baldes cheios', async () => {
       fetchMock.mockResolvedValue(okResponse());
 
-      // O teto de 25 campos por balde da falsa seguranca: sao tres baldes, e
-      // 3 x 25 campos e estruturalmente permitido.
-      await buildEnabled().publish(
+      // O teto de 25 campos por balde da falsa seguranca: sao QUATRO baldes, e
+      // 4 x 25 campos e estruturalmente permitido.
+      const delivered = await buildEnabled().publish(
         decision({
           announce: blackoutRecords(25),
           recovered: blackoutRecords(25),
           lostSignal: blackoutRecords(25),
+          flapping: blackoutRecords(25),
         }),
       );
 
       expect(aggregateChars(sentPayload())).toBeLessThanOrEqual(6000);
+      // Sem esta linha o teste passa numa implementacao que nao manda nada:
+      // zero embeds cabem trivialmente em 6000.
+      expect(delivered.length).toBeGreaterThan(0);
     });
 
     it('devolve so os ids que couberam de fato', async () => {
@@ -627,6 +634,65 @@ describe('DiscordAlerter', () => {
 
       // O 400 nao e transitorio: a mesma decisao remonta o mesmo payload.
       expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('balde de oscilacao', () => {
+    it('anuncia o silenciamento em vez de so silenciar', async () => {
+      fetchMock.mockResolvedValue(okResponse());
+      const noisy = record('platform.offline_account_share', 'breached');
+
+      const delivered = await buildEnabled().publish(
+        decision({ flapping: [noisy] }),
+      );
+
+      const embed = sentPayload().embeds[0];
+      expect(embed.title).toContain('silenciado');
+      expect(embed.description).toContain('NAO significa que estao bem');
+      expect(embed.description).toContain('/health/instrumentation');
+      // Nem verde nem vermelho: nao e um veredito sobre o jogo.
+      expect(embed.color).not.toBe(0x2e8b57);
+      expect(embed.color).not.toBe(0xd9363c);
+      expect(sentPayload().content).toContain('1 oscilando (silenciado)');
+      expect(delivered).toEqual([noisy.id]);
+    });
+
+    it('e o primeiro a ser cortado quando o payload nao cabe', async () => {
+      // `cutOrder: 0`. Uma mensagem sobre o ruido da propria camada perde para
+      // qualquer coisa sobre o jogo.
+      fetchMock.mockResolvedValue(okResponse());
+      const failing = blackoutRecords(20, 400);
+      const noisy = record('platform.offline_account_share', 'breached');
+
+      const delivered = await buildEnabled().publish(
+        decision({ announce: failing, flapping: [noisy] }),
+      );
+
+      expect(delivered).not.toContain(noisy.id);
+      expect(delivered.length).toBeGreaterThan(0);
+    });
+
+    it('nao carimba o que cortou, para o proximo ciclo poder repetir', async () => {
+      // A propriedade da qual a politica de alerta depende: `decideAlerts`
+      // compara contra o ultimo veredito CARIMBADO, entao um registro cortado
+      // aqui volta no ciclo seguinte. Se `publish` devolvesse ids que nao foram
+      // ao ar, o runner carimbaria, e o registro sumiria por uma janela inteira.
+      fetchMock.mockResolvedValue(okResponse());
+      const failing = blackoutRecords(25, 400);
+      const back = record('plan.collection_alive:survival', 'ok');
+
+      const delivered = await buildEnabled().publish(
+        decision({ announce: failing, recovered: [back] }),
+      );
+
+      const onTheWire = sentPayload()
+        .embeds.flatMap((embed) => embed.fields)
+        .map((field) => field.name);
+
+      // Tudo que voltou aparece na mensagem, e nada que nao apareceu voltou.
+      expect(delivered.length).toBe(onTheWire.length);
+      expect(delivered).not.toContain(back.id);
+      expect(sentPayload().content).toContain('nao exibido(s)');
     });
   });
 

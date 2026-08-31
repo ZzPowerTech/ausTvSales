@@ -67,6 +67,23 @@ export class ProxyRegistrationAliveCheck implements HealthCheck {
       ];
     }
 
+    if (arrivals.total === null) {
+      // The count itself came back unreadable. Says so and nothing more: with
+      // the row count unknown, every diagnosis below is unavailable, including
+      // the one about the wrong database.
+      return [
+        {
+          checkName: this.name,
+          status: 'error',
+          detail: {
+            summary:
+              'Nao foi possivel ler a contagem de plan_users — o driver ou o ' +
+              'tipo da coluna devolveu um formato inesperado',
+          },
+        },
+      ];
+    }
+
     if (arrivals.total === 0) {
       // An empty identity table is not "nobody arrived recently" — it is a
       // network with no history at all, which on a live server means the read
@@ -96,28 +113,27 @@ export class ProxyRegistrationAliveCheck implements HealthCheck {
       // Rows exist, but no usable `MAX(registered)`. Deliberately a *different*
       // verdict from the one above, and it names no cause.
       //
-      // The two came from the same branch until 2026-08-30, keyed on
-      // `lastRegisteredAt === null`, and that was wrong in a way worth spelling
-      // out: `total` is a `COUNT(*)` while `lastRegisteredAt` runs through
-      // `toNumber`, which returns null for an empty table **and** for any shape
-      // it does not expect — a `Date`, a non-numeric string, a driver bump that
-      // changes how a BIGINT comes back. `toNumber`'s own docblock names that as
-      // the bug that only shows up after a dependency upgrade.
+      // These three were one branch until 2026-08-30, keyed on
+      // `lastRegisteredAt === null`. Both fields run through `toNumber`, which
+      // returns null for an empty result **and** for any shape it does not
+      // expect — a `Date`, a `bigint`, a `Buffer`, whatever the next driver bump
+      // decides a column looks like. `toNumber`'s own docblock names that as the
+      // bug that only shows up after a dependency upgrade.
       //
-      // Merged, a mysql2 bump would have told the channel every fifteen minutes
-      // that the read "probably found the wrong database", about a perfectly
-      // healthy Plan, while `n` in the same payload said 5566. Alerting on a
-      // diagnosis the code never established is worse than not alerting: it
-      // sends someone to the wrong system.
+      // Collapsed, an unreadable read told the channel every fifteen minutes
+      // that it had "probably found the wrong database", about a perfectly
+      // healthy Plan. Alerting on a diagnosis the code never established is
+      // worse than not alerting: it sends someone to the wrong system. Three
+      // conditions, three verdicts, and only the middle one names a cause.
       return [
         {
           checkName: this.name,
           status: 'error',
           detail: {
             summary:
-              `plan_users tem ${arrivals.total} linha(s), mas nenhuma data de ` +
-              'registro legivel — a coluna mudou de tipo ou o driver mudou de ' +
-              'formato. NAO e o mesmo que tabela vazia.',
+              `plan_users tem ${arrivals.total} linha(s), mas MAX(registered) ` +
+              'nao veio legivel. NAO e o mesmo que tabela vazia; a causa pode ' +
+              'ser tipo de coluna, formato do driver ou a propria coluna nula.',
             n: arrivals.total,
           },
         },

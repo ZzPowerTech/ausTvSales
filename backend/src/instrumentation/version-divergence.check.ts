@@ -44,9 +44,8 @@ export class VersionDivergenceCheck implements HealthCheck {
       // An empty catalogue is not agreement, and it is not an empty window
       // either. Reporting `ok` here would pass the check precisely when Plan has
       // lost track of every instance — and reporting `no_data` would file that
-      // same event under a status `NOTIFIABLE_STATUSES` excludes, so
-      // `decideAlerts` would suppress it as `not_notifiable` forever while the
-      // row was rewritten every cycle. `error` is what reaches the channel, and
+      // same event under a status `decideAlerts` suppresses as
+      // `not_notifiable` forever, while the row was rewritten every cycle. `error` is what reaches the channel, and
       // it is the accurate word: the source answered with a universe that cannot
       // exist on a live network.
       return [

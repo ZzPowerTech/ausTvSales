@@ -68,7 +68,14 @@ interface DiscordEmbed {
  * "Can wait a cycle" is a claim about the alert policy, not a hope. A record cut
  * here is never stamped, and `decideAlerts` compares against the last verdict
  * that was *stamped* — so next cycle the check is in the same state as far as
- * the channel is concerned, and the same bucket is produced again. Under the
+ * the channel is concerned.
+ *
+ * What comes back then depends on what the check reports next, and for three of
+ * the four buckets that is the same bucket. `flapping` is the exception: if the
+ * next observation is `ok`, the policy suppresses it rather than re-issuing a
+ * notice stamped `ok`, so a cut notice can wait more than one cycle. It is
+ * never lost — the summary line still reports the count — but it is the one
+ * bucket where the cut is not simply a one-cycle delay. Under the
  * older policy, which compared against the previous **row**, that was false: a
  * cut recovery was reclassified as `not_notifiable` the next cycle and lost for
  * good. The comparison basis is what makes this cut safe.
