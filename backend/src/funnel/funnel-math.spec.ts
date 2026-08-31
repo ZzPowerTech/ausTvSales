@@ -40,17 +40,25 @@ function reasonOf(
   return (value as unknown as { unavailableReason: string }).unavailableReason;
 }
 
+/**
+ * The base in these cases is `survival`, and it used to be `network`.
+ *
+ * Not a rename for tidiness: `plan_users` was measured on 2026-08-31 to hold the
+ * Survival, so the counts these tests feed in have always been survival counts.
+ * They were being fed to the step called `rede`, which made the `rede → survival`
+ * conversion Survival ÷ Survival.
+ */
 describe('buildBucket', () => {
   describe('no percentage ever leaves without its base', () => {
     it('publishes percent and n together', () => {
       const bucket = buildBucket(
         '2026-03-10',
-        counts({ network: 200, tutorialEntered: 50 }),
+        counts({ survival: 200, tutorialEntered: 50 }),
       );
 
       const conversion = conversionOf(
         bucket,
-        FunnelStep.Network,
+        FunnelStep.Survival,
         FunnelStep.TutorialEntered,
       );
       expect(conversion.percent).toBe(25);
@@ -65,7 +73,7 @@ describe('buildBucket', () => {
 
       const conversion = conversionOf(
         bucket,
-        FunnelStep.Network,
+        FunnelStep.Survival,
         FunnelStep.TutorialEntered,
       );
       expect(conversion.percent).toBeNull();
@@ -76,12 +84,12 @@ describe('buildBucket', () => {
     it('keeps the base when only the numerator is missing', () => {
       // The denominator is a real measurement. Withholding it would lose
       // information for no reason.
-      const bucket = buildBucket('2026-03-10', counts({ network: 200 }));
+      const bucket = buildBucket('2026-03-10', counts({ survival: 200 }));
 
       const conversion = conversionOf(
         bucket,
-        FunnelStep.Network,
         FunnelStep.Survival,
+        FunnelStep.TutorialEntered,
       );
       expect(conversion.percent).toBeNull();
       expect(conversion.n).toBe(200);
@@ -90,11 +98,11 @@ describe('buildBucket', () => {
     it('rounds to one decimal', () => {
       const bucket = buildBucket(
         '2026-03-10',
-        counts({ network: 3, tutorialEntered: 1 }),
+        counts({ survival: 3, tutorialEntered: 1 }),
       );
 
       expect(
-        conversionOf(bucket, FunnelStep.Network, FunnelStep.TutorialEntered)
+        conversionOf(bucket, FunnelStep.Survival, FunnelStep.TutorialEntered)
           .percent,
       ).toBe(33.3);
     });
@@ -104,7 +112,7 @@ describe('buildBucket', () => {
     it('reports a missing step as null with a reason, never as 0', () => {
       // A collection gap read as zero is what made the tutorial's eight-month
       // outage invisible.
-      const bucket = buildBucket('2026-03-10', counts({ network: 200 }));
+      const bucket = buildBucket('2026-03-10', counts({ survival: 200 }));
 
       const tutorial = bucket.counts.find(
         (c) => c.step === FunnelStep.TutorialEntered,
@@ -118,7 +126,7 @@ describe('buildBucket', () => {
       // Measured-and-nobody-came is a fact, and must survive the round trip.
       const bucket = buildBucket(
         '2026-03-10',
-        counts({ network: 200, tutorialEntered: 0 }),
+        counts({ survival: 200, tutorialEntered: 0 }),
       );
 
       const tutorial = bucket.counts.find(
@@ -128,7 +136,7 @@ describe('buildBucket', () => {
       expect(reasonOf(tutorial!)).toBeUndefined();
       // And a measured zero over a real base is a real 0%.
       expect(
-        conversionOf(bucket, FunnelStep.Network, FunnelStep.TutorialEntered)
+        conversionOf(bucket, FunnelStep.Survival, FunnelStep.TutorialEntered)
           .percent,
       ).toBe(0);
     });
@@ -139,12 +147,12 @@ describe('buildBucket', () => {
       // and "nobody converted" that this contract exists to make impossible.
       const bucket = buildBucket(
         '2026-03-10',
-        counts({ network: 0, tutorialEntered: 0 }),
+        counts({ survival: 0, tutorialEntered: 0 }),
       );
 
       const conversion = conversionOf(
         bucket,
-        FunnelStep.Network,
+        FunnelStep.Survival,
         FunnelStep.TutorialEntered,
       );
       expect(conversion.percent).toBeNull();
@@ -154,43 +162,69 @@ describe('buildBucket', () => {
     });
   });
 
-  describe('the survival gap is stated, not hidden', () => {
-    it('names why the survival step has no numbers', () => {
-      const bucket = buildBucket('2026-03-10', counts({ network: 200 }));
+  describe('the network gap is stated, not hidden', () => {
+    it('names why the rede step has no numbers', () => {
+      const bucket = buildBucket('2026-03-10', counts({ survival: 200 }));
 
-      const survival = bucket.counts.find(
-        (c) => c.step === FunnelStep.Survival,
-      );
-      expect(survival?.value).toBeNull();
-      expect(reasonOf(survival!)).toContain('graph');
-      expect(reasonOf(survival!)).toContain('plan_user_info');
-      // And points at where the signal DOES exist today.
-      expect(reasonOf(survival!)).toContain('funnel.network_to_survival');
+      const rede = bucket.counts.find((c) => c.step === FunnelStep.Network);
+      expect(rede?.value).toBeNull();
+      // The reason names the table and the measurement, not just "sem fonte" —
+      // whoever reads it has to be able to tell that the population is in the
+      // old database rather than that a query failed.
+      expect(reasonOf(rede!)).toContain('plan_users');
+      expect(reasonOf(rede!)).toContain('plan_user_info');
     });
 
-    it('still publishes rede -> tutorial_entrou across the gap', () => {
+    it('refuses rede -> survival rather than dividing a step by itself', () => {
+      // The defect this file was rewritten for. With `plan_users` feeding the
+      // `rede` step, this conversion was Survival ÷ Survival: a number near
+      // 100% that could not fall with the whole network gone.
+      const bucket = buildBucket('2026-03-10', counts({ survival: 200 }));
+
+      const conversion = conversionOf(
+        bucket,
+        FunnelStep.Network,
+        FunnelStep.Survival,
+      );
+      expect(conversion.percent).toBeNull();
+      expect(conversion.n).toBeNull();
+      expect(reasonOf(conversion)).toContain('plan_users');
+    });
+
+    it('still publishes survival -> tutorial_entrou across the gap', () => {
       // A chain that stopped at the first missing step would withhold the one
       // comparison that is fully measurable today — and it is the number whose
       // collapse went unnoticed for eight months.
       const bucket = buildBucket(
         '2026-03-10',
-        counts({ network: 200, tutorialEntered: 24 }),
+        counts({ survival: 200, tutorialEntered: 24 }),
       );
 
-      const bridge = conversionOf(
+      const measured = conversionOf(
         bucket,
-        FunnelStep.Network,
+        FunnelStep.Survival,
         FunnelStep.TutorialEntered,
       );
-      expect(bridge.percent).toBe(12);
-      expect(bridge.n).toBe(200);
+      expect(measured.percent).toBe(12);
+      expect(measured.n).toBe(200);
     });
 
-    it('reports every consecutive pair even when one side is missing', () => {
-      const bucket = buildBucket('2026-03-10', counts({ network: 200 }));
+    it('publishes the three consecutive pairs and no bridge', () => {
+      const bucket = buildBucket('2026-03-10', counts({ survival: 200 }));
 
-      // Three consecutive pairs plus the bridge.
-      expect(bucket.conversions).toHaveLength(4);
+      // Three consecutive pairs. The `rede -> tutorial_entrou` bridge went away
+      // with the relabel: `survival` is adjacent to `tutorial_entrou` now, so
+      // the bridge could only restate a consecutive pair — and, with `rede`
+      // permanently null, restate it as a null.
+      expect(bucket.conversions).toHaveLength(3);
+      expect(
+        bucket.conversions.find(
+          (c) =>
+            c.from === FunnelStep.Network &&
+            c.to === FunnelStep.TutorialEntered,
+        ),
+      ).toBeUndefined();
+
       for (const conversion of bucket.conversions) {
         // Each one either has both halves or explains itself. Never silent.
         const explained =
@@ -198,26 +232,41 @@ describe('buildBucket', () => {
         expect(explained).toBe(true);
       }
     });
+
+    it('carries the caller reason for survival when it has one', () => {
+      // Per bucket, because inside one successful read "the source does not
+      // reach back this far" and "the query failed" are opposite diagnoses.
+      const bucket = buildBucket(
+        '2026-03-10',
+        counts({ survivalUnavailableReason: 'fonte comeca em 2024-06-02' }),
+      );
+
+      const survival = bucket.counts.find(
+        (c) => c.step === FunnelStep.Survival,
+      );
+      expect(reasonOf(survival!)).toBe('fonte comeca em 2024-06-02');
+    });
   });
 
   it('turns the april/2026 pair into the ~12% the investigation reported', () => {
     // Named for what it is. The DoD asks the funnel to *reproduce* known
     // figures, and this does not do that — it feeds two numbers in by hand and
-    // checks the division. Reproducing would mean running against the real
-    // sources, and the network side cannot: `plan_users` lost the proxy's
-    // history in the 2026-08-20 unification, so april/2026 has no denominator.
+    // checks the division.
     //
-    // What it does pin is that 360 arrivals and 43 entries render as 11,9% and
-    // not as something else — which is the arithmetic the report depends on.
+    // What has changed since this test was written is which figures it may use.
+    // 360 was the `rede` column of the verified table, and the funnel cannot
+    // produce it: that population is in the old database. 192 is the `survival`
+    // column for the same month, which is what `plan_users` actually holds, and
+    // 43/192 is the ratio this endpoint would render.
     const bucket = buildBucket(
       '2026-04',
-      counts({ network: 360, tutorialEntered: 43 }),
+      counts({ survival: 192, tutorialEntered: 43 }),
     );
 
     expect(
-      conversionOf(bucket, FunnelStep.Network, FunnelStep.TutorialEntered)
+      conversionOf(bucket, FunnelStep.Survival, FunnelStep.TutorialEntered)
         .percent,
-    ).toBeCloseTo(11.9, 1);
+    ).toBeCloseTo(22.4, 1);
   });
 });
 

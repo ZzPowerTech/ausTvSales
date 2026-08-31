@@ -4,20 +4,40 @@ import { Platform } from '../instrumentation/platform';
  * The four-step funnel of spec §6.2 (story S8.1).
  *
  * ```
- * conecta na rede (proxy)   → 100%
- * chega ao survival         →  54%    ← descoberto em 2026-08-21
- * entra no tutorial         →  varia  ← quebrou em dez/2025, silencioso
+ * conecta na rede (proxy)   → 100%   ← sem fonte: ver NETWORK_STEP_UNAVAILABLE
+ * chega ao survival         →  54%   ← descoberto em 2026-08-21
+ * entra no tutorial         →  varia ← quebrou em dez/2025, silencioso
  * conclui o tutorial        →   0,3% historico
  * ```
  *
  * Only the third step had ever been measured, and it was being measured wrong —
  * the series used for it counted tutorial entries and was read as arrivals,
  * which produced three of the five errors in `HANDOFF.md`.
+ *
+ * ## ⚠️ The first two steps swapped places on 2026-08-31
+ *
+ * Until then `plan_users` fed the **network** step and `survival` had no source.
+ * Production measurement inverted that: `plan_users` holds the **Survival**
+ * population, not the network's. Three facts, one conclusion — the proxy has
+ * zero rows in `plan_user_info`, `Survival` is the only server that appears
+ * there, and the monthly counts of `plan_users` match the `survival` column of
+ * `HANDOFF.md` exactly across eight months (682, 641, 727, 374, 258, 192, 1,
+ * 106) while the `rede` column is roughly double.
+ *
+ * So the step that had a number was the one wearing the wrong name, and the
+ * `rede → survival` conversion derived from it was Survival ÷ Survival — a
+ * number near 100% that would have read as a healthy funnel with the whole
+ * network gone. The counts did not change; the labels did.
  */
 export const FunnelStep = {
-  /** Connected to the network. `plan_users.registered` (ADR-002 exception 2). */
+  /** Connected to the network. No source. See {@link NETWORK_STEP_UNAVAILABLE}. */
   Network: 'rede',
-  /** Reached the survival backend. See {@link SURVIVAL_STEP_UNAVAILABLE}. */
+  /**
+   * Reached the survival backend. `plan_users.registered` (ADR-002 exception 2).
+   *
+   * The provenance caveat travels in the payload, not only here — see
+   * {@link SURVIVAL_STEP_PROVENANCE}.
+   */
   Survival: 'survival',
   /** Touched any tutorial quest. `tutorial_daily.entered` (S8.0). */
   TutorialEntered: 'tutorial_entrou',
@@ -36,34 +56,76 @@ export const FUNNEL_STEPS: readonly FunnelStep[] = [
 ];
 
 /**
- * Why the `survival` step carries no numbers yet.
+ * Why the `rede` step carries no numbers, and will not until a source exists.
  *
- * This is the step whose discovery started the epic — **54% of everyone who
- * connects to the network never reaches survival** — so shipping the funnel
- * without it is a real gap, and it is stated in the payload rather than left for
- * a reader to notice.
+ * This is the step whose absence started the epic — **54% of everyone who
+ * connects to the network never reaches survival** — so its emptiness is stated
+ * in the payload rather than left for a reader to notice.
  *
- * A *daily series* of arrivals at a backend needs one of two sources, and
- * neither is available to this story:
+ * ## It used to carry a number, and the number was the Survival step
  *
- * 1. `/v1/graph?type=uniqueAndNew` — the right endpoint, but **nobody has
- *    observed its payload**. Writing a parser against an imagined shape is the
- *    mistake that got story S6.2 written, merged and reverted, and the rule the
- *    S7.2 adapters were built under. Not repeating it.
- * 2. `plan_user_info`, which records registration per server — but that table is
- *    **exception 1** of ADR-002, scoped to the cohort module of story S8.2.
- *    Reaching for it here would widen an exception belonging to another story.
+ * `plan_users` was read as network arrivals from story S8.1 until 2026-08-31.
+ * Measured that day: the proxy (`AusTv`, `is_proxy = 1`) is in the `plan_servers`
+ * catalogue with **zero** players in `plan_user_info`; `Survival` is the only
+ * server that appears there, with 5575 of the 5638 rows; and the monthly counts
+ * of `plan_users` are, to the row, the `survival` column of the verified table
+ * in `HANDOFF.md`. The network’s population is in the **old** database, which is
+ * where that table’s `rede` column came from.
  *
- * What *does* exist is the **7-day windowed** conversion, and it is already
- * watched continuously by the `funnel.network_to_survival` check from S6.3. So
- * the signal is not absent from the system — it is absent from *this series*.
+ * ## Why this is `null` and not a best-effort number
+ *
+ * The conversion `rede → survival` computed from `plan_users` was Survival ÷
+ * Survival: close to 100%, plausible, and unable to move if the entire network
+ * vanished. That is the same class of number as the 4500% this module published
+ * twice — high, believable and false — and the project rule that settles it is
+ * the one in §6.1: a collection gap never becomes a zero **nor a healthy value**.
+ *
+ * **Trigger to revisit:** a source that counts arrivals at the *proxy*. The old
+ * database is one candidate; `/v1/networkMetadata` and `/v1/playersTable` have
+ * never been read for this purpose. Until one exists, saying “não sei” is the
+ * only answer this step is entitled to.
  */
-export const SURVIVAL_STEP_UNAVAILABLE =
-  'Serie diaria de chegadas ao servidor ainda sem fonte: o payload de ' +
-  '`/v1/graph?type=uniqueAndNew` nunca foi observado, e `plan_user_info` ' +
-  'pertence a excecao 1 do ADR-002 (modulo de coorte, S8.2). A conversao ' +
-  'rede->servidor em janela de 7 dias existe e e vigiada pelo check ' +
-  '`funnel.network_to_survival`.';
+export const NETWORK_STEP_UNAVAILABLE =
+  'A populacao da rede nao esta nesta fonte: `plan_users` guarda o Survival — ' +
+  'o proxy tem zero jogadores em `plan_user_info`, e as contagens mensais ' +
+  'batem exatamente com a coluna `survival` dos numeros verificados (medido em ' +
+  '2026-08-31). Publicar este degrau a partir dela daria uma conversao ' +
+  'rede->survival de Survival dividido por Survival, perto de 100%, incapaz de ' +
+  'cair com a rede inteira fora do ar. Sem fonte de chegadas no proxy, este ' +
+  'degrau fica sem numero.';
+
+/**
+ * What the `survival` step is actually counting, carried with every series.
+ *
+ * Not a footnote in a docblock: this string travels in `FunnelSourceState` so a
+ * consumer rendering the chart has the caveat in hand. Two things it says, and
+ * both matter.
+ *
+ * 1. **The table is `plan_users`, not `plan_user_info`.** The latter is the one
+ *    that records registration *per server* and would settle the question by
+ *    schema; it is **exception 1** of ADR-002, scoped to the cohort module of
+ *    story S8.2, and reaching for it here would widen an exception belonging to
+ *    another story.
+ * 2. **So the Survival identity is empirical, not guaranteed.** It rests on the
+ *    2026-08-31 measurement — eight months matching to the row, zero proxy
+ *    players. If the proxy ever starts registering into `plan_users`, or the old
+ *    database is merged in, this series becomes network-wide again and the
+ *    `survival` label would begin to **overstate** arrivals, silently. The
+ *    counter-signal is cheap and already collected: `plan.orphan_instance` and
+ *    `plan.proxy_registration_alive` both watch this catalogue.
+ *
+ * Stated rather than assumed because the alternative — dropping a measured
+ * 26-month series (`coversFrom` = 2024-06-02) because its label needed a
+ * caveat — loses more than it protects, and the owner made the same call for the
+ * cohorts of S8.2 on this same population.
+ */
+export const SURVIVAL_STEP_PROVENANCE =
+  'Contagem de `plan_users` (ADR-002 excecao 2). A tabela e a de identidade da ' +
+  'rede, mas nesta instalacao guarda so o Survival — medido em 2026-08-31: zero ' +
+  'jogadores no proxy e oito meses batendo linha a linha com a coluna ' +
+  '`survival` dos numeros verificados. E coincidencia medida, nao garantia de ' +
+  'schema: `plan_user_info`, que registraria por servidor, e a excecao 1 do ' +
+  'ADR-002 e pertence a S8.2.';
 
 /**
  * A count that may be absent, and says which.

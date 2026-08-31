@@ -57,7 +57,7 @@ function planDbWith({
         ? Promise.reject(new Error('mysql fora do ar'))
         : Promise.resolve(earliestAt),
     ),
-    networkArrivalsBetween: between,
+    registeredPlayersBetween: between,
   } as unknown as PlanDatabase;
 }
 
@@ -103,6 +103,77 @@ function countOf(
 }
 
 describe('FunnelService', () => {
+  describe('the step `plan_users` feeds — relabelled 2026-08-31', () => {
+    it('never publishes a number for `rede`, whatever the source returns', async () => {
+      // The regression this whole change exists for. `plan_users` is the
+      // Survival: publishing it as `rede` made the conversion below Survival
+      // divided by Survival — near 100%, and unable to fall with the entire
+      // network gone.
+      const service = new FunnelService(
+        planDbWith({
+          arrivals: [
+            { uuid: PREMIUM, registeredAt: MARCH_10_NOON },
+            { uuid: BEDROCK, registeredAt: MARCH_10_EVENING },
+          ],
+        }),
+        tutorialWith({}),
+      );
+
+      const series = await service.series(
+        FunnelGranularity.Daily,
+        '2026-03-10',
+        '2026-03-10',
+      );
+
+      const rede = countOf(series.buckets[0], FunnelStep.Network);
+      expect(rede?.value).toBeNull();
+      // Absent with a reason, never absent silently.
+      expect(
+        (rede as { unavailableReason?: string }).unavailableReason,
+      ).toContain('plan_users');
+    });
+
+    it('refuses the rede -> survival conversion instead of returning ~100%', async () => {
+      const service = new FunnelService(
+        planDbWith({
+          arrivals: [
+            { uuid: PREMIUM, registeredAt: MARCH_10_NOON },
+            { uuid: BEDROCK, registeredAt: MARCH_10_EVENING },
+          ],
+        }),
+        tutorialWith({}),
+      );
+
+      const series = await service.series(
+        FunnelGranularity.Daily,
+        '2026-03-10',
+        '2026-03-10',
+      );
+
+      const conversion = series.buckets[0].conversions.find(
+        (c) => c.from === FunnelStep.Network && c.to === FunnelStep.Survival,
+      );
+      expect(conversion?.percent).toBeNull();
+      expect(conversion?.n).toBeNull();
+    });
+
+    it('carries the provenance caveat of `plan_users` in the payload', async () => {
+      // Not only in a docblock: whoever renders the `survival` step has to be
+      // able to read that this is `plan_users`, and that its Survival identity
+      // is a measurement rather than a schema guarantee.
+      const service = new FunnelService(planDbWith({}), tutorialWith({}));
+
+      const series = await service.series(
+        FunnelGranularity.Daily,
+        '2026-03-10',
+        '2026-03-10',
+      );
+
+      const source = series.sources.find((s) => s.name === 'plan_users');
+      expect(source?.provenance).toContain('plan_user_info');
+    });
+  });
+
   describe('the series covers the whole range, not just the days with data', () => {
     it('emits a bucket per day even when nothing happened', async () => {
       // Deriving buckets from the rows that came back would make a collection
@@ -140,7 +211,7 @@ describe('FunnelService', () => {
     });
   });
 
-  describe('the network step', () => {
+  describe('the survival step', () => {
     it('buckets arrivals by São Paulo day, not by UTC', async () => {
       // A 21:00 BRT arrival is 00:00 UTC the next day. Bucketing in UTC would
       // push every Brazilian evening — the busiest hours — into the next day.
@@ -161,8 +232,8 @@ describe('FunnelService', () => {
         '2026-03-11',
       );
 
-      expect(countOf(series.buckets[0], FunnelStep.Network)?.value).toBe(2);
-      expect(countOf(series.buckets[1], FunnelStep.Network)?.value).toBe(1);
+      expect(countOf(series.buckets[0], FunnelStep.Survival)?.value).toBe(2);
+      expect(countOf(series.buckets[1], FunnelStep.Survival)?.value).toBe(1);
     });
 
     it('filters by platform from the uuid alone (ADR-003)', async () => {
@@ -184,7 +255,7 @@ describe('FunnelService', () => {
         Platform.Bedrock,
       );
 
-      expect(countOf(series.buckets[0], FunnelStep.Network)?.value).toBe(2);
+      expect(countOf(series.buckets[0], FunnelStep.Survival)?.value).toBe(2);
     });
 
     it('reports a measured zero when the source answered and nobody came', async () => {
@@ -196,7 +267,7 @@ describe('FunnelService', () => {
         '2026-03-10',
       );
 
-      expect(countOf(series.buckets[0], FunnelStep.Network)?.value).toBe(0);
+      expect(countOf(series.buckets[0], FunnelStep.Survival)?.value).toBe(0);
       expect(series.sources.find((s) => s.name === 'plan_users')?.ok).toBe(
         true,
       );
@@ -216,7 +287,7 @@ describe('FunnelService', () => {
         '2026-03-10',
       );
 
-      expect(countOf(series.buckets[0], FunnelStep.Network)?.value).toBeNull();
+      expect(countOf(series.buckets[0], FunnelStep.Survival)?.value).toBeNull();
       const state = series.sources.find((s) => s.name === 'plan_users');
       expect(state?.ok).toBe(false);
       expect(state?.failure).toBe('query_failed');
@@ -234,7 +305,7 @@ describe('FunnelService', () => {
         '2026-03-10',
       );
 
-      expect(countOf(series.buckets[0], FunnelStep.Network)?.value).toBeNull();
+      expect(countOf(series.buckets[0], FunnelStep.Survival)?.value).toBeNull();
       expect(series.sources.find((s) => s.name === 'plan_users')?.failure).toBe(
         'not_configured',
       );
@@ -319,7 +390,7 @@ describe('FunnelService', () => {
   });
 
   describe('the two sources fail independently', () => {
-    it('keeps the tutorial steps when the network source is down', async () => {
+    it('keeps the tutorial steps when the survival source is down', async () => {
       // A funnel that went blank because one of two databases blinked would be
       // less useful than one that says which half it still has.
       const service = new FunnelService(
@@ -342,13 +413,13 @@ describe('FunnelService', () => {
         '2026-03-10',
       );
 
-      expect(countOf(series.buckets[0], FunnelStep.Network)?.value).toBeNull();
+      expect(countOf(series.buckets[0], FunnelStep.Survival)?.value).toBeNull();
       expect(
         countOf(series.buckets[0], FunnelStep.TutorialEntered)?.value,
       ).toBe(7);
     });
 
-    it('keeps the network step when the tutorial source is down', async () => {
+    it('keeps the survival step when the tutorial source is down', async () => {
       const service = new FunnelService(
         planDbWith({
           arrivals: [{ uuid: PREMIUM, registeredAt: MARCH_10_NOON }],
@@ -362,7 +433,7 @@ describe('FunnelService', () => {
         '2026-03-10',
       );
 
-      expect(countOf(series.buckets[0], FunnelStep.Network)?.value).toBe(1);
+      expect(countOf(series.buckets[0], FunnelStep.Survival)?.value).toBe(1);
       expect(
         countOf(series.buckets[0], FunnelStep.TutorialEntered)?.value,
       ).toBeNull();
@@ -425,14 +496,14 @@ describe('FunnelService', () => {
     });
   });
 
-  describe('the network source does not speak for the whole past', () => {
+  describe('the survival source does not speak for the whole past', () => {
     it('reports null — not zero — before the table starts', async () => {
       // `plan_users` lost the proxy's history in the 2026-08-20 unification, so
       // it is only days deep. A query for March SUCCEEDS and returns nothing,
-      // and reading that as a measured zero would publish `rede: 0` for a month
+      // and reading that as a measured zero would publish `survival: 0` for a month
       // when thousands connected — beside a tutorial step whose ETL reads plugin
       // files going back to 2025. The funnel would show more people entering the
-      // tutorial than reaching the network.
+      // tutorial than reaching the survival.
       const service = new FunnelService(
         planDbWith({
           earliestAt: Date.parse('2026-03-09T00:00:00-03:00'),
@@ -448,12 +519,12 @@ describe('FunnelService', () => {
       );
 
       // Before coverage: no source, with a reason.
-      expect(countOf(series.buckets[0], FunnelStep.Network)?.value).toBeNull();
-      expect(countOf(series.buckets[1], FunnelStep.Network)?.value).toBeNull();
+      expect(countOf(series.buckets[0], FunnelStep.Survival)?.value).toBeNull();
+      expect(countOf(series.buckets[1], FunnelStep.Survival)?.value).toBeNull();
       // Inside coverage and genuinely empty: a measured zero.
-      expect(countOf(series.buckets[2], FunnelStep.Network)?.value).toBe(0);
+      expect(countOf(series.buckets[2], FunnelStep.Survival)?.value).toBe(0);
       // Inside coverage, with arrivals.
-      expect(countOf(series.buckets[3], FunnelStep.Network)?.value).toBe(1);
+      expect(countOf(series.buckets[3], FunnelStep.Survival)?.value).toBe(1);
     });
 
     it('publishes where the coverage starts, rounded up to a whole day', async () => {
@@ -511,15 +582,15 @@ describe('FunnelService', () => {
         '2026-08-21',
       );
 
-      expect(countOf(series.buckets[0], FunnelStep.Network)?.value).toBeNull();
+      expect(countOf(series.buckets[0], FunnelStep.Survival)?.value).toBeNull();
       // The boundary day itself: partial, so not a total.
-      expect(countOf(series.buckets[1], FunnelStep.Network)?.value).toBeNull();
+      expect(countOf(series.buckets[1], FunnelStep.Survival)?.value).toBeNull();
       // And the 4500% cannot be built from it.
       for (const conversion of series.buckets[1].conversions) {
         expect(conversion.percent).not.toBe(4500);
       }
       // The first whole day is counted.
-      expect(countOf(series.buckets[2], FunnelStep.Network)?.value).toBe(0);
+      expect(countOf(series.buckets[2], FunnelStep.Survival)?.value).toBe(0);
       expect(
         series.sources.find((s) => s.name === 'plan_users')?.coversFrom,
       ).toBe('2026-08-21');
@@ -538,7 +609,7 @@ describe('FunnelService', () => {
         '2026-08-20',
       );
 
-      expect(countOf(series.buckets[0], FunnelStep.Network)?.value).toBe(0);
+      expect(countOf(series.buckets[0], FunnelStep.Survival)?.value).toBe(0);
     });
 
     it('treats a PARTIALLY covered month as uncovered', async () => {
@@ -578,13 +649,13 @@ describe('FunnelService', () => {
 
       const [july, august, september] = series.buckets;
       expect(july.bucket).toBe('2026-07');
-      expect(countOf(july, FunnelStep.Network)?.value).toBeNull();
+      expect(countOf(july, FunnelStep.Survival)?.value).toBeNull();
       // August is only covered from the 20th, so it cannot be totalled.
       expect(august.bucket).toBe('2026-08');
-      expect(countOf(august, FunnelStep.Network)?.value).toBeNull();
+      expect(countOf(august, FunnelStep.Survival)?.value).toBeNull();
       // September is the first month the source knows in full.
       expect(september.bucket).toBe('2026-09');
-      expect(countOf(september, FunnelStep.Network)?.value).toBe(0);
+      expect(countOf(september, FunnelStep.Survival)?.value).toBe(0);
     });
 
     it('counts a month fully when coverage starts on its first day', async () => {
@@ -599,7 +670,7 @@ describe('FunnelService', () => {
         '2026-08-31',
       );
 
-      expect(countOf(series.buckets[0], FunnelStep.Network)?.value).toBe(0);
+      expect(countOf(series.buckets[0], FunnelStep.Survival)?.value).toBe(0);
     });
 
     it('rolls a december boundary into the next year', async () => {
@@ -614,8 +685,8 @@ describe('FunnelService', () => {
         '2027-01-31',
       );
 
-      expect(countOf(series.buckets[0], FunnelStep.Network)?.value).toBeNull();
-      expect(countOf(series.buckets[1], FunnelStep.Network)?.value).toBe(0);
+      expect(countOf(series.buckets[0], FunnelStep.Survival)?.value).toBeNull();
+      expect(countOf(series.buckets[1], FunnelStep.Survival)?.value).toBe(0);
     });
 
     it('treats an empty table as covering nothing, not everything', async () => {
@@ -630,7 +701,7 @@ describe('FunnelService', () => {
         '2026-03-10',
       );
 
-      expect(countOf(series.buckets[0], FunnelStep.Network)?.value).toBeNull();
+      expect(countOf(series.buckets[0], FunnelStep.Survival)?.value).toBeNull();
     });
   });
 

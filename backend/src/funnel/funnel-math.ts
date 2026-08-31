@@ -1,7 +1,7 @@
 import {
   FunnelStep,
   FUNNEL_STEPS,
-  SURVIVAL_STEP_UNAVAILABLE,
+  NETWORK_STEP_UNAVAILABLE,
   type Conversion,
   type FunnelBucket,
   type StepCount,
@@ -17,8 +17,24 @@ import {
 
 /** Counts a caller has for one bucket. `null` means "no source", never zero. */
 export interface RawCounts {
+  /**
+   * Always `null` today — see `NETWORK_STEP_UNAVAILABLE`.
+   *
+   * Kept in the shape rather than deleted because the step is still published,
+   * and a caller that one day finds a proxy-side source fills this in and
+   * nothing else here changes.
+   */
   network: number | null;
   survival: number | null;
+  /**
+   * Why `survival` is `null` in **this** bucket, when it is.
+   *
+   * Per bucket, not per read, because the reasons differ inside one successful
+   * response: the source can answer for August and cover nothing in March. A
+   * single response-level reason would attach "a fonte falhou" to a bucket the
+   * source simply does not reach back to.
+   */
+  survivalUnavailableReason?: string;
   tutorialEntered: number | null;
   tutorialCompleted: number | null;
 }
@@ -28,14 +44,24 @@ export interface RawCounts {
  *
  * ## Why conversions skip over a missing step instead of stopping
  *
- * The `survival` step has no source yet, and a chain that gave up at the first
- * gap would publish nothing at all — including `rede → tutorial_entrou`, which
- * is fully measurable today and is the comparison that would have caught the
- * eight-month outage.
+ * The `rede` step has no source, and a chain that gave up at the first gap would
+ * publish nothing at all — including `survival → tutorial_entrou`, which is
+ * fully measurable today and is the comparison whose collapse went unnoticed for
+ * eight months.
  *
- * So each *consecutive* pair is reported (with a reason where it cannot be
- * computed), and the pairs that bridge the gap are reported too. The bridging
- * conversion is marked so nobody reads it as an adjacent step.
+ * So each *consecutive* pair is reported, with a reason where it cannot be
+ * computed. `rede → survival` is one of those pairs and comes back `null` with
+ * `NETWORK_STEP_UNAVAILABLE` as its reason — which is the point of this change:
+ * it used to come back near 100%, because both sides were the Survival.
+ *
+ * ## The `rede → tutorial_entrou` bridge was removed on 2026-08-31
+ *
+ * It existed to reach over a `survival` step that had no source, so the
+ * tutorial's capture rate could still be seen against *something*. The two steps
+ * swapped roles: `survival` now carries the numbers and is **adjacent** to
+ * `tutorial_entrou`, so the bridge would only ever restate a consecutive pair —
+ * and, with `rede` permanently `null`, restate it as a null. A conversion that
+ * can never be computed is not caution, it is a field consumers learn to ignore.
  */
 export function buildBucket(bucket: string, raw: RawCounts): FunnelBucket {
   const counts = toStepCounts(raw);
@@ -48,23 +74,13 @@ export function buildBucket(bucket: string, raw: RawCounts): FunnelBucket {
     );
   }
 
-  // The one bridge worth publishing: with `survival` missing, this is the only
-  // way to see the tutorial's capture rate against arrivals at all, and it is
-  // the number whose collapse went unnoticed for eight months.
-  conversions.push(
-    convert(
-      byStep.get(FunnelStep.Network),
-      byStep.get(FunnelStep.TutorialEntered),
-    ),
-  );
-
   return { bucket, counts, conversions };
 }
 
 function toStepCounts(raw: RawCounts): StepCount[] {
   return [
-    step(FunnelStep.Network, raw.network),
-    step(FunnelStep.Survival, raw.survival, SURVIVAL_STEP_UNAVAILABLE),
+    step(FunnelStep.Network, raw.network, NETWORK_STEP_UNAVAILABLE),
+    step(FunnelStep.Survival, raw.survival, raw.survivalUnavailableReason),
     step(FunnelStep.TutorialEntered, raw.tutorialEntered),
     step(FunnelStep.TutorialCompleted, raw.tutorialCompleted),
   ];
@@ -73,10 +89,11 @@ function toStepCounts(raw: RawCounts): StepCount[] {
 function step(
   name: FunnelStep,
   value: number | null,
-  reason = 'sem fonte para este degrau no periodo',
+  reason: string | undefined = undefined,
 ): StepCount {
+  const explanation = reason ?? 'sem fonte para este degrau no periodo';
   return value === null
-    ? { step: name, value: null, unavailableReason: reason }
+    ? { step: name, value: null, unavailableReason: explanation }
     : { step: name, value };
 }
 

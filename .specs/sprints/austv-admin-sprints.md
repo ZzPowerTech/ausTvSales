@@ -12,7 +12,7 @@
 | `ausPlanBridge` (plugin Java) | **adiado para v2** | ADR-007 — economia já está em banco; **zero Java na v1** |
 | S6 = instalar e validar contrato | S6 = **unificar bancos + saúde + baseline** | Plan já instalado, em dois bancos, e já ficou 3 meses morto sem ninguém ver |
 | Saúde da instrumentação: inexistente | **PR 1, antes de qualquer gráfico** | ADR-006 |
-| Funil: só tutorial | **4 degraus** (rede → survival → tutorial → retenção) | descoberta do degrau de 54% |
+| Funil: só tutorial | **4 degraus** (rede → survival → tutorial → retenção) — o `rede` sem fonte desde 2026-08-31 | descoberta do degrau de 54% |
 | 104 SP / 8 sprints | **105 SP / 7 sprints** | o total caiu com a S7 eliminada, mas subiu com S6.0, S6.2b e a camada de saúde |
 
 Capacidade planejada 13 SP/semana. **Medir a S6 e recalibrar** — se a velocidade real for 6–8 SP,
@@ -431,8 +431,8 @@ existe para impedir.
 ### S8.1 — Módulo `funnel` · 8 SP · `feat/api-funnel`
 
 1. [~] Série diária e mensal de `rede → survival → tutorial_entrou → tutorial_concluiu` — **três dos
-   quatro degraus**. O `survival` está no contrato de todo bucket, mas sem números e **com o motivo
-   escrito**; ver o bloco abaixo
+   quatro degraus**. Até 2026-08-31 o degrau sem números era o `survival`; medido, é o **`rede`**, e
+   os dois trocaram de lugar sem que nenhuma contagem mudasse. Ver o bloco abaixo
 2. [x] Cada degrau segmentável por `platform` (ADR-003, direto do UUID) — exigiu ler
    `plan_users.uuid`, uma **extensão da exceção 2 do ADR-002** registrada lá e pendente do dono
 3. [x] **`n` retornado junto de todo percentual** — imposto pela *forma*: `percent` e `n` são um par
@@ -444,26 +444,33 @@ existe para impedir.
 5. [~] Agregação pesada em job **fora do pico**; falha mantém último resultado válido, datado — ver
    a justificativa abaixo
 
-> #### ⚠️ O degrau `survival` ficou sem série diária, e isso é uma lacuna real
+> #### 🔴 O degrau vazio é o `rede`, não o `survival` — corrigido em 2026-08-31
 >
-> É o degrau cuja descoberta abriu o épico — **54% de quem conecta na rede nunca chega ao
-> survival** —, então vale dizer alto em vez de deixar alguém notar.
+> ~~O degrau `survival` ficou sem série diária.~~ Estava invertido, e o bloco original apontava para
+> as fontes erradas.
 >
-> Uma **série diária** de chegadas a um backend precisa de uma de duas fontes, e nenhuma está ao
-> alcance desta história:
+> **O que se mediu.** `plan_users`, que alimentava o degrau `rede`, guarda o **Survival**: o proxy
+> (`AusTv`, `is_proxy = 1`) tem **zero** jogadores em `plan_user_info`, `Survival` é o único servidor
+> que aparece lá (5575 de 5638 linhas), e as contagens mensais da tabela são a coluna `survival` dos
+> números verificados **linha a linha**, nos oito meses. Detalhe no
+> [`HANDOFF.md`](../features/austv-admin/HANDOFF.md).
 >
-> 1. **`/v1/graph?type=uniqueAndNew`** — o endpoint certo, mas **ninguém observou o payload dele**.
->    Escrever parser contra forma imaginada é o erro que fez a S6.2 ser escrita, mergeada e
->    revertida, e é a regra sob a qual os adapters da S7.2 foram construídos.
-> 2. **`plan_user_info`**, que registra a entrada por servidor — mas essa tabela é a **exceção 1** do
->    ADR-002, escopada ao módulo de coorte da **S8.2**. Puxá-la aqui seria alargar uma exceção que
->    pertence a outra história.
+> **O que mudou no código:** os rótulos, e só. `rede` saiu `null` com motivo; a mesma contagem passa
+> a alimentar `survival`, com a procedência no payload (`sources[].provenance`), dizendo que a
+> tabela é `plan_users` e que a identidade Survival dela é coincidência medida, não garantia de
+> schema — `plan_user_info` continua sendo a **exceção 1** do ADR-002 e pertence à S8.2.
 >
-> **O sinal não sumiu do sistema, só desta série:** a conversão rede→servidor em janela de 7 dias
-> existe e é vigiada continuamente pelo check `funnel.network_to_survival` desde a S6.3.
+> **O que isso conserta não é uma contagem, é uma conversão.** `rede → survival` era Survival ÷
+> Survival: perto de 100%, plausível, e incapaz de cair com a rede inteira apagada. Mesma classe do
+> 4500% que este módulo já publicou duas vezes.
 >
-> Fechar isto é observar o corpo do `/v1/graph` numa instância viva — trabalho de minutos com acesso,
-> impossível sem ele.
+> **O sinal não estava vigiado em lugar nenhum**, ao contrário do que este bloco dizia: o check
+> `funnel.network_to_survival` dividia as mesmas duas populações e reportaria `ok` com a rede
+> desaparecida. Ele passou a `no_data` com o motivo — ver §6.1 do spec.
+>
+> **Fechar isto** deixou de ser "observar o corpo do `/v1/graph`" e passou a ser **achar uma fonte de
+> chegadas no proxy**: nem a API nem o banco autorizado hoje têm essa população. O banco antigo é
+> candidato; `/v1/networkMetadata` e `/v1/playersTable` nunca foram lidos com esse fim.
 >
 > #### Sobre o critério 5: metade entregue, metade não
 >
@@ -493,16 +500,20 @@ existe para impedir.
 > *"Funil reproduz os números conhecidos: ~54% rede→survival, ~100% de entrada no tutorial antes de
 > dez/2025."*
 >
-> - **~54% rede→survival** — o degrau `survival` não tem série diária (bloco acima).
-> - **~100% antes de dez/2025** — igualmente impossível, e por um motivo diferente: `plan_users`
->   **perdeu o histórico do proxy** na unificação de 2026-08-20 (`HANDOFF.md`, "Restrição nova para
->   o baseline da campanha"). Não há denominador de rede anterior a essa data, então a taxa de
->   dez/2025 não tem como ser calculada a partir desta fonte.
+> - **~54% rede→survival** — o degrau `rede` não tem fonte (bloco acima). Continua bloqueado, e
+>   agora por um motivo medido em vez de suposto.
+> - **~100% antes de dez/2025** — ~~igualmente impossível~~. **Destravou em 2026-08-31.** A premissa
+>   desta linha era que `plan_users` **perdeu o histórico do proxy** na unificação de 2026-08-20;
+>   medido, `coversFrom` é **2024-06-02**, e o que a tabela nunca teve não é profundidade, é a
+>   população do proxy. Esta metade não precisa dela: `~100%` é **tutorial ÷ survival**, e
+>   `survival` é justamente o degrau que a tabela alimenta. Nov/2025 dá `694 / 682 = 101,8%`.
+>   **Calculável; ainda não rodado contra produção.**
 >
-> O funil **não finge** conseguir: buckets anteriores à cobertura de `plan_users` saem com `rede:
-> null` e motivo, nunca com um zero medido. Sem essa guarda, o período default mensal publicaria
-> doze meses de `rede: 0` ao lado de números reais de tutorial — um funil onde mais gente entra no
-> tutorial do que conecta na rede.
+> O funil **não finge** conseguir: buckets anteriores à cobertura de `plan_users` saem com
+> `survival: null` e motivo, nunca com um zero medido — e o degrau `rede` sai `null` em todo bucket,
+> sempre, porque nenhuma fonte tem essa população. Sem a guarda de cobertura, o período default
+> mensal publicaria doze meses de `survival: 0` ao lado de números reais de tutorial — um funil onde
+> mais gente entra no tutorial do que chega ao servidor.
 
 ### S8.2 — Retenção D1/D7/D30 por coorte e plataforma · 5 SP · `feat/api-cohort-retention`
 
@@ -630,19 +641,27 @@ existe para impedir.
       meses. O bloqueio real é que **a população da rede não está neste banco**; está no antigo,
       de onde veio a coluna `rede` daquela tabela.
 
-      Consequência que não é só de DoD: o degrau `rede` do funil mede Survival com outro nome, e
-      o check `funnel.network_to_survival` divide Survival por Survival — ele reportaria `ok`
-      com a rede inteira desaparecida. Detalhe no
-      [`HANDOFF.md`](../features/austv-admin/HANDOFF.md).
+      ✅ **Os dois defeitos que isso expôs foram corrigidos em 2026-08-31.** O degrau `rede`
+      passou a `null` com motivo e a contagem de `plan_users` passou a alimentar o degrau
+      `survival`, com a procedência no payload; o `funnel.network_to_survival` parou de dividir
+      Survival por Survival e passou a `no_data` com o motivo, sem tocar no banco nem no Plan.
+      A meta de ~54% **continua bloqueada** — nada disso cria a população do proxy. Detalhe no
+      [`HANDOFF.md`](../features/austv-admin/HANDOFF.md) e na §6.2 do spec.
 
       A segunda metade merece a conta explícita, porque é fácil errar o denominador — e a primeira
       versão desta linha errou. O `~100%` sai de **tutorial ÷ survival**, não de tutorial ÷ rede.
       Na tabela de números verificados do `HANDOFF.md`, nov/2025: `694 / 682 = 101,8%` ✅, enquanto
       `694 / 1403 = 49,5%`, que não é "~100%".
 
-      Consequência prática: esta metade depende do degrau `survival`, que é o bloqueio mais duro
-      e sem dono — o payload de `/v1/graph?type=uniqueAndNew` nunca foi observado. Esse
-      bloqueio é real e independente da dúvida acima.
+      ✅ **E esta metade destravou em 2026-08-31, pelo mesmo motivo que a primeira travou.** Ela
+      depende do degrau `survival`, que agora **tem** números — `694 / 682 = 101,8%` para
+      nov/2025 é exatamente o par consecutivo `survival → tutorial_entrou` que o endpoint passou
+      a publicar. O bloqueio alegado antes (`/v1/graph?type=uniqueAndNew` nunca observado) caiu
+      junto: a fonte é `plan_users`, que já estava aqui.
+
+      **Calculável não é calculado.** Ninguém rodou isto contra produção, e é o mesmo passo que a
+      S6.2b e a S6.3 deixaram em aberto — o que exige tocar um ambiente real. Marcar esta linha
+      exige rodar `/api/funnel/monthly` e conferir o par de nov/2025.
 
       A data de **2026-09-19** que aparecia aqui saía da suposição sobre `plan_users`, não de
       uma leitura, e não deve ser citada como prazo de nada.
@@ -665,7 +684,7 @@ existe para impedir.
 | história | estado |
 |---|---|
 | **S8.0** — Fonte de dados do tutorial | ✅ **entregue** (PRs #168, #169). Fecha também o 7º check da §6.1 e o critério 5 da S6.3 |
-| **S8.1** — Módulo `funnel` | ✅ **entregue** (PR #170), com o degrau `survival` declarado sem fonte e o motivo no payload |
+| **S8.1** — Módulo `funnel` | ✅ **entregue** (PR #170). Corrigida em 2026-08-31: o degrau sem fonte é o **`rede`**, não o `survival` — os dois trocaram de lugar quando se mediu que `plan_users` é o Survival |
 | **S8.2** — Retenção por coorte | 🛑 **não iniciada** — três pré-requisitos abertos, ver o bloco dela |
 
 **Recomendação: mover a S8.2 para a S9**, que é a válvula de escape que o próprio plano nomeia

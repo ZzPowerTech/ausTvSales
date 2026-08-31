@@ -9,7 +9,7 @@ const DEFAULT_MAX_SILENCE_HOURS = 24;
 const MS_PER_HOUR = 3_600_000;
 
 /**
- * Is the network still registering anyone? (spec §6.1)
+ * Is anyone still being registered in `plan_users`? (spec §6.1)
  *
  * ## The check the spec names by table
  *
@@ -22,12 +22,27 @@ const MS_PER_HOUR = 3_600_000;
  * `serverOverview` returns `numbers: {}`. Verified against production on
  * 2026-08-23.
  *
- * ## The disaster it exists for
+ * ## ⚠️ It does not watch the proxy, and its name says it does
  *
- * The proxy's Plan stopped collecting from **May to August 2026** and nobody
- * noticed for three months. Acquisition — the top of the funnel, the number every
- * campaign is judged by — was simply absent, and the dashboards that existed had
- * no way to say so.
+ * The disaster on record is the proxy's Plan collecting nothing from **May to
+ * August 2026**, unnoticed for three months. This check was written for that.
+ * Measured on 2026-08-31, it cannot see it: `plan_users` holds the **Survival**
+ * in this installation — zero proxy players in `plan_user_info`, and eight
+ * months of monthly counts matching the `survival` column of `HANDOFF.md` to the
+ * row. Through the very outage it was built for, the verified table shows the
+ * proxy dead (`Plan morto`) while Survival kept registering 106 players in
+ * 2026-06. Registration silence here would have stayed at zero hours.
+ *
+ * What it *does* watch is real and worth watching: registration on this Plan
+ * installation going quiet, which is the Survival's acquisition and the same
+ * founding disaster one level down. So it keeps running, and the summaries below
+ * say Survival rather than "rede".
+ *
+ * `HealthCheckName.ProxyRegistrationAlive` is **not** renamed with them: the
+ * string is persisted and is the join key of this check's own history. Renaming
+ * it would split the series in two and silently reset the alert policy's memory
+ * of what the channel was last told. Whether the identifier should change is a
+ * decision for the owner, alongside finding an actual proxy-side source.
  *
  * ## Why silence, not a count
  *
@@ -55,7 +70,7 @@ export class ProxyRegistrationAliveCheck implements HealthCheck {
   async run(): Promise<HealthCheckObservation[]> {
     let arrivals;
     try {
-      arrivals = await this.db.networkArrivals();
+      arrivals = await this.db.registeredPlayers();
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       return [
@@ -148,7 +163,8 @@ export class ProxyRegistrationAliveCheck implements HealthCheck {
       observed: silenceHours,
       threshold: thresholdHours,
       // The population behind the verdict. The rule is that no number is
-      // published without its base, and the base here is the whole network.
+      // published without its base, and the base here is every row of
+      // `plan_users` — the Survival's players, not the network's.
       n: arrivals.total,
       context: {
         ultimo_registro: new Date(arrivals.lastRegisteredAt).toISOString(),
@@ -163,8 +179,10 @@ export class ProxyRegistrationAliveCheck implements HealthCheck {
           detail: {
             ...common,
             summary:
-              `Nenhum jogador novo registrado na rede ha ${silenceHours}h ` +
-              `(limite ${thresholdHours}h) — a coleta do proxy pode ter parado`,
+              `Nenhum jogador novo registrado em plan_users ha ${silenceHours}h ` +
+              `(limite ${thresholdHours}h) — a coleta do Survival pode ter ` +
+              'parado. NAO cobre o proxy: esta tabela guarda o Survival nesta ' +
+              'instalacao (medido em 2026-08-31).',
           },
         },
       ];
@@ -176,7 +194,7 @@ export class ProxyRegistrationAliveCheck implements HealthCheck {
         status: 'ok',
         detail: {
           ...common,
-          summary: `Ultimo registro de rede ha ${silenceHours}h`,
+          summary: `Ultimo registro em plan_users (Survival) ha ${silenceHours}h`,
         },
       },
     ];

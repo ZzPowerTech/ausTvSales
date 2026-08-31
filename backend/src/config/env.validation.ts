@@ -371,21 +371,27 @@ export class EnvironmentVariables {
   @Max(720)
   PROXY_REGISTRATION_MAX_SILENCE_HOURS?: number;
 
-  // Piso da conversao rede -> servidor, de 0 a 1. Historicamente ~0,46 (54% de
-  // quem conecta na rede nunca chega ao survival). PRECISA de calibracao: 0.3 e
-  // margem conservadora abaixo do historico, nao uma medida.
+  // ⚠️ INERTE desde 2026-08-31, e mantida de proposito.
   //
-  // A janela e fixa em 7 dias e NAO e configuravel: o Plan so oferece
-  // `last_7_days` neste endpoint, e uma janela ajustavel deixaria alguem
-  // comparar numerador de 30 dias com denominador de 7.
+  // `funnel.network_to_survival` nao calcula mais razao nenhuma: o denominador
+  // (`plan_users`) e a mesma populacao do numerador (`serverOverview` do
+  // Survival), medido no dia. Nenhum codigo le esta variavel hoje.
+  //
+  // Ela fica aqui porque a validacao roda contra o `.env` implantado, e remover
+  // a chave transformaria um deploy existente num erro de boot para calibrar um
+  // limiar que ninguem esta usando. Ao restaurar o check com uma fonte de rede
+  // de verdade, o limiar volta a valer — e continua PRECISANDO de calibracao:
+  // 0.3 e margem conservadora abaixo do historico (~0,46), nao uma medida.
   @IsOptional()
   @IsNumber()
   @Min(0)
   @Max(1)
   FUNNEL_MIN_NETWORK_TO_SERVER?: number;
 
-  // Abaixo desta quantidade de chegadas de rede na janela, nenhuma conversao e
-  // publicada — razao sobre amostra pequena e ruido lido como tendencia.
+  // Abaixo desta quantidade de chegadas na janela, nenhuma razao e publicada —
+  // razao sobre amostra pequena e ruido lido como tendencia. Lida hoje pelo
+  // `funnel.tutorial_entry_rate`; era compartilhada com o
+  // `funnel.network_to_survival` ate ele parar de publicar razao.
   @IsOptional()
   @IsInt()
   @Min(1)

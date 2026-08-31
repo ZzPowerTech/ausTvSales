@@ -115,7 +115,7 @@ provar que o alerta chega. Ver o bloco abaixo — a distinção importa mais que
 **AusTV Admin S8 — S8.0 e S8.1 entregues; S8.2 não iniciada.** A fonte do tutorial existe
 ([ADR-0004](.specs/decisions/ADR-0004-fonte-dados-tutorial.md): ETL noturno sobre
 `Quests/playerdata`), o 7º check da §6.1 fechou o conjunto, e o módulo `funnel` publica três dos
-quatro degraus. **O `[CORTE]` foi exercido:** a S8.2 (retenção por coorte) moveu para a S9 —
+quatro degraus — desde 2026-08-31 o degrau vazio é o **`rede`**, não o `survival`. **O `[CORTE]` foi exercido:** a S8.2 (retenção por coorte) moveu para a S9 —
 não por capacidade, mas por três pré-requisitos abertos, o primeiro deles ler o `/v1/retention`
 antes de abrir a exceção 1 do ADR-002.
 
@@ -138,17 +138,28 @@ sprints.
   **A exceção 1 ficou sem justificativa nenhuma e ninguém a fechou** — fechar é decisão do dono.
   **A ressalva que a S8.2 tem de carregar:** `lastSeenDate` mede intervalo de sobrevivência, não
   retorno no dia N. Publicar é aceitável; publicar sem o rótulo é o erro de denominador de novo.
-- **🔴 O degrau `rede` do funil mede o Survival, e o check que o vigia está cego. Medido em
-  2026-08-31.** O `plan_users` deste banco não tem a rede: o proxy (`AusTv`, `is_proxy=1`) está no
-  catálogo com **zero** jogadores em `plan_user_info`, só o Survival tem (5575 de 5638), e as
-  contagens mensais da tabela são **exatamente** a coluna `survival` dos números verificados do
-  `HANDOFF.md` — 682, 641, 727, 374, 258, 192, 1, 106, os oito meses sem diferença.
-  A profundidade, aliás, é boa: `coversFrom` = **2024-06-02**, 26 meses. A alegação de "3 dias"
-  apontava um problema real e o descreveu com a palavra errada.
-  **O que quebra:** o degrau `rede` do funil é Survival com outro nome; o
-  `funnel.network_to_survival` divide Survival por Survival e reportaria `ok` com a rede inteira
-  fora do ar; e os ~54% do DoD da S8 não saem desta base, porque a população da rede está no banco
-  antigo. **Nada de conversão de rede publicada até o degrau ser consertado.**
+- **✅ O rótulo de rede foi consertado em 2026-08-31 — e o que sobrou é a falta da fonte.**
+  O `plan_users` deste banco não tem a rede: o proxy (`AusTv`, `is_proxy=1`) está no catálogo com
+  **zero** jogadores em `plan_user_info`, só o Survival tem (5575 de 5638), e as contagens mensais
+  da tabela são **exatamente** a coluna `survival` dos números verificados do `HANDOFF.md` — 682,
+  641, 727, 374, 258, 192, 1, 106, os oito meses sem diferença. A profundidade, aliás, é boa:
+  `coversFrom` = **2024-06-02**, 26 meses; a alegação de "3 dias" apontava um problema real e o
+  descreveu com a palavra errada.
+  **O que foi feito:** o degrau `rede` do funil saiu `null` com motivo e a **mesma contagem passou
+  a alimentar o degrau `survival`**, que até então não tinha fonte — os dois trocaram de lugar, sem
+  que nenhuma contagem mudasse, e a conversão `rede → survival` deixou de ser Survival ÷ Survival
+  perto de 100%. A procedência viaja no payload, porque a identidade Survival de `plan_users` é
+  coincidência medida, não garantia de schema. O `funnel.network_to_survival` parou de dividir uma
+  população por ela mesma e devolve `no_data` com o motivo, sem tocar no banco nem no Plan.
+  **O que sobra, e é do dono:** os ~54% deixaram de ser vigiados — não é rebaixamento de sinal, é o
+  reconhecimento de que nunca houve sinal —, e restaurá-los exige uma **fonte de chegadas no
+  proxy** que nem a API nem o banco autorizado hoje têm. E o
+  `plan.proxy_registration_alive` tem o mesmo defeito de rótulo: lê `plan_users`, logo **não cobre
+  o apagão do proxy** que lhe deu origem. Os sumários dele passaram a dizer isso; **renomear o
+  identificador persistido é decisão do dono**, porque partiria o histórico do check.
+  **Ganho colateral:** a segunda metade do DoD da S8 (`~100%` de entrada no tutorial) é
+  `tutorial ÷ survival` e virou um par consecutivo do endpoint — nov/2025 dá `694/682 = 101,8%`.
+  Calculável; **ainda não rodado contra produção**.
 - **O alerta de saúde CHEGA — comprovado em 2026-08-26.** Alertas reais do
   `platform.offline_account_share` foram observados no canal: `breached`, recuperação e o `n` ao
   lado do percentual, funcionando em produção. A camada deixou de ser construção sobre algo que
@@ -216,10 +227,12 @@ sprints.
 - **[#157](https://github.com/ZzPowerTech/ausTvSales/issues/157) — perda de venda em silêncio.**
   Um 429 faz o plugin marcar a venda como permanentemente falha. Descoberto na S7; é dado perdido,
   não incômodo.
-- **Dois dos três limiares da S6.3 seguem sem calibração** contra o baseline (chute conservador,
-  marcado como tal no `.env.example`). O terceiro, o share offline, foi calibrado pela produção —
-  ver o item acima. Enquanto os outros dois forem chute, o alerta é ruído em potencial, que é como
-  um canal do Discord vira mudo.
+- **Um dos três limiares da S6.3 segue sem calibração** contra o baseline (chute conservador,
+  marcado como tal no `.env.example`). O share offline foi calibrado pela produção — ver o item
+  acima. O terceiro, `FUNNEL_MIN_NETWORK_TO_SERVER`, ficou **inerte** em 2026-08-31: o check que o
+  lia parou de publicar razão. A variável continua aceita pela validação para não quebrar um `.env`
+  já implantado, e volta a precisar de calibração no dia em que existir fonte de rede. Enquanto o
+  que sobra for chute, o alerta é ruído em potencial, que é como um canal do Discord vira mudo.
 - **Probe externo de uptime.** O critério 2 da S7.1 pede endpoint "para uso externo" e o 3 exige
   JWT — um monitor não faz OAuth. Ficou sob a sessão; a saída recomendada é heartbeat, não
   endpoint. Decisão do dono.
