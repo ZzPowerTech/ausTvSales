@@ -401,29 +401,46 @@ erro específico não seja repetido em código.
 
 ### Restrição nova para o baseline da campanha
 
-`plan_users` tem **5566** linhas; `plan_user_info` do Survival tem **5540**. O histórico de
-**sessões** do proxy não veio na unificação — está no banco antigo.
+`plan_users` tem **5566** linhas; `plan_user_info` do Survival tem **5540**. O que exatamente
+não veio na unificação — identidade, sessão, ou parte de cada — **não está estabelecido**;
+as duas contagens acima não distinguem essas leituras. Ver o bloco abaixo.
 
-> #### ❌ Erro 6 — "métrica de rede tem 3 dias de profundidade" (corrigido em 2026-08-30)
+> #### ⚠️ "Métrica de rede tem 3 dias de profundidade" está EM DÚVIDA, e a checagem que
+> resolve já está escrita (2026-08-31)
 >
-> Esta seção afirmava, como fato, que a métrica de rede só existia **desde 2026-08-20** e que
-> por isso a primeira coorte de D30 só nasceria em 2026-09-19.
+> Esta seção afirmava, como fato, que a métrica de rede só existia **desde 2026-08-20**, e
+> disso saíram o adiamento da S8.2, a data de 2026-09-19 e metade do DoD da S8.
 >
-> **Falso.** O `/v1/retention` foi lido em 2026-08-29 e devolve **5565 linhas** com
-> `registerDate` indo de **2024-06** a **2026-08** — 26 meses. Como o `plan_users` tem 5566
-> linhas, é a mesma população: a data de **registro** sobreviveu à unificação inteira.
+> **O que foi observado.** Uma leitura do `/v1/retention` em 2026-08-29 devolveu **5565
+> linhas** com `registerDate` de **2024-06** a **2026-08**.
 >
-> O que de fato não veio foi o histórico de **sessão** do proxy, e daí saiu a inferência. Uma
-> coisa não implica a outra: `plan_users` é tabela de identidade e guarda `registered`, que é
-> justamente o que uma coorte precisa.
+> **O que isso NÃO estabelece, e a primeira versão desta nota dizia que estabelecia.** Que
+> `plan_users.registered` tem 26 meses. A ponte era "5565 ≈ 5566 linhas do `plan_users`,
+> logo é a mesma população" — uma contagem que erra por um. O Plan guarda registro em
+> **dois** lugares (`plan_users.registered`, de rede, e `plan_user_info.registered`, por
+> servidor), o `/v1/retention` é documentado como *"for server or the network"* e **não foi
+> registrado qual requisição foi feita**. O `plan_user_info` do Survival tem 5540 linhas:
+> 5565 cabe nessa vizinhança e não distingue as duas leituras.
 >
-> **Consequência:** o degrau de rede do funil tem profundidade histórica, e a S8.2 não precisa
-> esperar 2026-09-19 para ter a primeira coorte de D30. O erro é do mesmo tipo dos cinco
-> anteriores — concluir sobre uma coisa a partir da ausência de outra, sem consultar a fonte
-> que responde. A fonte respondia em um `curl`.
+> **A checagem que resolve já existe e ninguém rodou.** `PlanDatabase.earliestArrivalAt()`
+> é literalmente `SELECT MIN(registered) FROM plan_users`, e o `FunnelService` publica a
+> resposta como `coversFrom` em toda chamada de `/funnel/monthly`. Um `curl` no endpoint
+> devolve a profundidade exata da coluna em disputa.
 >
-> **O que continua não verificado:** se alguma métrica derivada de **sessão** no proxy tem
-> profundidade. Essa é a afirmação original, e ela não foi testada nem refutada aqui.
+> Escrever essa inferência como fato foi cometer o erro 5 — concluir sobre uma fonte a
+> partir de evidência sobre outra, com a fonte que responde a um comando de distância —
+> dentro do parágrafo que o estava catalogando. Por isso esta nota **não** vira "erro 6":
+> ela é o erro 5 de novo, e o registro fica onde já está.
+>
+> **O que se pode afirmar hoje:**
+>
+> - o `/v1/retention` **daquela leitura** cobre 26 meses de `registerDate`. Para uma S8.2
+>   construída sobre o endpoint, essa é a profundidade que importa, e ela é suficiente;
+> - a profundidade de `plan_users.registered` — que é o que o **degrau de rede do funil**
+>   lê por SQL — continua **desconhecida**. Nem confirmada nem refutada.
+>
+> **Como fechar:** `curl` autenticado em `/funnel/monthly` e ler `coversFrom`. Registrar o
+> valor aqui, com a data. Até lá, nada nesta seção deve ser citado como profundidade de rede.
 
 ---
 
@@ -447,17 +464,16 @@ essa justificativa agora está sem apoio.
 vez de consultar a fonte que enumera. O custo desta vez foi uma exceção a um ADR, aberta com o
 argumento de que não havia alternativa.
 
-> **O que NÃO está verificado, e não se conclui daqui:** se o `networkMetadata` traz o
-> `plan_version` por instância. O check `plan.version_divergence` precisa disso. Sem verificar o
-> corpo, a exceção 2 não pode ser fechada — só perdeu o motivo alegado.
+> **Corpo lido em 2026-08-29:** o `networkMetadata` enumera as instâncias e **não** traz o
+> `plan_version`. O check `plan.version_divergence` precisa dele, então a exceção 2 fica de
+> pé por essa metade, com justificativa reescrita. Detalhe no bloco "Os dois corpos foram
+> lidos", abaixo.
 
 ### O que mais a lista revelou
 
 | endpoint | por que importa |
 |---|---|
-| `GET /v1/retention` | **Lido em 2026-08-29 — ver o bloco abaixo.** Devolve 5565 linhas com
-`playerUUID`, `registerDate`, `lastSeenDate`, `playtime` e `timeDifference`. Derruba a premissa
-da **exceção 1** do ADR-002 |
+| `GET /v1/retention` | **Lido em 2026-08-29.** Devolve 5565 linhas com `playerUUID`, `registerDate`, `lastSeenDate`, `playtime` e `timeDifference`. Derruba a premissa da **exceção 1** do ADR-002 — a agregação por coorte × plataforma sai daí, sem SQL. Ver o bloco "Os dois corpos foram lidos" |
 | `GET /v1/query` + `GET /v1/filters` | API de consulta com filtros e janela (`afterEpochMs`/`beforeEpochMs`, lista de servidores). Candidato para o degrau **rede → survival** da S8.1. Não cobre `tutorial_entrou` nem `tutorial_concluiu`, e isso não é leitura de documento: o Plan
 **não coleta nada de tutorial** (bloco anterior deste arquivo), então nenhum endpoint dele poderia
 cobrir. Seguem bloqueados pela S8.0 — e não se sabe se resolve o denominador de rede (§2 do spec: proxy grava usuário, não sessão). Verificar o corpo antes de estimar |
@@ -482,9 +498,22 @@ Isso parte a exceção 2 em duas metades com destinos diferentes:
   Nenhum outro endpoint do OpenAPI a expõe. Esta metade **fica**.
 
 Ou seja: a exceção 2 continua de pé, e a justificativa escrita dela morreu. São coisas
-diferentes e o spec agora diz as duas. Fechar a metade do `orphan_instance` é trabalho de
-sprint, não decisão pendente — e enquanto as duas metades compartilharem o `PlanDatabase`, a
-credencial de MySQL continua existindo, que é o custo que o ADR-002 queria evitar.
+diferentes e o spec agora diz as duas.
+
+> **Migrar o `orphan_instance` não é decisão tomada, e este documento tem o contra-argumento
+> mais abaixo.** Sob 403 na API, os três checks que leem o `PlanDatabase` continuam
+> respondendo *pela topologia do código*; tirar um deles do SQL trocaria dívida de
+> acoplamento por perda de cobertura no cenário que hoje é plausível. Nada nos dois corpos
+> lidos toca nesse argumento — ele não foi respondido, e continua de pé.
+>
+> O gatilho original pedia duas coisas: `plan_version` **e recência por instância**. Só a
+> primeira foi verificada. A segunda importa porque o check construído reconcilia listas e
+> não olha recência (§ do spec sobre a exceção 2), então um endpoint sem recência não
+> substitui o que a redação da §6.1 pede, só o que o código faz hoje.
+
+E enquanto as duas metades compartilharem o `PlanDatabase`, a credencial de MySQL continua
+existindo, que é o custo que o ADR-002 queria evitar — migrar só o `orphan_instance` não a
+remove.
 
 ### `/v1/retention` — derruba a premissa da exceção 1
 
@@ -496,8 +525,11 @@ linha de SQL.
 
 > **A ressalva importa mais que a manchete, e ela é sobre o que a métrica significa.**
 > `lastSeenDate` dá o **intervalo de sobrevivência** de um jogador, não se ele voltou no dia
-> N. "Ainda ativo 30 dias depois de registrar" e "voltou no dia 30" são números diferentes, e
-> a §6.2 pede o segundo. O endpoint entrega o primeiro.
+> N. "Ainda ativo 30 dias depois de registrar" e "voltou no dia 30" são números diferentes.
+> A §6.2 escreve *"retém D1/D7/D30 → por plataforma"* e **não define qual das duas leituras
+> é**; "D30" na literatura costuma ser a segunda, e é assim que este documento vinha usando
+> o termo. O endpoint entrega a primeira. Que a §6.2 "peça" a segunda é leitura, não citação,
+> e está marcada como tal aqui de propósito.
 >
 > Isso não reabre a exceção: entregar a retenção por intervalo, rotulada como tal, é melhor
 > que abrir acesso direto a três tabelas para entregar a outra. Mas o rótulo é obrigatório, e
@@ -506,10 +538,23 @@ linha de SQL.
 
 **Duas armadilhas nos dados, encontradas ao montar as coortes e que a S8.2 precisa tratar:**
 
-1. **Coortes até 2025-08 dão D1/D7/D30 de 100%.** É artefato da unificação, não retenção
-   perfeita: quem foi importado carrega `lastSeenDate` posterior por construção. A partir de
-   2025-09 os números batem com os já conhecidos (30,1 / 21,7 / 15,4). A S8.2 tem de detectar
-   e **não publicar** as coortes contaminadas — publicá-las seria inventar um passado bom.
+1. **Coortes até 2025-08 dão D1/D7/D30 de 100%.** Não é retenção perfeita: quem foi
+   importado na unificação carrega `lastSeenDate` posterior por construção.
+
+   A S8.2 tem de emitir `null` **com o motivo** para essas coortes, nunca o 100% e nunca
+   silêncio. "Não publicar" seria a única disposição que o critério 2 da própria história
+   (*"marcadas, não escondidas"*) e a regra do projeto proíbem juntas.
+
+   **A fronteira de 2025-08 é ajuste empírico, não mecanismo, e isso é um problema em
+   aberto.** Se a contaminação vem da unificação de 2026-08-20, ela deveria atingir toda
+   coorte, não parar em 2025-09. Entregar a data como se fosse regra dá ao implementador um
+   número mágico sem critério de detecção. **A S8.2 precisa de um teste sobre o dado** —
+   por exemplo, `lastSeenDate` idêntico ou colado à data da unificação — e não de um corte
+   por mês.
+
+   E a corroboração citada não vale como está: os 30,1 / 21,7 / 15,4 conhecidos foram
+   apurados sobre uma base de **11.525**, registrada neste documento como *base enviesada*.
+   Bater com ela não valida um cálculo sobre 5.565 linhas.
 2. **A coorte do mês corrente é imatura.** 2026-08 dá D30 = 0,0% porque ninguém registrado
    neste mês teve 30 dias para voltar. Isso é *sem dados*, e sai `null`, nunca zero — é a
    regra dura do projeto aplicada ao caso mais fácil de errar.

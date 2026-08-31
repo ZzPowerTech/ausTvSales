@@ -88,8 +88,30 @@ documentadas e isoladas em módulo próprio**, sempre em usuário **read-only**:
 
 | # | escopo | tabelas | por quê a API não serve |
 |---|---|---|---|
-| 1 | Coorte histórica (§6.2, S8.2) | `plan_users`, `plan_user_info`, `plan_sessions` | ~~agregação por coorte × plataforma não existe em nenhum endpoint~~ — **premissa derrubada em 2026-08-29**: o `/v1/retention` foi lido e traz `registerDate` (coorte) e `playerUUID` (plataforma, pelo ADR-003). Ver a nota da exceção 1 abaixo |
+| 1 | Coorte histórica (§6.2, S8.2) | `plan_users`, `plan_user_info`, `plan_sessions` | ~~agregação por coorte × plataforma não existe em nenhum endpoint~~ — **premissa derrubada em 2026-08-29**, e **nenhuma justificativa a substitui**. Ver a nota abaixo |
 | 2 | **Inventário de instâncias e chegadas de rede (§6.1, S6.3)** — *aprovada em 2026-08-23; **premissa desmentida em 2026-08-26**, corpo lido em 2026-08-29* | **`plan_servers` e `plan_users`** | ~~o Plan não expõe lista de servidores~~ — **falso**: `/v1/networkMetadata` lista as instâncias. Mas o corpo **não traz `plan_version`**, e nenhum outro endpoint traz: `version_divergence` fica, `orphan_instance` pode sair. Justificativa reescrita abaixo. A parte sobre chegadas de rede não foi reavaliada |
+
+#### Exceção 1 — sem justificativa desde 2026-08-29
+
+A exceção foi aberta com um único argumento: *"agregação por coorte × plataforma não existe
+em nenhum endpoint"*. O corpo do `/v1/retention` foi lido e traz `registerDate` (coorte) e
+`playerUUID` (plataforma, pelo ADR-003). O argumento caiu, e **nada foi escrito no lugar**.
+
+Pelo próprio ADR-002, uma exceção numerada precisa carregar uma justificativa escrita. Esta
+não carrega mais, e a regra que este documento aplica à exceção 2 quatro parágrafos abaixo
+— *uma exceção que sobrevive porque ninguém reescreveu o motivo é como esta aqui foi
+aberta* — vale igual para esta.
+
+**Estado:** autoriza `plan_users`, `plan_user_info` e `plan_sessions`, e **nenhum código a
+usa** — a S8.2, única história que dependia dela, sai do endpoint. Fechá-la é decisão do
+dono, porque foi ele quem a abriu; até lá ela fica registrada aqui como o que é: uma
+autorização de pé sem motivo de pé.
+
+> **A ressalva que sobra, e não é sobre acesso:** `lastSeenDate` dá o **intervalo de
+> sobrevivência**, não o retorno no dia N. Entregar retenção por intervalo, rotulada como
+> tal, é melhor que abrir três tabelas para entregar a outra — mas é uma métrica
+> diferente, e chamar uma de outra seria o erro de denominador que já custou uma linha do
+> DoD da S8.
 
 #### Exceção 2 — inventário de instâncias (2026-08-23)
 
@@ -179,7 +201,10 @@ tabela de identidade — das mais estáveis do schema do Plan.
 > OpenAPI carrega.
 >
 > - **`plan.orphan_instance`** reconcilia duas *listas*, e o endpoint serve essa lista. Esta
->   metade pode sair do SQL — é trabalho de sprint, não decisão pendente.
+>   metade **poderia** sair do SQL — mas não é decisão tomada: o argumento estrutural
+>   registrado abaixo (sob 403 na API, os checks que leem SQL continuam respondendo) não foi
+>   respondido por nada que os dois corpos mostraram. E o gatilho original pedia
+>   `plan_version` **e recência por instância**; só a primeira foi verificada.
 > - **`plan.version_divergence`** precisa da versão por instância. Esta metade **fica**, e a
 >   exceção fica com ela.
 >

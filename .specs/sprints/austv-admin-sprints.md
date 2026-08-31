@@ -481,7 +481,14 @@ existe para impedir.
 >   outra coisa. A capacidade existe no repo — `PlanCache` (`outcome: 'stale'` + a idade real),
 >   construída na S7.2 exatamente para isto — e ligar o funil nela é o próximo passo óbvio.
 
-> #### E o item 1 do DoD da S8 não é verificável hoje, nas **duas** metades
+> #### E o item 1 do DoD da S8 não é verificável hoje
+>
+> ⚠️ **Este bloco dizia "nas duas metades" e a segunda metade está em dúvida desde
+> 2026-08-30.** A profundidade de `plan_users.registered` nunca foi medida — ela foi
+> inferida da perda do histórico do proxy, e `earliestArrivalAt()` /
+> `coversFrom` respondem isso em um `curl` que ninguém deu. O texto abaixo fica como está
+> por ser o registro do que se acreditava; leia-o com essa ressalva. Ver o bloco da
+> profundidade no [`HANDOFF.md`](../features/austv-admin/HANDOFF.md).
 >
 > *"Funil reproduz os números conhecidos: ~54% rede→survival, ~100% de entrada no tutorial antes de
 > dez/2025."*
@@ -533,23 +540,27 @@ existe para impedir.
 > revisada, mergeada e revertida — e é a regra sob a qual todos os adapters da S7.2 e o parser da
 > S8.0 foram construídos.
 >
-> #### 3. `plan_users` não tem coortes antigas para reter
+> #### 3. ~~`plan_users` não tem coortes antigas para reter~~ — **não se aplica mais**
 >
-> Descoberto ao construir a S8.1: o histórico do proxy **não veio na unificação de 2026-08-20**
-> (`HANDOFF.md`, "Restrição nova para o baseline da campanha"). Coorte mensal exige meses de
-> chegadas, e a tabela tem dias. Uma retenção D30 precisa de uma coorte com 30 dias de idade, que só
-> existirá a partir de **2026-09-19**.
+> Este pré-requisito supunha que a S8.2 leria `plan_users` por SQL. Ela não lê: sai do
+> `/v1/retention`, cujo corpo lido em 2026-08-29 cobre 26 meses de `registerDate`. A
+> profundidade do `plan_users` deixou de ser pergunta **desta história** — continua sendo
+> pergunta do degrau de rede do funil, e continua sem medição.
+>
+> A data de **2026-09-19** que este bloco produziu não tem base: ela saía da suposição
+> acima, não de uma leitura.
 >
 > #### O que destrava, em ordem de custo
 >
-> | # | passo | custo | o que resolve |
-> |---|---|---|---|
-> | 1 | `curl` no `/v1/retention` da VPS e registrar o corpo | minutos, com acesso | pode **eliminar** a exceção 1 inteira |
-> | 2 | `DESCRIBE plan_sessions` e registrar o schema | minutos, com acesso | destrava o pré-requisito 2 |
-> | 3 | esperar a primeira coorte de 30 dias | até 2026-09-19 | destrava o pré-requisito 3 |
+> | # | passo | custo | o que resolve | estado |
+> |---|---|---|---|---|
+> | 1 | `curl` no `/v1/retention` da VPS e registrar o corpo | minutos, com acesso | **eliminou** a premissa da exceção 1 | ✅ feito em 2026-08-29 |
+> | 2 | `DESCRIBE plan_sessions` e registrar o schema | minutos, com acesso | destravava o pré-requisito 2 | ⬜ deixou de importar — a S8.2 não toca a tabela |
+> | 3 | esperar a primeira coorte de 30 dias | até 2026-09-19 | destravava o pré-requisito 3 | ❌ sem base — a data vinha da suposição do item 3 |
 >
-> Os dois primeiros são trabalho de minutos **para quem tem acesso à produção**, e nenhum é
-> trabalho de sessão. Nada aqui é impossível; o que seria errado é escrever o módulo antes deles.
+> **Nenhum pré-requisito da S8.2 continua aberto.** O que resta é a ressalva de rótulo
+> (`lastSeenDate` é intervalo de sobrevivência, não retorno no dia N) e as duas armadilhas
+> de dado, ambas no [`HANDOFF.md`](../features/austv-admin/HANDOFF.md).
 >
 > #### "Mas a S8.1 entregou com um degrau sem fonte. Por que a S8.2 não?"
 >
@@ -610,11 +621,14 @@ existe para impedir.
       antes de dez/2025 — **uma metade bloqueada, não as duas. A linha anterior dizia
       "inalcançável nas duas metades" e estava errada sobre a primeira.**
 
-      **Primeira metade (~54% rede→survival): destravada.** Ela foi declarada inalcançável
-      por causa da perda do histórico do proxy, e essa perda não é o que se pensava — o
-      `registerDate` tem 26 meses (erro 6 do `HANDOFF.md`). O bloqueio nomeado caiu. O que
-      falta é **medir**, e ninguém mediu ainda: esta linha continua desmarcada porque
-      reproduzir o número é uma verificação, não uma inferência.
+      **Primeira metade (~54% rede→survival): o bloqueio citado está em dúvida, não removido.**
+      Ela foi declarada inalcançável porque `plan_users` teria perdido o histórico do proxy.
+      Essa perda **nunca foi medida** — foi inferida — e `PlanDatabase.earliestArrivalAt()`
+      (`SELECT MIN(registered) FROM plan_users`) responde a pergunta, publicada como
+      `coversFrom` em toda chamada de `/funnel/monthly`.
+
+      Enquanto esse `curl` não for dado, esta metade não está nem bloqueada nem destravada:
+      está **sem medição**. Ler o `coversFrom` custa um comando e decide a linha.
 
       A segunda metade merece a conta explícita, porque é fácil errar o denominador — e a primeira
       versão desta linha errou. O `~100%` sai de **tutorial ÷ survival**, não de tutorial ÷ rede.
@@ -622,10 +636,11 @@ existe para impedir.
       `694 / 1403 = 49,5%`, que não é "~100%".
 
       Consequência prática: esta metade depende do degrau `survival`, que é o bloqueio mais duro
-      e sem dono — o payload de `/v1/graph?type=uniqueAndNew` nunca foi observado. Continua
-      valendo, e agora é o **único** bloqueio desta linha: o segundo, a perda do histórico do
-      proxy, caiu em 2026-08-29 e nunca existiu na forma em que foi escrito (erro 6 do
-      `HANDOFF.md`). A data de 2026-09-19 que aparecia aqui e no `CLAUDE.md` não significa nada.
+      e sem dono — o payload de `/v1/graph?type=uniqueAndNew` nunca foi observado. Esse
+      bloqueio é real e independente da dúvida acima.
+
+      A data de **2026-09-19** que aparecia aqui saía da suposição sobre `plan_users`, não de
+      uma leitura, e não deve ser citada como prazo de nada.
 - [x] **Nenhum endpoint retorna percentual sem `n`** — verdadeiro hoje em toda a superfície. No
       funil é **imposto pelo tipo**: em `Conversion`, a variante medida carrega os dois e
       `{ percent: 50, n: null }` não compila. Fecha o achado que a auditoria da S6 deixou em aberto.
@@ -635,7 +650,10 @@ existe para impedir.
       omitir a base. Nenhum omite hoje, e o contrato `HealthCheck` documenta a regra — mas a
       garantia de máquina cobre o funil, não a camada de saúde. A união do funil é o molde para
       quando alguém fechar aquela também
-- [ ] Usuário read-only comprovadamente sem permissão de escrita — pertence à S8.2, não iniciada
+- [ ] ~~Usuário read-only comprovadamente sem permissão de escrita — pertence à S8.2~~ —
+      **deixou de pertencer**: a S8.2 consome o `/v1/retention` e não abre conexão MySQL. A
+      exigência continua válida para a exceção **2**, que segue de pé, e por isso não é
+      apagada daqui — só deixa de estar atrelada a esta história
 
 ### Fechamento da S8 — 2026-08-28
 
@@ -835,9 +853,11 @@ Com a capacidade planejada de 13 SP/sprint, **restou uma sprint estourando**:
 | **S12** | **18** | 38% acima. Três histórias grandes |
 
 **Um estouro agora, não dois.** A S8 fechou movendo a **S8.2** para a S9 — a S8.0 era pré-requisito
-da S8.1 e não podia sair. E o corte não foi por capacidade: a S8.2 tem três pré-requisitos abertos,
-o primeiro deles ler o `/v1/retention` antes de abrir a exceção 1 do ADR-002. Ver o bloco da
-história.
+da S8.1 e não podia sair. E o corte não foi por capacidade: a S8.2 tinha três pré-requisitos
+abertos, o primeiro deles ler o `/v1/retention` antes de abrir a exceção 1 do ADR-002.
+
+**Os três caíram em 2026-08-29**, quando a leitura foi feita: a S8.2 sai do endpoint e não
+precisa da exceção 1. Ver o bloco da história.
 
 **Resta a S12**, e dividi-la em duas segue sendo a única decisão de escopo do dono.
 

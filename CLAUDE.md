@@ -131,17 +131,21 @@ sprints.
 
 - **✅ As duas leituras foram feitas em 2026-08-29, e destravaram a S8.2.** O `/v1/retention`
   devolve 5565 linhas com `playerUUID`, `registerDate`, `lastSeenDate`, `playtime` e
-  `timeDifference` — coorte e plataforma saem daí, então **a exceção 1 do ADR-002 não é
-  necessária** e o `DESCRIBE plan_sessions` deixou de importar. O `/v1/networkMetadata` lista as
+  `timeDifference` — coorte e plataforma saem daí, então **a premissa da exceção 1 do ADR-002
+  caiu** e o `DESCRIBE plan_sessions` deixou de importar. O `/v1/networkMetadata` lista as
   instâncias mas **não traz `plan_version`**: a exceção 2 fica de pé para o `version_divergence`,
-  com justificativa reescrita, e o `orphan_instance` pode sair do SQL.
+  com justificativa reescrita.
+  **A exceção 1 ficou sem justificativa nenhuma e ninguém a fechou** — fechar é decisão do dono.
   **A ressalva que a S8.2 tem de carregar:** `lastSeenDate` mede intervalo de sobrevivência, não
   retorno no dia N. Publicar é aceitável; publicar sem o rótulo é o erro de denominador de novo.
-- **~~`plan_users` tem dias de profundidade, não meses.~~ Era falso, corrigido em 2026-08-30.** O
-  `registerDate` do `/v1/retention` vai de 2024-06 a 2026-08 — 26 meses, sobre as mesmas 5566
-  linhas do `plan_users`. O que não veio na unificação foi o histórico de **sessão** do proxy, e daí
-  saiu a inferência errada: identidade e sessão são tabelas diferentes. **A data de 2026-09-19 não
-  significa nada** e a primeira coorte de D30 já existe. Erro 6 do `HANDOFF.md`.
+- **A profundidade de `plan_users` nunca foi medida, e a checagem está pronta.** Este item dizia
+  "dias, não meses" como fato; era inferência a partir da perda do histórico do proxy. Uma leitura
+  do `/v1/retention` em 2026-08-29 mostrou 26 meses de `registerDate`, mas isso **não** resolve a
+  questão: o endpoint serve por servidor ou por rede, não foi registrado qual foi pedido, e o Plan
+  guarda registro em duas tabelas.
+  **`PlanDatabase.earliestArrivalAt()` é `SELECT MIN(registered) FROM plan_users` e o
+  `/funnel/monthly` publica a resposta como `coversFrom`.** Um `curl` autenticado fecha a questão —
+  e até lá a data de **2026-09-19** que circulava não tem base, porque vinha da mesma inferência.
   O funil continua tratando bucket sem cobertura como `null`, nunca zero — isso não muda.
 
 - **O alerta de saúde CHEGA — comprovado em 2026-08-26.** Alertas reais do

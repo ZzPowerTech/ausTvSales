@@ -304,10 +304,12 @@ export class PlanDatabase implements OnModuleInit, OnModuleDestroy {
    *
    * ## The number this exists to stop being invented
    *
-   * `plan_users` does **not** hold the network's whole history. The proxy's
-   * records did not come across in the 2026-08-20 unification — they are in the
-   * old database — so in practice the network metric is only a few days deep
-   * (`HANDOFF.md`, "Restrição nova para o baseline da campanha").
+   * `plan_users` may not hold the network's whole history. The belief on
+   * record is that the proxy's rows did not come across in the 2026-08-20
+   * unification, leaving the network metric shallow — but that belief was
+   * **inferred, never measured**, and this very method is what measures it.
+   * Whatever it returns is the answer; the paragraph above is only why the
+   * question matters.
    *
    * A query for March 2026 therefore **succeeds and returns nothing**, and a
    * caller that reads "the source answered, so an empty bucket is a measured
