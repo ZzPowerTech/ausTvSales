@@ -571,30 +571,61 @@ existe para impedir.
 >
 > **A fatia que existiria, e foi considerada:** o **tamanho de coorte** (`n` por mês × plataforma)
 > sai de `plan_users.registered` + `uuid`, que a exceção **2** já abriu — sem tocar a exceção 1.
-> Endereçaria em parte os critérios 1 e 2. Mas com profundidade de rede desde 2026-08-20 renderia um
-> bucket parcial e **nenhuma retenção**, que é o produto da história. Adiada com isso à vista.
+> Endereçaria em parte os critérios 1 e 2.
 >
-> E a alternativa "consumir `/v1/retention` em vez de SQL" está fechada pelo mesmo motivo que a S8.1
-> recusou o `/v1/graph`: o payload nunca foi observado. Fazer aqui o que se recusou lá, com o
-> argumento invertido, seria a incoerência de verdade.
+> ### ✅ Os dois motivos do adiamento caíram em 2026-08-29
+>
+> Este bloco adiou a S8.2 por duas razões, e as duas eram afirmações sobre ausência que
+> ninguém tinha ido conferir. Foram conferidas.
+>
+> 1. ~~"com profundidade de rede desde 2026-08-20 renderia um bucket parcial e nenhuma
+>    retenção"~~ — **falso**. O `registerDate` do `/v1/retention` vai de 2024-06 a 2026-08:
+>    26 meses, sobre a mesma população de 5566 linhas do `plan_users`. O que não veio na
+>    unificação foi o histórico de **sessão** do proxy, que é outra coisa. Erro 6 do
+>    [`HANDOFF.md`](../features/austv-admin/HANDOFF.md).
+> 2. ~~"a alternativa de consumir `/v1/retention` está fechada porque o payload nunca foi
+>    observado"~~ — **resolvido**: foi observado. 5565 linhas com `playerUUID`,
+>    `registerDate`, `lastSeenDate`, `playtime`, `timeDifference`.
+>
+> A coerência que este bloco invocava vale nos dois sentidos: recusar o `/v1/graph` sem ver o
+> payload estava certo, e **adiar por ausência sem ver o payload estava errado pelo mesmo
+> motivo**. A leitura custou um `curl`.
+>
+> **A S8.2 sai da exceção 1 inteira.** Sem SQL, sem `plan_sessions`, sem `DESCRIBE` — os três
+> pré-requisitos que este bloco listava eram o mesmo pré-requisito, e ele caiu.
+>
+> **Duas coisas que a implementação precisa carregar, e nenhuma é opcional:**
+>
+> - `lastSeenDate` mede **intervalo de sobrevivência**, não retorno no dia N. A §6.2 pede o
+>   segundo. Publicar o primeiro é aceitável; publicar o primeiro chamando-o de segundo é o
+>   erro de denominador que já custou uma linha do DoD desta sprint. **O rótulo vai junto do
+>   número.**
+> - Coortes até 2025-08 dão D1/D7/D30 de 100% por artefato da unificação, e a coorte do mês
+>   corrente é imatura (D30 = 0,0% porque ninguém teve 30 dias). A primeira tem de ser
+>   detectada e não publicada; a segunda sai `null`, nunca zero.
 
 ### DoD da S8
 
-- [ ] ~~Funil reproduz os números conhecidos: ~54% rede→survival, ~100% de entrada no tutorial antes
-      de dez/2025~~ — **inalcançável nas duas metades, e as duas caem pela mesma raiz**: o degrau
-      `survival` não tem série diária.
+- [ ] Funil reproduz os números conhecidos: ~54% rede→survival, ~100% de entrada no tutorial
+      antes de dez/2025 — **uma metade bloqueada, não as duas. A linha anterior dizia
+      "inalcançável nas duas metades" e estava errada sobre a primeira.**
+
+      **Primeira metade (~54% rede→survival): destravada.** Ela foi declarada inalcançável
+      por causa da perda do histórico do proxy, e essa perda não é o que se pensava — o
+      `registerDate` tem 26 meses (erro 6 do `HANDOFF.md`). O bloqueio nomeado caiu. O que
+      falta é **medir**, e ninguém mediu ainda: esta linha continua desmarcada porque
+      reproduzir o número é uma verificação, não uma inferência.
 
       A segunda metade merece a conta explícita, porque é fácil errar o denominador — e a primeira
       versão desta linha errou. O `~100%` sai de **tutorial ÷ survival**, não de tutorial ÷ rede.
       Na tabela de números verificados do `HANDOFF.md`, nov/2025: `694 / 682 = 101,8%` ✅, enquanto
       `694 / 1403 = 49,5%`, que não é "~100%".
 
-      Consequência prática: esta metade **não** destrava quando o `plan_users` acumular
-      profundidade em 2026-09-19. Ela depende do degrau `survival`, que é o bloqueio mais duro e
-      sem dono — o payload de `/v1/graph?type=uniqueAndNew` nunca foi observado.
-
-      A perda do histórico do proxy é um **segundo** bloqueio, independente, e só sobre a primeira
-      metade. Detalhe no bloco da S8.1
+      Consequência prática: esta metade depende do degrau `survival`, que é o bloqueio mais duro
+      e sem dono — o payload de `/v1/graph?type=uniqueAndNew` nunca foi observado. Continua
+      valendo, e agora é o **único** bloqueio desta linha: o segundo, a perda do histórico do
+      proxy, caiu em 2026-08-29 e nunca existiu na forma em que foi escrito (erro 6 do
+      `HANDOFF.md`). A data de 2026-09-19 que aparecia aqui e no `CLAUDE.md` não significa nada.
 - [x] **Nenhum endpoint retorna percentual sem `n`** — verdadeiro hoje em toda a superfície. No
       funil é **imposto pelo tipo**: em `Conversion`, a variante medida carrega os dois e
       `{ percent: 50, n: null }` não compila. Fecha o achado que a auditoria da S6 deixou em aberto.

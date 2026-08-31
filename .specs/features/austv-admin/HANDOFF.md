@@ -401,10 +401,29 @@ erro específico não seja repetido em código.
 
 ### Restrição nova para o baseline da campanha
 
-`plan_users` tem **5566** linhas; `plan_user_info` do Survival tem **5540**. O histórico de rede do
-proxy **não veio na unificação** — está no banco antigo. Na prática, **métrica de rede tem 3 dias de
-profundidade** (desde 2026-08-20). Para comparar antes/depois do unban isso é raso, e é melhor
-saber agora do que na hora de comparar.
+`plan_users` tem **5566** linhas; `plan_user_info` do Survival tem **5540**. O histórico de
+**sessões** do proxy não veio na unificação — está no banco antigo.
+
+> #### ❌ Erro 6 — "métrica de rede tem 3 dias de profundidade" (corrigido em 2026-08-30)
+>
+> Esta seção afirmava, como fato, que a métrica de rede só existia **desde 2026-08-20** e que
+> por isso a primeira coorte de D30 só nasceria em 2026-09-19.
+>
+> **Falso.** O `/v1/retention` foi lido em 2026-08-29 e devolve **5565 linhas** com
+> `registerDate` indo de **2024-06** a **2026-08** — 26 meses. Como o `plan_users` tem 5566
+> linhas, é a mesma população: a data de **registro** sobreviveu à unificação inteira.
+>
+> O que de fato não veio foi o histórico de **sessão** do proxy, e daí saiu a inferência. Uma
+> coisa não implica a outra: `plan_users` é tabela de identidade e guarda `registered`, que é
+> justamente o que uma coorte precisa.
+>
+> **Consequência:** o degrau de rede do funil tem profundidade histórica, e a S8.2 não precisa
+> esperar 2026-09-19 para ter a primeira coorte de D30. O erro é do mesmo tipo dos cinco
+> anteriores — concluir sobre uma coisa a partir da ausência de outra, sem consultar a fonte
+> que responde. A fonte respondia em um `curl`.
+>
+> **O que continua não verificado:** se alguma métrica derivada de **sessão** no proxy tem
+> profundidade. Essa é a afirmação original, e ela não foi testada nem refutada aqui.
 
 ---
 
@@ -436,12 +455,64 @@ argumento de que não havia alternativa.
 
 | endpoint | por que importa |
 |---|---|
-| `GET /v1/retention` | *"Get retention data for server or the network"*. A **S8.2** existe para calcular retenção por coorte, e é a **exceção 1** do ADR-002 — o único ponto autorizado a fazer SQL direto. Verificar o que este endpoint devolve antes de escrever a S8.2 |
+| `GET /v1/retention` | **Lido em 2026-08-29 — ver o bloco abaixo.** Devolve 5565 linhas com
+`playerUUID`, `registerDate`, `lastSeenDate`, `playtime` e `timeDifference`. Derruba a premissa
+da **exceção 1** do ADR-002 |
 | `GET /v1/query` + `GET /v1/filters` | API de consulta com filtros e janela (`afterEpochMs`/`beforeEpochMs`, lista de servidores). Candidato para o degrau **rede → survival** da S8.1. Não cobre `tutorial_entrou` nem `tutorial_concluiu`, e isso não é leitura de documento: o Plan
 **não coleta nada de tutorial** (bloco anterior deste arquivo), então nenhum endpoint dele poderia
 cobrir. Seguem bloqueados pela S8.0 — e não se sabe se resolve o denominador de rede (§2 do spec: proxy grava usuário, não sessão). Verificar o corpo antes de estimar |
 | `GET /v1/joinAddresses` | endereço de conexão usado pelo jogador. **Proxy possível** de canal de aquisição — só vale como canal se canais diferentes anunciarem hostnames diferentes. Rotular como proxy onde aparecer, pela mesma regra do critério 6 da S8.0 |
 | `GET /v1/playersTable` | já conhecido, mas o schema documenta `registered` por jogador — é a outra metade da exceção 2 (`plan_users.registered`) |
+
+## ✅ Os dois corpos foram lidos (2026-08-29)
+
+O gatilho de reavaliação que o spec registrava para a exceção 2 era literalmente "ler o corpo
+de `/v1/networkMetadata`". Foi lido, junto com o do `/v1/retention`. Os dois resultados puxam
+em direções opostas, e é por isso que valem um bloco.
+
+### `/v1/networkMetadata` — lista os servidores, **não** traz `plan_version`
+
+O corpo enumera as instâncias da rede. Ele **não** carrega a versão do Plan por instância.
+
+Isso parte a exceção 2 em duas metades com destinos diferentes:
+
+- **`plan.orphan_instance`** reconcilia duas *listas* (`plan_servers` × `PLAN_SERVERS`). O
+  endpoint serve essa lista. Esta metade **pode** sair do SQL.
+- **`plan.version_divergence`** precisa da versão por instância, e o endpoint não a tem.
+  Nenhum outro endpoint do OpenAPI a expõe. Esta metade **fica**.
+
+Ou seja: a exceção 2 continua de pé, e a justificativa escrita dela morreu. São coisas
+diferentes e o spec agora diz as duas. Fechar a metade do `orphan_instance` é trabalho de
+sprint, não decisão pendente — e enquanto as duas metades compartilharem o `PlanDatabase`, a
+credencial de MySQL continua existindo, que é o custo que o ADR-002 queria evitar.
+
+### `/v1/retention` — derruba a premissa da exceção 1
+
+5565 linhas, uma por jogador, com `playerUUID`, `registerDate`, `lastSeenDate`, `playtime` e
+`timeDifference`. A exceção 1 foi aberta com o argumento de que *"agregação por coorte ×
+plataforma não existe em nenhum endpoint"*. Com `registerDate` a coorte é derivável, e com
+`playerUUID` a plataforma é derivável pelo ADR-003 — os dois eixos que a §6.2 pede, sem uma
+linha de SQL.
+
+> **A ressalva importa mais que a manchete, e ela é sobre o que a métrica significa.**
+> `lastSeenDate` dá o **intervalo de sobrevivência** de um jogador, não se ele voltou no dia
+> N. "Ainda ativo 30 dias depois de registrar" e "voltou no dia 30" são números diferentes, e
+> a §6.2 pede o segundo. O endpoint entrega o primeiro.
+>
+> Isso não reabre a exceção: entregar a retenção por intervalo, rotulada como tal, é melhor
+> que abrir acesso direto a três tabelas para entregar a outra. Mas o rótulo é obrigatório, e
+> a S8.2 tem de publicá-lo junto do número. Chamar um de outro seria o mesmo erro de
+> denominador que já custou uma linha do DoD da S8.
+
+**Duas armadilhas nos dados, encontradas ao montar as coortes e que a S8.2 precisa tratar:**
+
+1. **Coortes até 2025-08 dão D1/D7/D30 de 100%.** É artefato da unificação, não retenção
+   perfeita: quem foi importado carrega `lastSeenDate` posterior por construção. A partir de
+   2025-09 os números batem com os já conhecidos (30,1 / 21,7 / 15,4). A S8.2 tem de detectar
+   e **não publicar** as coortes contaminadas — publicá-las seria inventar um passado bom.
+2. **A coorte do mês corrente é imatura.** 2026-08 dá D30 = 0,0% porque ninguém registrado
+   neste mês teve 30 dias para voltar. Isso é *sem dados*, e sai `null`, nunca zero — é a
+   regra dura do projeto aplicada ao caso mais fácil de errar.
 
 ### `serverOverview` e `onlineOverview` não estão no documento
 
