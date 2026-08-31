@@ -621,14 +621,19 @@ existe para impedir.
       antes de dez/2025 — **uma metade bloqueada, não as duas. A linha anterior dizia
       "inalcançável nas duas metades" e estava errada sobre a primeira.**
 
-      **Primeira metade (~54% rede→survival): o bloqueio citado está em dúvida, não removido.**
-      Ela foi declarada inalcançável porque `plan_users` teria perdido o histórico do proxy.
-      Essa perda **nunca foi medida** — foi inferida — e `PlanDatabase.earliestArrivalAt()`
-      (`SELECT MIN(registered) FROM plan_users`) responde a pergunta, publicada como
-      `coversFrom` em toda chamada de `/funnel/monthly`.
+      **Primeira metade (~54% rede→survival): resolvida em 2026-08-31, e é inalcançável —
+      agora por um motivo medido.** O `plan_users` deste banco guarda o **Survival**, não a
+      rede: o proxy tem zero linhas em `plan_user_info`, e as contagens mensais da tabela são
+      exatamente a coluna `survival` dos números verificados, nos oito meses.
 
-      Enquanto esse `curl` não for dado, esta metade não está nem bloqueada nem destravada:
-      está **sem medição**. Ler o `coversFrom` custa um comando e decide a linha.
+      O bloqueio alegado antes (profundidade) era falso — `coversFrom` = **2024-06-02**, 26
+      meses. O bloqueio real é que **a população da rede não está neste banco**; está no antigo,
+      de onde veio a coluna `rede` daquela tabela.
+
+      Consequência que não é só de DoD: o degrau `rede` do funil mede Survival com outro nome, e
+      o check `funnel.network_to_survival` divide Survival por Survival — ele reportaria `ok`
+      com a rede inteira desaparecida. Detalhe no
+      [`HANDOFF.md`](../features/austv-admin/HANDOFF.md).
 
       A segunda metade merece a conta explícita, porque é fácil errar o denominador — e a primeira
       versão desta linha errou. O `~100%` sai de **tutorial ÷ survival**, não de tutorial ÷ rede.
