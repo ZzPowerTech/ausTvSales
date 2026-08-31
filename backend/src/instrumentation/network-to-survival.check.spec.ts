@@ -106,10 +106,84 @@ describe('NetworkToSurvivalCheck', () => {
     expect(observations).toEqual([]);
   });
 
-  it('touches neither the Plan API nor the game database', () => {
-    // The constructor takes one collaborator, and that is the assertion: there
-    // is no client and no pool to call. A cycle that asked the game machine for
-    // a constant would be paying for nothing, every fifteen minutes, forever.
-    expect(NetworkToSurvivalCheck.length).toBe(1);
+  describe('nao cobra nada da maquina do jogo', () => {
+    /**
+     * The property: one cycle of this check costs the game machine nothing.
+     *
+     * It used to be asserted as `NetworkToSurvivalCheck.length === 1`, which
+     * tested the wrong thing in both directions. It failed on any second
+     * collaborator that was not a client or a pool — a Logger, a clock — with a
+     * message about network calls, sending whoever debugged it to look for
+     * something that was not there. And it passed if `run()` started reaching
+     * the Plan through a module-level singleton, a static, or a bare `fetch`,
+     * because none of those change the constructor's arity.
+     *
+     * What replaces it observes the call actually happening. What is *not*
+     * asserted here, because the type system already does it: that no
+     * `PlanDatabase` is injected. Adding one as a required dependency breaks
+     * every construction in this file at compile time, which is a harder guard
+     * than any runtime spy.
+     */
+    it('nao faz nenhuma chamada HTTP durante o ciclo', async () => {
+      // `PlanApiClient` reaches the Plan through the global `fetch`, so this
+      // catches the regression by ANY route — an injected client, a singleton,
+      // or a bare `fetch()` written into `run()`. Same pattern the
+      // `discord-alerter` spec uses.
+      const realFetch = global.fetch;
+      const fetchMock = jest.fn();
+      global.fetch = fetchMock;
+
+      try {
+        await new NetworkToSurvivalCheck(serversConfig(ONE_BACKEND)).run();
+        expect(fetchMock).not.toHaveBeenCalled();
+      } finally {
+        global.fetch = realFetch;
+      }
+    });
+
+    it('le apenas `backends()` do unico colaborador que recebe', async () => {
+      // Records what `run()` reads off its collaborator. Methods are handed
+      // back bound to the raw target, so the object's own internal `this`
+      // access does not count as the check touching it — what the assertion
+      // sees is exactly the surface `run()` used.
+      const touched: string[] = [];
+      const target = serversConfig(ONE_BACKEND);
+      const recorded = new Proxy(target, {
+        get(object, property, receiver) {
+          if (typeof property === 'string') {
+            touched.push(property);
+          }
+          const value = Reflect.get(object, property, receiver) as unknown;
+          return typeof value === 'function'
+            ? (value as (...args: unknown[]) => unknown).bind(object)
+            : value;
+        },
+      });
+
+      await new NetworkToSurvivalCheck(recorded).run();
+
+      expect([...new Set(touched)]).toEqual(['backends']);
+    });
+
+    it('resolve mesmo com fetch e o relogio indisponiveis', async () => {
+      // The strongest statement of "this answer does not depend on anything
+      // outside the process": make the two ways out of it throw, and the check
+      // still produces its verdicts.
+      const realFetch = global.fetch;
+      global.fetch = () => {
+        throw new Error('a rede nao deveria ser tocada neste check');
+      };
+
+      try {
+        const observations = await new NetworkToSurvivalCheck(
+          serversConfig(ONE_BACKEND),
+        ).run();
+
+        expect(observations).toHaveLength(1);
+        expect(observations[0].status).toBe('no_data');
+      } finally {
+        global.fetch = realFetch;
+      }
+    });
   });
 });
