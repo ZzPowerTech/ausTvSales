@@ -405,42 +405,66 @@ erro específico não seja repetido em código.
 não veio na unificação — identidade, sessão, ou parte de cada — **não está estabelecido**;
 as duas contagens acima não distinguem essas leituras. Ver o bloco abaixo.
 
-> #### ⚠️ "Métrica de rede tem 3 dias de profundidade" está EM DÚVIDA, e a checagem que
-> resolve já está escrita (2026-08-31)
+> #### ✅ MEDIDO em 2026-08-31: `plan_users` cobre desde **2024-06-02**, e o problema é outro
 >
 > Esta seção afirmava, como fato, que a métrica de rede só existia **desde 2026-08-20**, e
-> disso saíram o adiamento da S8.2, a data de 2026-09-19 e metade do DoD da S8.
+> disso saíram o adiamento da S8.2, a data de 2026-09-19 e metade do DoD da S8. Uma versão
+> anterior desta nota tentou refutar isso pela contagem de linhas do `/v1/retention`, o que
+> era inferir sobre uma fonte a partir de evidência sobre outra.
 >
-> **O que foi observado.** Uma leitura do `/v1/retention` em 2026-08-29 devolveu **5565
-> linhas** com `registerDate` de **2024-06** a **2026-08**.
+> **Agora está medido, na coluna certa.** `curl` autenticado em `/api/funnel/monthly`, cujo
+> `coversFrom` é a resposta de `SELECT MIN(registered) FROM plan_users`:
 >
-> **O que isso NÃO estabelece, e a primeira versão desta nota dizia que estabelecia.** Que
-> `plan_users.registered` tem 26 meses. A ponte era "5565 ≈ 5566 linhas do `plan_users`,
-> logo é a mesma população" — uma contagem que erra por um. O Plan guarda registro em
-> **dois** lugares (`plan_users.registered`, de rede, e `plan_user_info.registered`, por
-> servidor), o `/v1/retention` é documentado como *"for server or the network"* e **não foi
-> registrado qual requisição foi feita**. O `plan_user_info` do Survival tem 5540 linhas:
-> 5565 cabe nessa vizinhança e não distingue as duas leituras.
+> ```
+> "coversFrom":"2024-06-02"
+> ```
 >
-> **A checagem que resolve já existe e ninguém rodou.** `PlanDatabase.earliestArrivalAt()`
-> é literalmente `SELECT MIN(registered) FROM plan_users`, e o `FunnelService` publica a
-> resposta como `coversFrom` em toda chamada de `/funnel/monthly`. Um `curl` no endpoint
-> devolve a profundidade exata da coluna em disputa.
+> **26 meses. A afirmação de "3 dias" era falsa.**
 >
-> Escrever essa inferência como fato foi cometer o erro 5 — concluir sobre uma fonte a
-> partir de evidência sobre outra, com a fonte que responde a um comando de distância —
-> dentro do parágrafo que o estava catalogando. Por isso esta nota **não** vira "erro 6":
-> ela é o erro 5 de novo, e o registro fica onde já está.
+> #### E a mesma leitura abriu um problema maior
 >
-> **O que se pode afirmar hoje:**
+> Os buckets mensais de `rede` que a mesma resposta traz, ao lado da tabela de números
+> verificados acima:
 >
-> - o `/v1/retention` **daquela leitura** cobre 26 meses de `registerDate`. Para uma S8.2
->   construída sobre o endpoint, essa é a profundidade que importa, e ela é suficiente;
-> - a profundidade de `plan_users.registered` — que é o que o **degrau de rede do funil**
->   lê por SQL — continua **desconhecida**. Nem confirmada nem refutada.
+> | mês | `rede` no funil | `rede` na tabela | `survival` na tabela |
+> |---|---|---|---|
+> | 2025-11 | 687 | 1403 | 682 |
+> | 2025-12 | 635 | 1259 | 641 |
+> | 2026-01 | 727 | 1177 | 727 |
+> | 2026-02 | 373 | 645 | 374 |
+> | 2026-03 | 257 | 445 | 258 |
+> | 2026-04 | 192 | 360 | 192 |
+> | 2026-05 | 1 | 1 | 1 |
+> | 2026-06 | 107 | *(Plan morto)* | 106 |
 >
-> **Como fechar:** `curl` autenticado em `/funnel/monthly` e ler `coversFrom`. Registrar o
-> valor aqui, com a data. Até lá, nada nesta seção deve ser citado como profundidade de rede.
+> **O degrau chamado `rede` bate com a coluna `survival`, não com a coluna `rede`.** Oito
+> meses, diferença de 0 a 6 contra `survival` e cerca de metade de `rede`. E não é filtro:
+> `networkArrivalsBetween` é `SELECT uuid, registered FROM plan_users WHERE registered
+> BETWEEN ? AND ?`, sem servidor e sem plataforma.
+>
+> **Duas leituras possíveis, e nenhuma está verificada:**
+>
+> 1. o `plan_users` de hoje guarda essencialmente a população do **survival** — as linhas
+>    do proxy realmente não vieram, e as que ficaram são antigas, o que explica ao mesmo
+>    tempo a profundidade de 2024-06 e a coincidência com `survival`;
+> 2. a coluna `rede` da tabela veio de uma fonte que conta outra coisa (sessão, ou o banco
+>    antigo), e é ela que está errada.
+>
+> A leitura 1 é consistente com o que este documento já registra — que o histórico do proxy
+> ficou no banco antigo — e, se for ela, **a afirmação original não era boba: era mal
+> escrita**. A tabela não é rasa; falta nela a *metade da rede*. "Sem profundidade" e "sem a
+> população do proxy" são coisas diferentes, e as duas versões anteriores desta nota erraram
+> uma para cada lado.
+>
+> **Por que isto é urgente, e não uma curiosidade:** se a leitura 1 estiver certa, o degrau
+> `rede` do funil está **rotulado errado**, e a conversão rede→survival calculada a partir
+> dele daria perto de **100%**, não os ~54% conhecidos. Um número alto, plausível e falso —
+> exatamente a classe do 4500% e do "queda de 96%". Nada deve ser publicado como conversão
+> de rede antes de isto ser resolvido.
+>
+> **Como resolver:** descobrir se as linhas de `plan_users` carregam origem por servidor
+> (`plan_user_info` faz o vínculo) e comparar a contagem de um mês contra o survival puro.
+> Minutos, com acesso — e desta vez a fonte tem de ser a que responde, não uma vizinha.
 
 ---
 
