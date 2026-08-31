@@ -857,6 +857,60 @@ describe('decideAlerts', () => {
     });
   });
 
+  describe('o que o orcamento do Discord cortou volta no ciclo seguinte', () => {
+    // O `DiscordAlerter` corta campos para caber nos 6000 caracteres agregados,
+    // e corta recuperacao e sinal perdido ANTES de falha ativa. O comentario do
+    // `cutOrder` diz que isso "pode esperar um ciclo". Sob a politica anterior
+    // era falso: ela classificava contra a LINHA anterior, entao no ciclo
+    // seguinte o `previousStatus` ja era `ok` e a recuperacao virava
+    // `not_notifiable` — perdida de vez, nao adiada.
+    //
+    // O que torna o corte seguro e a base de comparacao: nada cortado e
+    // carimbado, entao o `lastAlert` nao anda, e o mesmo balde e produzido de
+    // novo. Estes dois testes prendem isso.
+
+    it('reproduz a recuperacao que nao foi entregue', () => {
+      const record = observation(HealthCheckName.CollectionAlive, 'ok');
+      const naoEntregue = told(record.checkName, 'breached', 2);
+
+      const primeiro = decide({
+        observations: [record],
+        lastAlert: naoEntregue,
+        healthyStreak: confirmed(record.checkName),
+      });
+      // O alerter cortou: nada foi carimbado, entao o ciclo seguinte ve
+      // exatamente o mesmo `lastAlert`.
+      const segundo = decide({
+        observations: [record],
+        lastAlert: naoEntregue,
+        healthyStreak: confirmed(record.checkName),
+      });
+
+      expect(primeiro.recovered).toEqual([record]);
+      expect(segundo.recovered).toEqual([record]);
+    });
+
+    it('reproduz o sinal perdido que nao foi entregue', () => {
+      // O pior dos dois para cortar: "este check em falha ficou cego" e
+      // exatamente o sinal do ADR-006, e o `cutOrder` o tira antes da falha
+      // ativa.
+      const record = observation(HealthCheckName.TutorialEntryRate, 'no_data');
+      const naoEntregue = told(record.checkName, 'breached', 2);
+
+      const primeiro = decide({
+        observations: [record],
+        lastAlert: naoEntregue,
+      });
+      const segundo = decide({
+        observations: [record],
+        lastAlert: naoEntregue,
+      });
+
+      expect(primeiro.lostSignal).toEqual([record]);
+      expect(segundo.lostSignal).toEqual([record]);
+    });
+  });
+
   describe('lote misto', () => {
     it('separa anuncio, recuperacao e supressao numa unica decisao', () => {
       const failing = observation(HealthCheckName.CollectionAlive, 'breached');

@@ -63,17 +63,36 @@ export class OrphanInstanceCheck implements HealthCheck {
     const configured = this.servers.all().map((server) => server.name);
 
     if (catalogue.length === 0) {
-      // Not agreement, and not a pass. An empty catalogue means Plan lost track
-      // of every instance — the loudest possible version of the problem this
-      // check exists to find.
+      // `error`, not `no_data`, and the distinction is the whole alert.
+      //
+      // An empty catalogue means Plan lost track of every instance — the
+      // loudest possible version of the problem this check exists to find. But
+      // `NOTIFIABLE_STATUSES` holds `breached` and `error` and **not**
+      // `no_data`, and `decideAlerts` suppresses a `no_data` as
+      // `not_notifiable` whenever nothing is already open on the check. So a
+      // catalogue that empties from a clean state filed as `no_data` produces a
+      // row every fifteen minutes and never one message — silence over the
+      // exact disaster of ADR-006.
+      //
+      // Filing it as `error` is also the honest reading of the vocabulary:
+      // `no_data` is "ran, but the source had nothing **for the window**". There
+      // is no window here. `plan_servers` is an inventory, and an inventory that
+      // comes back empty on a live network did not answer, it failed.
+      // `tutorial-entry-rate` reached the same conclusion for its stale ETL.
       return [
-        this.verdict('no_data', 'plan_servers nao retornou nenhum servidor', {
+        this.verdict('error', 'plan_servers nao retornou nenhum servidor', {
           n: configured.length,
         }),
       ];
     }
 
     if (configured.length === 0) {
+      // Stays `no_data`, deliberately, and the line is drawn at *whose* emptiness
+      // it is. Above, a source came back with an impossible answer. Here our own
+      // configuration is unset — nothing failed, there is simply nothing to
+      // compare against, and an unconfigured staging box must not page the
+      // channel every re-alert window. `InstrumentationHealthService` already
+      // made that same call for `missing` checks, for the same reason.
       return [
         this.verdict(
           'no_data',
@@ -135,7 +154,7 @@ export class OrphanInstanceCheck implements HealthCheck {
   }
 
   private verdict(
-    status: 'ok' | 'breached' | 'no_data',
+    status: 'ok' | 'breached' | 'no_data' | 'error',
     summary: string,
     detail: Omit<HealthCheckObservation['detail'], 'summary'>,
   ): HealthCheckObservation {

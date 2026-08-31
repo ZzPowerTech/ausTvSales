@@ -1,3 +1,9 @@
+import { decideAlerts } from './alert-policy';
+import type {
+  HealthCheckRecord,
+  HealthCheckStatus,
+} from './health-check.types';
+
 import type { PlanDatabase, PlanServerRow } from './plan-database';
 import { VersionDivergenceCheck } from './version-divergence.check';
 
@@ -20,6 +26,41 @@ const AUSTV_REAL = [
   server('Survival', '5.8 build 3605'),
   server('AusTv', '5.8 build 3605', true),
 ];
+
+/**
+ * Does this verdict actually reach the channel from a clean slate?
+ *
+ * The defect these tests exist for lived in the *policy*, not in the status
+ * name: `decideAlerts` suppresses a `no_data` with nothing open as
+ * `not_notifiable`, forever. Asserting that the status is in some notifiable
+ * list only restates the line above it. Driving the record through the real
+ * policy is the property.
+ */
+function announcedFromCleanSlate(observation: {
+  checkName: string;
+  status: HealthCheckStatus;
+}): boolean {
+  const record: HealthCheckRecord = {
+    id: 1,
+    checkName: observation.checkName,
+    status: observation.status,
+    checkedAt: new Date('2026-08-30T12:00:00.000Z'),
+    detail: null,
+    alertedAt: null,
+  };
+
+  const decision = decideAlerts({
+    observations: [record],
+    lastAlert: new Map(),
+    alertsInWindow: new Map(),
+    maxAlertsPerWindow: 4,
+    healthyStreak: new Map(),
+    confirmRecoveryAfter: 2,
+    reAlertAfterMs: 24 * 60 * 60 * 1000,
+  });
+
+  return decision.announce.includes(record);
+}
 
 describe('VersionDivergenceCheck', () => {
   describe('convergencia', () => {
@@ -90,16 +131,29 @@ describe('VersionDivergenceCheck', () => {
     });
   });
 
-  describe('ausencia de dado', () => {
-    it('reports no_data when the catalogue is empty', async () => {
+  describe('catalogo vazio', () => {
+    it('reports error, not no_data, when the catalogue is empty', async () => {
       const [result] = await new VersionDivergenceCheck(dbReturning([])).run();
 
-      // An empty catalogue is not agreement. `ok` here would pass the check
-      // precisely when Plan lost track of every instance.
-      expect(result.status).toBe('no_data');
+      // An empty catalogue is not agreement, and `ok` here would pass the check
+      // precisely when Plan lost track of every instance. It is not an empty
+      // window either: `error` is the only verdict that reaches the channel.
+      expect(result.status).toBe('error');
       expect(result.detail.n).toBe(0);
     });
 
+    it('files the empty catalogue under a notifiable status', async () => {
+      // The regression this pins. `decideAlerts` suppresses a `no_data` as
+      // `not_notifiable` while nothing is open on the check, so an emptied
+      // `plan_servers` filed as `no_data` rewrote a row every cycle and never
+      // produced one message.
+      const [result] = await new VersionDivergenceCheck(dbReturning([])).run();
+
+      expect(announcedFromCleanSlate(result)).toBe(true);
+    });
+  });
+
+  describe('ausencia de dado', () => {
     it('reports no_data with a single instance', async () => {
       const [result] = await new VersionDivergenceCheck(
         dbReturning([server('Survival', '5.8 build 3605')]),
@@ -118,6 +172,10 @@ describe('VersionDivergenceCheck', () => {
 
       // Only one server has a version, so there is nothing to compare. Calling
       // that `ok` would claim agreement that was never established.
+      //
+      // Stays `no_data`, unlike the empty catalogue: the source answered with
+      // real servers and the comparison merely has no base. This is the case the
+      // suppression rule in `decideAlerts` was written for.
       expect(result.status).toBe('no_data');
       expect(result.detail.n).toBe(2);
     });

@@ -67,18 +67,57 @@ export class ProxyRegistrationAliveCheck implements HealthCheck {
       ];
     }
 
-    if (arrivals.lastRegisteredAt === null) {
+    if (arrivals.total === 0) {
       // An empty identity table is not "nobody arrived recently" — it is a
       // network with no history at all, which on a live server means the read
-      // found the wrong database.
+      // found the wrong database. That is §1's founding disaster verbatim: the
+      // production Plan on SQLite while the MySQL being queried was half empty.
+      //
+      // So `error`, not `no_data`: `decideAlerts` suppresses a `no_data` with
+      // nothing open on the check as `not_notifiable`, forever, meaning the
+      // single verdict that would have named the SQLite disaster is the one that
+      // never reaches Discord. `no_data` is for a window that came back empty;
+      // an identity table has no window.
       return [
         {
           checkName: this.name,
-          status: 'no_data',
+          status: 'error',
           detail: {
             summary:
-              'plan_users nao tem nenhum registro — sem base para avaliar ' +
-              'liveness do proxy',
+              'plan_users nao tem nenhum registro — a leitura provavelmente ' +
+              'encontrou o banco errado',
+            n: 0,
+          },
+        },
+      ];
+    }
+
+    if (arrivals.lastRegisteredAt === null) {
+      // Rows exist, but no usable `MAX(registered)`. Deliberately a *different*
+      // verdict from the one above, and it names no cause.
+      //
+      // The two came from the same branch until 2026-08-30, keyed on
+      // `lastRegisteredAt === null`, and that was wrong in a way worth spelling
+      // out: `total` is a `COUNT(*)` while `lastRegisteredAt` runs through
+      // `toNumber`, which returns null for an empty table **and** for any shape
+      // it does not expect — a `Date`, a non-numeric string, a driver bump that
+      // changes how a BIGINT comes back. `toNumber`'s own docblock names that as
+      // the bug that only shows up after a dependency upgrade.
+      //
+      // Merged, a mysql2 bump would have told the channel every fifteen minutes
+      // that the read "probably found the wrong database", about a perfectly
+      // healthy Plan, while `n` in the same payload said 5566. Alerting on a
+      // diagnosis the code never established is worse than not alerting: it
+      // sends someone to the wrong system.
+      return [
+        {
+          checkName: this.name,
+          status: 'error',
+          detail: {
+            summary:
+              `plan_users tem ${arrivals.total} linha(s), mas nenhuma data de ` +
+              'registro legivel — a coluna mudou de tipo ou o driver mudou de ' +
+              'formato. NAO e o mesmo que tabela vazia.',
             n: arrivals.total,
           },
         },

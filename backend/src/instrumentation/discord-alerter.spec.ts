@@ -41,9 +41,9 @@ function record(
 function decision(overrides: Partial<AlertDecision> = {}): AlertDecision {
   return {
     announce: [],
+    flapping: [],
     recovered: [],
     lostSignal: [],
-    flapping: [],
     suppressed: [],
     ...overrides,
   };
@@ -91,6 +91,38 @@ describe('DiscordAlerter', () => {
   function sentPayload(call = 0): DiscordPayload {
     const calls = fetchMock.mock.calls as FetchCall[];
     return JSON.parse(calls[call][1].body) as DiscordPayload;
+  }
+
+  /**
+   * What Discord counts against its 6000-character aggregate limit: titles,
+   * descriptions, field names and field values summed over *all* embeds of the
+   * message. Recomputed here from the wire payload instead of imported, so the
+   * test would still catch the module agreeing with itself about a wrong sum.
+   */
+  function aggregateChars(payload: DiscordPayload): number {
+    return payload.embeds.reduce(
+      (total, embed) =>
+        total +
+        embed.title.length +
+        (embed.description?.length ?? 0) +
+        embed.fields.reduce(
+          (sum, field) => sum + field.name.length + field.value.length,
+          0,
+        ),
+      0,
+    );
+  }
+
+  /** One `error` observation as `runChecks` builds it when a source is down. */
+  function blackoutRecords(
+    count: number,
+    reasonChars = 400,
+  ): HealthCheckRecord[] {
+    return Array.from({ length: count }, (_, index) =>
+      record(`plan.collection_alive:s${index}`, 'error', {
+        summary: `Check lancou excecao: ${'x'.repeat(reasonChars)}`,
+      }),
+    );
   }
 
   describe('configuracao', () => {
@@ -440,46 +472,161 @@ describe('DiscordAlerter', () => {
     });
   });
 
-  describe('oscilacao (orcamento de mensagens estourado)', () => {
-    it('avisa que vai ficar quieto em vez de so ficar quieto', async () => {
-      // Um mute silencioso e indistinguivel de um check saudavel — a confusao
-      // exata contra a qual o ADR-006 foi escrito. O silenciamento se anuncia.
+  describe('orcamento agregado de 6000 caracteres', () => {
+    it('cabe no limite agregado no apagao que gera 25 erros longos', async () => {
       fetchMock.mockResolvedValue(okResponse());
-      const noisy = record('platform.offline_account_share', 'breached');
 
-      await buildEnabled().publish(decision({ flapping: [noisy] }));
+      // O cenario real: a VPS do Plan some, `runChecks` transforma cada excecao
+      // numa observacao `error` com a mensagem da excecao, e os 25 campos por
+      // embed passam folgado dos 6000 somados. O Discord responde 400, o
+      // alerter desiste, e o proximo ciclo remonta o mesmo payload — silencio
+      // permanente exatamente no maior apagao possivel.
+      await buildEnabled().publish(decision({ announce: blackoutRecords(25) }));
 
-      const embed = sentPayload().embeds[0];
-      expect(embed.title).toContain('silenciado');
-      expect(embed.description).toContain('NAO significa que estao bem');
-      // E aponta para onde a verdade continua disponivel.
-      expect(embed.description).toContain('/health/instrumentation');
-      // Nem verde nem vermelho: nao e um veredito sobre o jogo.
-      expect(embed.color).not.toBe(0x2e8b57);
-      expect(embed.color).not.toBe(0xd9363c);
+      expect(aggregateChars(sentPayload())).toBeLessThanOrEqual(6000);
     });
 
-    it('entrega o id do aviso para o carimbo, para nao repeti-lo', async () => {
-      // Se este id nao voltasse, o aviso nunca seria carimbado, o orcamento
-      // nunca passaria do teto e o "vou ficar quieto" sairia a cada ciclo — o
-      // silenciamento viraria a propria oscilacao.
+    it('cabe no limite agregado com os tres baldes cheios', async () => {
       fetchMock.mockResolvedValue(okResponse());
-      const noisy = record('platform.offline_account_share', 'breached');
 
-      const delivered = await buildEnabled().publish(
-        decision({ flapping: [noisy] }),
+      // O teto de 25 campos por balde da falsa seguranca: sao tres baldes, e
+      // 3 x 25 campos e estruturalmente permitido.
+      await buildEnabled().publish(
+        decision({
+          announce: blackoutRecords(25),
+          recovered: blackoutRecords(25),
+          lostSignal: blackoutRecords(25),
+        }),
       );
 
-      expect(delivered).toEqual([noisy.id]);
+      expect(aggregateChars(sentPayload())).toBeLessThanOrEqual(6000);
     });
 
-    it('conta a oscilacao no resumo', async () => {
+    it('devolve so os ids que couberam de fato', async () => {
       fetchMock.mockResolvedValue(okResponse());
-      const noisy = record('platform.offline_account_share', 'breached');
+      const many = blackoutRecords(25);
 
-      await buildEnabled().publish(decision({ flapping: [noisy] }));
+      const delivered = await buildEnabled().publish(
+        decision({ announce: many }),
+      );
 
-      expect(sentPayload().content).toContain('1 oscilando (silenciado)');
+      // Mesma regra do corte de 25 campos: carimbar `alerted_at` em algo que
+      // nao foi exibido faz a politica agrupar o check, e ele some do canal por
+      // uma janela inteira de re-alerta.
+      const shown = sentPayload().embeds[0].fields.length;
+      expect(shown).toBeLessThan(25);
+      expect(delivered).toHaveLength(shown);
+      expect(delivered).toEqual(many.slice(0, shown).map((r) => r.id));
+    });
+
+    it('conta o corte do orcamento no aviso de nao exibido', async () => {
+      fetchMock.mockResolvedValue(okResponse());
+      const many = blackoutRecords(25);
+
+      await buildEnabled().publish(decision({ announce: many }));
+
+      const payload = sentPayload();
+      const hidden = 25 - payload.embeds[0].fields.length;
+      // Truncamento em silencio e lido como "era so isso".
+      expect(payload.content).toContain(
+        `${hidden} nao exibido(s) por limite do Discord`,
+      );
+    });
+
+    it('mantem no titulo a contagem real do balde cortado', async () => {
+      fetchMock.mockResolvedValue(okResponse());
+
+      await buildEnabled().publish(decision({ announce: blackoutRecords(25) }));
+
+      expect(sentPayload().embeds[0].title).toContain('25 check(s)');
+    });
+
+    it('corta recuperacao antes de falha', async () => {
+      fetchMock.mockResolvedValue(okResponse());
+      const failing = blackoutRecords(10, 300);
+      const recovered = Array.from({ length: 10 }, (_, index) =>
+        record(`plan.orphan_instance:r${index}`, 'ok', {
+          summary: 'z'.repeat(300),
+        }),
+      );
+
+      const delivered = await buildEnabled().publish(
+        decision({ announce: failing, recovered }),
+      );
+
+      const payload = sentPayload();
+      // Noticia boa espera um ciclo; a falha ativa e a razao de a mensagem
+      // existir.
+      expect(payload.embeds[0].fields).toHaveLength(10);
+      expect(payload.embeds[1].fields.length).toBeLessThan(10);
+      expect(delivered).toEqual(
+        expect.arrayContaining(failing.map((r) => r.id)),
+      );
+    });
+
+    it('nao deixa o payload passar dos 6000 nem com detalhe gigante', async () => {
+      fetchMock.mockResolvedValue(okResponse());
+      const huge = Array.from({ length: 25 }, (_, index) =>
+        record(`plan.collection_alive:s${index}`, 'error', {
+          summary: 'x'.repeat(5000),
+        }),
+      );
+
+      const delivered = await buildEnabled().publish(
+        decision({ announce: huge }),
+      );
+
+      expect(aggregateChars(sentPayload())).toBeLessThanOrEqual(6000);
+      expect(delivered.length).toBeGreaterThan(0);
+    });
+
+    it('preserva allowed_mentions e escape mesmo cortando campos', async () => {
+      fetchMock.mockResolvedValue(okResponse());
+      const many = Array.from({ length: 25 }, (_, index) =>
+        record(`plan.collection_alive:s${index}`, 'error', {
+          summary: `@everyone ||spoiler|| ${'x'.repeat(400)}`,
+        }),
+      );
+
+      await buildEnabled().publish(decision({ announce: many }));
+
+      const payload = sentPayload();
+      expect(payload.allowed_mentions).toEqual({ parse: [] });
+      expect(payload.embeds[0].fields[0].value).not.toContain('||spoiler||');
+    });
+  });
+
+  describe('recusa do payload (HTTP 400)', () => {
+    it('nao carimba nada e diz no log que nao entregou', async () => {
+      const error = jest.spyOn(Logger.prototype, 'error');
+      fetchMock.mockResolvedValue({ ok: false, status: 400 });
+
+      const ids = await buildEnabled().publish(
+        decision({
+          announce: [record(HealthCheckName.CollectionAlive, 'breached')],
+        }),
+      );
+
+      expect(ids).toEqual([]);
+      // `publish` devolvendo [] sozinho e indistinguivel de "nao havia nada a
+      // dizer" para quem le o log.
+      const logged = JSON.stringify(error.mock.calls);
+      expect(logged).toContain('NAO entregue');
+      expect(logged).toContain('400');
+      expect(logged).not.toContain('super-secret-token');
+    });
+
+    it('nao tenta de novo no mesmo ciclo', async () => {
+      fetchMock.mockResolvedValue({ ok: false, status: 400 });
+
+      await buildEnabled().publish(
+        decision({
+          announce: [record(HealthCheckName.CollectionAlive, 'breached')],
+        }),
+      );
+
+      // O 400 nao e transitorio: a mesma decisao remonta o mesmo payload.
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     });
   });
 

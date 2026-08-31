@@ -1,4 +1,10 @@
+import { decideAlerts } from './alert-policy';
+import type {
+  HealthCheckRecord,
+  HealthCheckStatus,
+} from './health-check.types';
 import { ConfigService } from '@nestjs/config';
+
 import { OrphanInstanceCheck } from './orphan-instance.check';
 import type { PlanDatabase, PlanServerRow } from './plan-database';
 import { PlanServersConfig } from './plan-servers.config';
@@ -30,6 +36,41 @@ const REAL_CONFIG = {
   PLAN_SERVERS: 'AusTv,Survival',
   PLAN_PROXY_SERVER: 'AusTv',
 };
+
+/**
+ * Does this verdict actually reach the channel from a clean slate?
+ *
+ * The defect these tests exist for lived in the *policy*, not in the status
+ * name: `decideAlerts` suppresses a `no_data` with nothing open as
+ * `not_notifiable`, forever. Asserting that the status is in some notifiable
+ * list only restates the line above it. Driving the record through the real
+ * policy is the property.
+ */
+function announcedFromCleanSlate(observation: {
+  checkName: string;
+  status: HealthCheckStatus;
+}): boolean {
+  const record: HealthCheckRecord = {
+    id: 1,
+    checkName: observation.checkName,
+    status: observation.status,
+    checkedAt: new Date('2026-08-30T12:00:00.000Z'),
+    detail: null,
+    alertedAt: null,
+  };
+
+  const decision = decideAlerts({
+    observations: [record],
+    lastAlert: new Map(),
+    alertsInWindow: new Map(),
+    maxAlertsPerWindow: 4,
+    healthyStreak: new Map(),
+    confirmRecoveryAfter: 2,
+    reAlertAfterMs: 24 * 60 * 60 * 1000,
+  });
+
+  return decision.announce.includes(record);
+}
 
 describe('OrphanInstanceCheck', () => {
   describe('listas em acordo', () => {
@@ -137,23 +178,44 @@ describe('OrphanInstanceCheck', () => {
     });
   });
 
-  describe('ausencia de dado', () => {
-    it('reports no_data when the catalogue is empty', async () => {
+  describe('catalogo vazio', () => {
+    it('reports error when the catalogue is empty', async () => {
       const [result] = await new OrphanInstanceCheck(
         dbReturning([]),
         serversConfig(REAL_CONFIG),
       ).run();
 
-      // An empty catalogue is the loudest version of this problem, not a pass.
-      expect(result.status).toBe('no_data');
+      // An empty catalogue is the loudest version of this problem, not a pass —
+      // and `no_data` would file the loudest version under the one status that
+      // never reaches Discord.
+      expect(result.status).toBe('error');
     });
 
+    it('files the empty catalogue under a notifiable status', async () => {
+      // The regression this pins. `decideAlerts` suppresses a `no_data` as
+      // `not_notifiable` while nothing is open on the check, so a `plan_servers`
+      // that empties from a clean state produced a row every fifteen minutes and
+      // never one message.
+      const [result] = await new OrphanInstanceCheck(
+        dbReturning([]),
+        serversConfig(REAL_CONFIG),
+      ).run();
+
+      expect(announcedFromCleanSlate(result)).toBe(true);
+    });
+  });
+
+  describe('ausencia de dado', () => {
     it('reports no_data when nothing is configured to compare against', async () => {
       const [result] = await new OrphanInstanceCheck(
         dbReturning(REAL_CATALOGUE),
         serversConfig({}),
       ).run();
 
+      // Stays `no_data`: nothing failed, our own configuration is unset. An
+      // unconfigured staging box must not page the channel every re-alert
+      // window — the same call `InstrumentationHealthService` makes for
+      // `missing` checks.
       expect(result.status).toBe('no_data');
       expect(result.detail.n).toBe(2);
     });
