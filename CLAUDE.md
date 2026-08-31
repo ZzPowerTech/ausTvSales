@@ -138,16 +138,17 @@ sprints.
   **A exceção 1 ficou sem justificativa nenhuma e ninguém a fechou** — fechar é decisão do dono.
   **A ressalva que a S8.2 tem de carregar:** `lastSeenDate` mede intervalo de sobrevivência, não
   retorno no dia N. Publicar é aceitável; publicar sem o rótulo é o erro de denominador de novo.
-- **A profundidade de `plan_users` nunca foi medida, e a checagem está pronta.** Este item dizia
-  "dias, não meses" como fato; era inferência a partir da perda do histórico do proxy. Uma leitura
-  do `/v1/retention` em 2026-08-29 mostrou 26 meses de `registerDate`, mas isso **não** resolve a
-  questão: o endpoint serve por servidor ou por rede, não foi registrado qual foi pedido, e o Plan
-  guarda registro em duas tabelas.
-  **`PlanDatabase.earliestArrivalAt()` é `SELECT MIN(registered) FROM plan_users` e o
-  `/funnel/monthly` publica a resposta como `coversFrom`.** Um `curl` autenticado fecha a questão —
-  e até lá a data de **2026-09-19** que circulava não tem base, porque vinha da mesma inferência.
-  O funil continua tratando bucket sem cobertura como `null`, nunca zero — isso não muda.
-
+- **🔴 O degrau `rede` do funil pode estar medindo a população errada, e ninguém verificou.**
+  A profundidade foi medida em 2026-08-31: `coversFrom` = **2024-06-02**, 26 meses — a alegação
+  de "dias, não meses" era falsa. Mas na mesma resposta os buckets de `rede` batem, em oito meses,
+  com a coluna **`survival`** da tabela de números verificados (diferença de 0 a 6) e dão cerca de
+  **metade** da coluna `rede`. A query não filtra nada: é `SELECT uuid, registered FROM plan_users`
+  na janela.
+  Se o `plan_users` de hoje guarda essencialmente o survival — leitura consistente com o
+  histórico do proxy ter ficado no banco antigo — então a conversão rede→survival calculada dele
+  daria perto de **100%** em vez dos ~54% conhecidos: número alto, plausível e falso, a classe do
+  4500%. **Nada de conversão de rede publicada antes de resolver.** As duas leituras possíveis e
+  como decidir entre elas estão no `HANDOFF.md`.
 - **O alerta de saúde CHEGA — comprovado em 2026-08-26.** Alertas reais do
   `platform.offline_account_share` foram observados no canal: `breached`, recuperação e o `n` ao
   lado do percentual, funcionando em produção. A camada deixou de ser construção sobre algo que

@@ -621,14 +621,17 @@ existe para impedir.
       antes de dez/2025 — **uma metade bloqueada, não as duas. A linha anterior dizia
       "inalcançável nas duas metades" e estava errada sobre a primeira.**
 
-      **Primeira metade (~54% rede→survival): o bloqueio citado está em dúvida, não removido.**
-      Ela foi declarada inalcançável porque `plan_users` teria perdido o histórico do proxy.
-      Essa perda **nunca foi medida** — foi inferida — e `PlanDatabase.earliestArrivalAt()`
-      (`SELECT MIN(registered) FROM plan_users`) responde a pergunta, publicada como
-      `coversFrom` em toda chamada de `/funnel/monthly`.
+      **Primeira metade (~54% rede→survival): medida em 2026-08-31, e o resultado foi pior que
+      um bloqueio.** `coversFrom` = **2024-06-02**: o `plan_users` tem 26 meses, e a alegada
+      perda de profundidade era falsa.
 
-      Enquanto esse `curl` não for dado, esta metade não está nem bloqueada nem destravada:
-      está **sem medição**. Ler o `coversFrom` custa um comando e decide a linha.
+      Mas a mesma resposta mostrou que o degrau `rede` do funil bate, mês a mês, com a coluna
+      **`survival`** da tabela de números verificados — não com a coluna `rede`, da qual é
+      cerca de metade. Se o degrau estiver medindo a população errada, esta linha do DoD não
+      está bloqueada: está pronta para produzir **~100%** e parecer certa. As duas leituras
+      possíveis estão no [`HANDOFF.md`](../features/austv-admin/HANDOFF.md).
+
+      **Não marcar esta linha, e não publicar conversão de rede, até isso ser resolvido.**
 
       A segunda metade merece a conta explícita, porque é fácil errar o denominador — e a primeira
       versão desta linha errou. O `~100%` sai de **tutorial ÷ survival**, não de tutorial ÷ rede.
