@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.15.1](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.15.0...backend-v0.15.1) (2026-08-31)
+
+
+### Bug Fixes
+
+* **admin:** orcar os 6000 caracteres do Discord antes de mandar o alerta ([#175](https://github.com/ZzPowerTech/ausTvSales/issues/175)) ([616384b](https://github.com/ZzPowerTech/ausTvSales/commit/616384b0741acf2f9eb2ebc15ec4d97b9493e2ed))
+* **admin:** parar a oscilação dos alertas de saúde — calibração, histerese e orçamento de mensagens ([#176](https://github.com/ZzPowerTech/ausTvSales/issues/176)) ([5dd54e3](https://github.com/ZzPowerTech/ausTvSales/commit/5dd54e307ef9f00d7bb3a4665e377897f82f7026))
+* **backend:** fonte vazia vira `error` — o alerta que nunca saia (§6.1) ([#174](https://github.com/ZzPowerTech/ausTvSales/issues/174)) ([0152d88](https://github.com/ZzPowerTech/ausTvSales/commit/0152d8880a13211dae3d0955d451bb8da20ea7b6))
+
 ## [0.15.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.14.0...backend-v0.15.0) (2026-08-29)
 
 
