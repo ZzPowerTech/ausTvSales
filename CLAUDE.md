@@ -134,15 +134,58 @@ S8.2 se os pré-requisitos dela forem resolvidos.
   mas nenhum número histórico de rede vai aparecer até lá.
 
 - **O alerta de saúde CHEGA — comprovado em 2026-08-26.** Alertas reais do
-  `platform.offline_account_share` foram observados no canal: `breached`, recuperação, agrupamento e
-  o `n` ao lado do percentual, tudo funcionando em produção. A camada deixou de ser construção sobre
-  algo que ninguém verificou.
+  `platform.offline_account_share` foram observados no canal: `breached`, recuperação e o `n` ao
+  lado do percentual, funcionando em produção. A camada deixou de ser construção sobre algo que
+  ninguém verificou.
+  **Agrupamento não entra nessa lista:** supressão só é observável sabendo que um ciclo produziu
+  falha e nenhuma mensagem saiu, e os ciclos entre 19:54 e 21:24 nunca foram registrados. Três
+  mensagens entregues não são evidência de supressão.
   **Falta metade do critério 4:** o caminho **`error`** — fonte que *morre*, não limiar que estoura.
   É outro código e é o que cobre o apagão de três meses. Teste: parar o Plan por um ciclo.
-- **🔴 Os alertas estão oscilando, e isso é ativo.** 51,5% (n=33) → 50,0% (n=32) → 51,6% (n=31) em
-  duas horas: com n≈32 **um único jogador vira o alerta**, e o limiar de 0,5 caiu exatamente em cima
-  do valor real. É o "canal do Discord vira mudo" acontecendo. A boa notícia é que isso **é** a
-  calibração que faltava: o share offline real é ~51%, estável.
+- **A oscilação dos alertas foi corrigida em código em 2026-08-29 — ainda não observada em
+  produção.** 51,5% (n=33) → 50,0% (n=32) → 51,6% (n=31) em duas horas: com n≈32 um único jogador
+  virava o alerta, e o limiar de 0,5 caía em cima do valor real. Duas correções, no mesmo PR:
+  - o limiar foi **calibrado para 0,65** usando essa própria leitura (nível real ~51% — as três
+    leituras são janelas de 7 dias tomadas em 105 minutos, então fixam o nível, não a estabilidade).
+    É isto que silencia a sequência de 2026-08-26: a 0,65 nenhuma das três leituras estoura.
+    O custo está registrado no `.env.example` — a faixa 0,55–0,65 fica cega de propósito;
+  - a política passou a decidir contra **o que o canal foi informado por último**, não contra a
+    linha anterior da tabela, com histerese de 2 ciclos no all-clear. A falha sai no primeiro
+    ciclo; só a recuperação espera. Piora (`breached` → `no_data` → `error`) fura a janela;
+    melhora sem chegar a `ok` espera.
+
+  **E um teto por cima de tudo isso** (`HEALTH_ALERT_MAX_PER_WINDOW`, padrão 4): a regra de
+  transição raciocina sobre formatos de oscilação e já errou duas vezes nisso — a primeira versão
+  deixava `breached` ↔ `no_data` mandar uma mensagem por ciclo para sempre; a segunda ainda deixava
+  `breached` → `ok` → `breached` passar, porque uma recuperação confirmada e entregue legitimamente
+  reabre a porta (64/dia; 448 por semana, medido sem o teto). O teto não depende de prever o
+  formato.
+
+  O teto conta **repetição**, e só. Um status que o canal não ouviu nesta janela passa sempre —
+  barrá-lo foi como a primeira versão do teto segurou a morte de uma fonte por 45 horas, deixando
+  um aviso cinza dizendo "calibre o limiar" como última palavra sobre um servidor que tinha
+  sumido. Recuperação confirmada **é** barrada, um slot antes das demais, e
+  por outro motivo: solta, ela ganha a corrida para ser a última mensagem, e o canal fica
+  segurando um "normalizado" sobre um check que quebra a cada três ciclos — falso all-clear, a
+  única coisa que esta camada não pode produzir. Reservar o último slot para um problema **reduz** esse
+  caso — não o elimina, porque o passe do status-não-ouvido é avaliado antes do limite, e
+  é inerte para teto 1 ou 2. O passe do status-não-ouvido a libera quando os
+  `ok` da própria oscilação saem da janela, e a espera aparece no log como
+  `segurados_por_orcamento`. Os três casos estão fixados em teste. Ao estourar, o check recebe um aviso de que vai ficar quieto — mute sem
+  aviso é indistinguível de check saudável.
+
+  Medido: a oscilação que dava **448** mensagens por semana passa a dar **27**, e o canal nunca
+  passa uma janela inteira sem notícia de um check que oscila — ou sai uma mensagem de verdade,
+  ou sai o aviso cinza. Quatro formatos de oscilação diferentes estão fixados em teste.
+  Duas ressalvas medidas: o aviso cinza não pode ser carimbado `ok` — seria lido como
+  all-clear —, então uma sequência de `ok` na fronteira estica o silêncio por esses
+  ciclos; e do lado da recuperação o custo chega a ~23h com o canal segurando um `breached`
+  sobre um check já saudável, sem nada dito durante a espera. Aparece no log como
+  `segurados_por_orcamento`.
+
+  O que a política **não** faz: se a recuperação se sustentar e for entregue, a quebra seguinte é
+  incidente novo e sai. Isso é correto. É por isso que a calibração é a metade que fecha o caso de
+  2026-08-26 — as duas juntas, não a política sozinha.
 - **A auditoria de rede da S6.2b nunca foi rodada.** Os scripts, o runbook e o template estão em
   `ops/audit/`; **nenhum relatório preenchido existe**, e o produto da história é o registro, não o
   script. Fechar isso e ler a whitelist do Plan (item abaixo) são a mesma tarefa.
@@ -157,9 +200,10 @@ S8.2 se os pré-requisitos dela forem resolvidos.
 - **[#157](https://github.com/ZzPowerTech/ausTvSales/issues/157) — perda de venda em silêncio.**
   Um 429 faz o plugin marcar a venda como permanentemente falha. Descoberto na S7; é dado perdido,
   não incômodo.
-- **Os três limiares da S6.3 seguem sem calibração** contra o baseline (chute conservador, marcado
-  como tal no `.env.example`). Enquanto isso, o alerta é ruído em potencial — que é como um canal
-  do Discord vira mudo.
+- **Dois dos três limiares da S6.3 seguem sem calibração** contra o baseline (chute conservador,
+  marcado como tal no `.env.example`). O terceiro, o share offline, foi calibrado pela produção —
+  ver o item acima. Enquanto os outros dois forem chute, o alerta é ruído em potencial, que é como
+  um canal do Discord vira mudo.
 - **Probe externo de uptime.** O critério 2 da S7.1 pede endpoint "para uso externo" e o 3 exige
   JWT — um monitor não faz OAuth. Ficou sob a sessão; a saída recomendada é heartbeat, não
   endpoint. Decisão do dono.

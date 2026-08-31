@@ -1,7 +1,6 @@
 import {
   HEALTH_CHECK_STATUSES,
   HealthCheckName,
-  NOTIFIABLE_STATUSES,
   parseCheckName,
   scopedCheckName,
 } from './health-check.types';
@@ -60,12 +59,6 @@ describe('health-check.types', () => {
         'no_data',
         'error',
       ]);
-    });
-
-    it('notifies on breached and error, but not on ok or no_data', () => {
-      expect(NOTIFIABLE_STATUSES).toEqual(['breached', 'error']);
-      expect(NOTIFIABLE_STATUSES).not.toContain('ok');
-      expect(NOTIFIABLE_STATUSES).not.toContain('no_data');
     });
   });
 

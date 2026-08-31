@@ -80,7 +80,7 @@ export class NetworkToSurvivalCheck implements HealthCheck {
 
     // The denominator is shared, so it is fetched once rather than once per
     // backend — one query instead of N against the game's database.
-    let networkArrivals: number;
+    let networkArrivals: number | null;
     try {
       const since = Date.now() - WINDOW_DAYS * MS_PER_DAY;
       networkArrivals = (await this.db.networkArrivals(since)).total;
@@ -91,6 +91,23 @@ export class NetworkToSurvivalCheck implements HealthCheck {
         status: 'error' as const,
         detail: {
           summary: `Nao foi possivel ler as chegadas de rede: ${reason}`,
+          context: { server: server.name },
+        },
+      }));
+    }
+
+    if (networkArrivals === null) {
+      // The query answered and the count came back in a shape `toNumber` does
+      // not read. `error`, not a small sample: a denominator that could not be
+      // read is not a denominator of zero, and letting it fall through to the
+      // `< minSample` branch below would file a failed read as "quiet week".
+      return backends.map((server) => ({
+        checkName: scopedCheckName(this.name, server.name),
+        status: 'error' as const,
+        detail: {
+          summary:
+            'A contagem de chegadas de rede veio num formato ilegivel — sem ' +
+            'denominador, nenhuma conversao pode ser calculada',
           context: { server: server.name },
         },
       }));

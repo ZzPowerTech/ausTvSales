@@ -1,5 +1,10 @@
+import { decideAlerts } from './alert-policy';
+import type {
+  HealthCheckRecord,
+  HealthCheckStatus,
+} from './health-check.types';
 import { ConfigService } from '@nestjs/config';
-import { NOTIFIABLE_STATUSES } from './health-check.types';
+
 import { OrphanInstanceCheck } from './orphan-instance.check';
 import type { PlanDatabase, PlanServerRow } from './plan-database';
 import { PlanServersConfig } from './plan-servers.config';
@@ -31,6 +36,41 @@ const REAL_CONFIG = {
   PLAN_SERVERS: 'AusTv,Survival',
   PLAN_PROXY_SERVER: 'AusTv',
 };
+
+/**
+ * Does this verdict actually reach the channel from a clean slate?
+ *
+ * The defect these tests exist for lived in the *policy*, not in the status
+ * name: `decideAlerts` suppresses a `no_data` with nothing open as
+ * `not_notifiable`, forever. Asserting that the status is in some notifiable
+ * list only restates the line above it. Driving the record through the real
+ * policy is the property.
+ */
+function announcedFromCleanSlate(observation: {
+  checkName: string;
+  status: HealthCheckStatus;
+}): boolean {
+  const record: HealthCheckRecord = {
+    id: 1,
+    checkName: observation.checkName,
+    status: observation.status,
+    checkedAt: new Date('2026-08-30T12:00:00.000Z'),
+    detail: null,
+    alertedAt: null,
+  };
+
+  const decision = decideAlerts({
+    observations: [record],
+    lastAlert: new Map(),
+    alertsInWindow: new Map(),
+    maxAlertsPerWindow: 4,
+    healthyStreak: new Map(),
+    confirmRecoveryAfter: 2,
+    reAlertAfterMs: 24 * 60 * 60 * 1000,
+  });
+
+  return decision.announce.includes(record);
+}
 
 describe('OrphanInstanceCheck', () => {
   describe('listas em acordo', () => {
@@ -161,7 +201,7 @@ describe('OrphanInstanceCheck', () => {
         serversConfig(REAL_CONFIG),
       ).run();
 
-      expect(NOTIFIABLE_STATUSES).toContain(result.status);
+      expect(announcedFromCleanSlate(result)).toBe(true);
     });
   });
 

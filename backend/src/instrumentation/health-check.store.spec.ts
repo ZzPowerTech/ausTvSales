@@ -174,21 +174,87 @@ describe('HealthCheckStore', () => {
     });
   });
 
-  describe('lastAlertAt', () => {
-    it('returns the timestamp of the most recent announced row', async () => {
+  describe('healthyStreak', () => {
+    // A query em si e coberta contra Postgres de verdade no e2e. O que se testa
+    // aqui e a contagem, que e onde mora a regra do projeto: `no_data` quebra a
+    // sequencia igual a uma falha, porque um ciclo que nao pode ser medido nao
+    // e prova de que o check esta bem.
+
+    /** Rows as the query returns them: newest first. */
+    function newestFirst(statuses: string[]) {
+      return chain(statuses.map((status) => ({ status }))).proxy;
+    }
+
+    it('conta os ok consecutivos a partir do mais recente', async () => {
+      db.select.mockReturnValue(newestFirst(['ok', 'ok', 'ok']));
+
+      await expect(store.healthyStreak('a', 10)).resolves.toBe(3);
+    });
+
+    it('para no primeiro veredito de falha', async () => {
+      db.select.mockReturnValue(newestFirst(['ok', 'breached', 'ok']));
+
+      await expect(store.healthyStreak('a', 10)).resolves.toBe(1);
+    });
+
+    it('trata no_data como quebra de sequencia, nao como ok', async () => {
+      db.select.mockReturnValue(newestFirst(['ok', 'no_data', 'ok']));
+
+      await expect(store.healthyStreak('a', 10)).resolves.toBe(1);
+    });
+
+    it('devolve zero quando o veredito mais recente nao e ok', async () => {
+      db.select.mockReturnValue(newestFirst(['breached', 'ok']));
+
+      await expect(store.healthyStreak('a', 10)).resolves.toBe(0);
+    });
+
+    it('devolve zero para um check sem historico', async () => {
+      db.select.mockReturnValue(newestFirst([]));
+
+      await expect(store.healthyStreak('a', 10)).resolves.toBe(0);
+    });
+
+    it('pede ao banco exatamente a janela recebida', async () => {
+      const { proxy, calls } = chain([]);
+      db.select.mockReturnValue(proxy);
+
+      await store.healthyStreak('a', 3);
+
+      // Se o LIMIT nao acompanhasse a janela, a sequencia saturaria no valor
+      // errado e a recuperacao poderia nunca ser alcancavel.
+      expect(calls.limit.mock.calls[0][0]).toBe(3);
+    });
+  });
+
+  describe('lastAlert', () => {
+    it('returns the status and timestamp of the most recent announced row', async () => {
       const at = new Date('2026-08-20T12:00:00.000Z');
-      db.select.mockReturnValue(chain([{ alertedAt: at }]).proxy);
+      db.select.mockReturnValue(
+        chain([{ status: 'breached', alertedAt: at }]).proxy,
+      );
 
       await expect(
-        store.lastAlertAt(HealthCheckName.TutorialEntryRate),
-      ).resolves.toEqual(at);
+        store.lastAlert(HealthCheckName.TutorialEntryRate),
+      ).resolves.toEqual({ status: 'breached', at });
+    });
+
+    it('carries the status of an announced recovery, not just of a failure', async () => {
+      // O status e o que distingue "o canal esta segurando um problema aberto"
+      // de "o ultimo recado foi um all-clear" — a decisao inteira depende dele.
+      const at = new Date('2026-08-21T12:00:00.000Z');
+      db.select.mockReturnValue(chain([{ status: 'ok', alertedAt: at }]).proxy);
+
+      await expect(
+        store.lastAlert(HealthCheckName.TutorialEntryRate),
+      ).resolves.toEqual({ status: 'ok', at });
     });
 
     it('returns null when the check was never announced', async () => {
       db.select.mockReturnValue(chain([]).proxy);
 
       await expect(
-        store.lastAlertAt(HealthCheckName.TutorialEntryRate),
+        store.lastAlert(HealthCheckName.TutorialEntryRate),
       ).resolves.toBeNull();
     });
   });

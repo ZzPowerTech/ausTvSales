@@ -1,4 +1,9 @@
-import { NOTIFIABLE_STATUSES } from './health-check.types';
+import { decideAlerts } from './alert-policy';
+import type {
+  HealthCheckRecord,
+  HealthCheckStatus,
+} from './health-check.types';
+
 import type { PlanDatabase, PlanServerRow } from './plan-database';
 import { VersionDivergenceCheck } from './version-divergence.check';
 
@@ -21,6 +26,41 @@ const AUSTV_REAL = [
   server('Survival', '5.8 build 3605'),
   server('AusTv', '5.8 build 3605', true),
 ];
+
+/**
+ * Does this verdict actually reach the channel from a clean slate?
+ *
+ * The defect these tests exist for lived in the *policy*, not in the status
+ * name: `decideAlerts` suppresses a `no_data` with nothing open as
+ * `not_notifiable`, forever. Asserting that the status is in some notifiable
+ * list only restates the line above it. Driving the record through the real
+ * policy is the property.
+ */
+function announcedFromCleanSlate(observation: {
+  checkName: string;
+  status: HealthCheckStatus;
+}): boolean {
+  const record: HealthCheckRecord = {
+    id: 1,
+    checkName: observation.checkName,
+    status: observation.status,
+    checkedAt: new Date('2026-08-30T12:00:00.000Z'),
+    detail: null,
+    alertedAt: null,
+  };
+
+  const decision = decideAlerts({
+    observations: [record],
+    lastAlert: new Map(),
+    alertsInWindow: new Map(),
+    maxAlertsPerWindow: 4,
+    healthyStreak: new Map(),
+    confirmRecoveryAfter: 2,
+    reAlertAfterMs: 24 * 60 * 60 * 1000,
+  });
+
+  return decision.announce.includes(record);
+}
 
 describe('VersionDivergenceCheck', () => {
   describe('convergencia', () => {
@@ -109,7 +149,7 @@ describe('VersionDivergenceCheck', () => {
       // produced one message.
       const [result] = await new VersionDivergenceCheck(dbReturning([])).run();
 
-      expect(NOTIFIABLE_STATUSES).toContain(result.status);
+      expect(announcedFromCleanSlate(result)).toBe(true);
     });
   });
 

@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { AlertDecision } from './alert-policy';
 import type { DiscordAlerter } from './discord-alerter';
@@ -39,22 +40,31 @@ function asRecord(
 
 interface StoreStub {
   store: HealthCheckStore;
-  latestAll: jest.Mock;
   record: jest.Mock;
-  lastAlertAt: jest.Mock;
+  lastAlert: jest.Mock;
+  alertsInWindow: jest.Mock<Promise<Map<HealthCheckStatus, number>>, unknown[]>;
+  /** Typed: an untyped mock let a `Map` stand in for the `number` it returns. */
+  healthyStreak: jest.Mock<Promise<number>, unknown[]>;
   markAlerted: jest.Mock;
 }
 
-function buildStore(previous: HealthCheckRecord[] = []): StoreStub {
-  const latestAll = jest.fn(() => {
-    calls.push('latestAll');
-    return Promise.resolve(previous);
-  });
+function buildStore(): StoreStub {
   const record = jest.fn((observations: HealthCheckObservation[]) => {
     calls.push('record');
     return Promise.resolve(observations.map(asRecord));
   });
-  const lastAlertAt = jest.fn(() => Promise.resolve(null));
+  const lastAlert = jest.fn(() => {
+    calls.push('lastAlert');
+    return Promise.resolve(null);
+  });
+  const alertsInWindow = jest.fn(() => {
+    calls.push('alertsInWindow');
+    return Promise.resolve(new Map<HealthCheckStatus, number>());
+  });
+  const healthyStreak = jest.fn(() => {
+    calls.push('healthyStreak');
+    return Promise.resolve(0);
+  });
   const markAlerted = jest.fn((ids: number[]) => {
     calls.push('markAlerted');
     return Promise.resolve(ids.length);
@@ -62,14 +72,16 @@ function buildStore(previous: HealthCheckRecord[] = []): StoreStub {
 
   return {
     store: {
-      latestAll,
       record,
-      lastAlertAt,
+      lastAlert,
+      alertsInWindow,
+      healthyStreak,
       markAlerted,
     } as unknown as HealthCheckStore,
-    latestAll,
     record,
-    lastAlertAt,
+    lastAlert,
+    alertsInWindow,
+    healthyStreak,
     markAlerted,
   };
 }
@@ -120,7 +132,7 @@ describe('HealthCheckRunner', () => {
   });
 
   describe('ordering', () => {
-    it('reads the previous state BEFORE persisting the new verdicts', async () => {
+    it('reads the alert state AFTER persisting the new verdicts', async () => {
       const store = buildStore();
       const { alerter } = buildAlerter();
       const check = fakeCheck(HealthCheckName.OrphanInstance, () =>
@@ -131,11 +143,14 @@ describe('HealthCheckRunner', () => {
         check,
       ]).runAll();
 
-      // If the snapshot were taken after the insert, `latestAll` would return the
-      // rows this cycle just wrote, every check would look unchanged, no
-      // transition would ever fire, and the system would go silent while
-      // appearing healthy.
-      expect(calls.indexOf('latestAll')).toBeLessThan(calls.indexOf('record'));
+      // `healthyStreak` has to include the verdict this cycle just wrote — the
+      // question is "has it been ok for two cycles *including this one*". And
+      // `lastAlert` reads rows that only ever get stamped after delivery, so it
+      // cannot be polluted by the insert.
+      expect(calls.indexOf('record')).toBeLessThan(calls.indexOf('lastAlert'));
+      expect(calls.indexOf('record')).toBeLessThan(
+        calls.indexOf('healthyStreak'),
+      );
     });
 
     it('stamps alerted_at only after the alerter reports delivery', async () => {
@@ -268,7 +283,7 @@ describe('HealthCheckRunner', () => {
 
     it('releases the guard even when the cycle throws', async () => {
       const store = buildStore();
-      store.latestAll.mockRejectedValueOnce(new Error('banco fora'));
+      store.record.mockRejectedValueOnce(new Error('banco fora'));
       const { alerter } = buildAlerter();
       const check = fakeCheck(HealthCheckName.OrphanInstance, () =>
         Promise.resolve([observation('x', 'ok')]),
@@ -288,8 +303,7 @@ describe('HealthCheckRunner', () => {
 
   describe('resumo', () => {
     it('tallies every status and reports what was delivered', async () => {
-      const previous: HealthCheckRecord[] = [];
-      const store = buildStore(previous);
+      const store = buildStore();
       const { alerter, publish } = buildAlerter([1, 2]);
       const check = fakeCheck(HealthCheckName.CollectionAlive, () =>
         Promise.resolve([
@@ -318,8 +332,182 @@ describe('HealthCheckRunner', () => {
       expect(summary.alerted).toBe(2);
 
       const decision = firstArg<AlertDecision>(publish);
-      // breached and error both notify; ok and no_data do not.
+      // Com `lastAlert` vazio, so `breached` e `error` viram mensagem: um `ok`
+      // nao tem nada para fechar e um `no_data` nao tem falha aberta atras dele.
       expect(decision.announce).toHaveLength(2);
+    });
+  });
+
+  describe('recuperacoes seguras', () => {
+    it('conta as recuperacoes seguradas separado do resto da supressao', async () => {
+      // O numero que o docblock de `recovery_unconfirmed` chama de "o numero a
+      // observar" precisa existir em algum lugar observavel. Um
+      // `HEALTH_ALERT_CONFIRM_RECOVERY` alto demais nunca deixa um all-clear
+      // sair, e sem este campo isso nao aparece em lugar nenhum.
+      const store = buildStore();
+      store.lastAlert.mockResolvedValue({
+        status: 'breached',
+        at: new Date('2026-08-22T10:00:00.000Z'),
+      });
+      store.healthyStreak.mockResolvedValue(1);
+      const { alerter } = buildAlerter();
+      const check = fakeCheck(HealthCheckName.OrphanInstance, () =>
+        Promise.resolve([observation('a', 'ok')]),
+      );
+
+      const summary = await new HealthCheckRunner(
+        store.store,
+        alerter,
+        config(),
+        [check],
+      ).runAll();
+
+      expect(summary.recoveryHeld).toBe(1);
+      expect(summary.recovered).toBe(0);
+    });
+
+    it('conta e mostra o que o orcamento segurou, recuperacao inclusive', async () => {
+      // Uma recuperacao segurada pelo orcamento cairia no total generico de
+      // supressoes, que e exatamente o que a separacao do `recovery_unconfirmed`
+      // existe para evitar. Um `HEALTH_ALERT_MAX_PER_WINDOW` que mantenha este
+      // numero acima de zero e um valor que mantem o canal achando que coisas
+      // resolvidas seguem quebradas — entao ele tem de ser visivel.
+      const store = buildStore();
+      store.lastAlert.mockResolvedValue({
+        status: 'breached',
+        at: new Date('2026-08-22T11:00:00.000Z'),
+      });
+      store.healthyStreak.mockResolvedValue(5);
+      store.alertsInWindow.mockResolvedValue(
+        new Map<HealthCheckStatus, number>([
+          ['breached', 2],
+          ['ok', 2],
+        ]),
+      );
+      const log = jest
+        .spyOn(Logger.prototype, 'log')
+        .mockImplementation(() => undefined);
+      const { alerter, publish } = buildAlerter();
+      const check = fakeCheck(HealthCheckName.OrphanInstance, () =>
+        Promise.resolve([observation('a', 'ok')]),
+      );
+
+      const summary = await new HealthCheckRunner(
+        store.store,
+        alerter,
+        config(),
+        [check],
+      ).runAll();
+
+      // A sequencia satisfaz o `confirmRecoveryAfter`, entao nao foi o
+      // `recovery_unconfirmed` que segurou — foi o orcamento.
+      expect(summary.recoveryHeld).toBe(0);
+      expect(summary.budgetHeld).toBe(1);
+      expect(firstArg<AlertDecision>(publish).recovered).toEqual([]);
+      expect(log).toHaveBeenCalledWith(
+        expect.stringContaining('segurados_por_orcamento=1'),
+      );
+      log.mockRestore();
+    });
+
+    it('pede a sequencia com a janela igual ao limiar configurado', async () => {
+      // Uma janela menor que o limiar satura abaixo dele, e a recuperacao morre
+      // de fome para sempre — com o `lastAlert` preso numa falha ja resolvida.
+      const store = buildStore();
+      const { alerter } = buildAlerter();
+      const check = fakeCheck(HealthCheckName.OrphanInstance, () =>
+        Promise.resolve([observation('a', 'ok')]),
+      );
+
+      await new HealthCheckRunner(
+        store.store,
+        alerter,
+        config({ HEALTH_ALERT_CONFIRM_RECOVERY: 7 }),
+        [check],
+      ).runAll();
+
+      expect(store.healthyStreak).toHaveBeenCalledWith('a', 7);
+    });
+
+    it('leva o teto de mensagens configurado ate a politica', () => {
+      // Sem isto, `HEALTH_ALERT_MAX_PER_WINDOW` podia ser lido, guardado e nunca
+      // usado, e o teste que existia passaria igual — ele so checava que o
+      // alerter tinha sido chamado.
+      const store = buildStore();
+      store.alertsInWindow.mockResolvedValue(
+        new Map<HealthCheckStatus, number>([['breached', 9]]),
+      );
+      const { alerter, publish } = buildAlerter();
+      const check = fakeCheck(HealthCheckName.OrphanInstance, () =>
+        Promise.resolve([observation('a', 'breached')]),
+      );
+
+      return new HealthCheckRunner(
+        store.store,
+        alerter,
+        config({ HEALTH_ALERT_MAX_PER_WINDOW: 3 }),
+        [check],
+      )
+        .runAll()
+        .then(() => {
+          // 9 mensagens ja ouvidas, teto 3: a falha nao sai como falha. Com o
+          // teto ignorado, ela estaria em `announce`. Sai como aviso de
+          // silenciamento porque este check nunca falou nada antes, entao a
+          // janela inteira passou calada.
+          const decision = firstArg<AlertDecision>(publish);
+          expect(decision.announce).toEqual([]);
+          expect(decision.flapping).toHaveLength(1);
+        });
+    });
+
+    it('conta o orcamento na mesma janela do reenvio', () => {
+      const store = buildStore();
+      const { alerter } = buildAlerter();
+      const check = fakeCheck(HealthCheckName.OrphanInstance, () =>
+        Promise.resolve([observation('a', 'breached')]),
+      );
+
+      return new HealthCheckRunner(
+        store.store,
+        alerter,
+        config({ HEALTH_ALERT_REALERT_HOURS: 3 }),
+        [check],
+      )
+        .runAll()
+        .then(() => {
+          expect(store.alertsInWindow).toHaveBeenCalledWith('a', 3 * 3_600_000);
+        });
+    });
+  });
+
+  describe('nome de check repetido no mesmo ciclo', () => {
+    it('descarta a segunda observacao e grita', () => {
+      // Duas linhas com o mesmo `check_name` num ciclo sao sempre erro de
+      // configuracao (nome repetido em PLAN_SERVERS) e corrompem tres coisas de
+      // uma vez: o desempate do `latestAll`, a contagem da sequencia saudavel, e
+      // o orcamento — que pularia de dois em dois e poderia passar direto pelo
+      // ponto em que o aviso de silenciamento sai, calando o check sem avisar.
+      const store = buildStore();
+      const { alerter } = buildAlerter();
+      const error = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+      const check = fakeCheck(HealthCheckName.CollectionAlive, () =>
+        Promise.resolve([
+          observation('plan.collection_alive:survival', 'breached'),
+          observation('plan.collection_alive:survival', 'ok'),
+        ]),
+      );
+
+      return new HealthCheckRunner(store.store, alerter, config(), [check])
+        .runAll()
+        .then((summary) => {
+          expect(summary.observations).toBe(1);
+          expect(error).toHaveBeenCalledWith(
+            expect.stringContaining('duas observacoes no mesmo ciclo'),
+          );
+          error.mockRestore();
+        });
     });
   });
 

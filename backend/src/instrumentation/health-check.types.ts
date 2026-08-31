@@ -29,12 +29,6 @@ export const HEALTH_CHECK_STATUSES = [
 
 export type HealthCheckStatus = (typeof HEALTH_CHECK_STATUSES)[number];
 
-/** Statuses that must reach Discord. */
-export const NOTIFIABLE_STATUSES: readonly HealthCheckStatus[] = [
-  'breached',
-  'error',
-];
-
 /**
  * The seven checks of spec §6.1, each paired with the disaster it would have
  * caught. The string values are persisted, so they are part of the data contract
@@ -117,4 +111,17 @@ export interface HealthCheckRecord {
   checkedAt: Date;
   detail: HealthCheckDetail | null;
   alertedAt: Date | null;
+}
+
+/**
+ * The last verdict of a check that actually reached Discord.
+ *
+ * The status matters as much as the timestamp. Alert decisions are made against
+ * **what the channel was last told**, not against the last row written: a
+ * recovery that was held back leaves the channel believing the check is still
+ * failing, and re-announcing the same failure there is noise, not news.
+ */
+export interface LastAlert {
+  status: HealthCheckStatus;
+  at: Date;
 }

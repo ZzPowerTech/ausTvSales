@@ -39,9 +39,23 @@ interface RawServerRow extends RowDataPacket {
  * so every session-derived endpoint is structurally empty for the proxy.
  */
 export interface NetworkArrivals {
-  /** Rows counted. Scoped to the window when one was given. */
-  total: number;
-  /** Most recent `registered`, epoch ms. Null when the table is empty. */
+  /**
+   * Rows counted, scoped to the window when one was given. **Null means the
+   * count could not be read**, which is not the same as zero.
+   *
+   * This used to be `number`, with an `?? 0` swallowing the difference, and that
+   * `?? 0` was a manufactured measurement: `toNumber` returns null for an empty
+   * result *and* for any shape it does not expect — a `bigint`, a `Buffer`, a
+   * `Date`, whatever the next driver bump decides a `COUNT(*)` looks like. A
+   * caller then read "zero rows" and said so out loud. Callers must now handle
+   * the two separately, which is the whole point of the type.
+   */
+  total: number | null;
+  /**
+   * Most recent `registered`, epoch ms. Null when the table is empty **or** when
+   * the value could not be read — same caveat as {@link total}, and the reason
+   * the two are reported independently.
+   */
   lastRegisteredAt: number | null;
 }
 
@@ -252,7 +266,7 @@ export class PlanDatabase implements OnModuleInit, OnModuleDestroy {
 
     const row = rows[0];
     return {
-      total: toNumber(row?.total) ?? 0,
+      total: toNumber(row?.total),
       lastRegisteredAt: toNumber(row?.last_registered),
     };
   }

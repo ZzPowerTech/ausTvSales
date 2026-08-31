@@ -1,5 +1,10 @@
+import type {
+  HealthCheckRecord,
+  HealthCheckStatus,
+} from './health-check.types';
+import { decideAlerts } from './alert-policy';
 import { ConfigService } from '@nestjs/config';
-import { NOTIFIABLE_STATUSES } from './health-check.types';
+
 import type { NetworkArrivals, PlanDatabase } from './plan-database';
 import { ProxyRegistrationAliveCheck } from './proxy-registration-alive.check';
 
@@ -16,6 +21,41 @@ function dbReturning(arrivals: NetworkArrivals): PlanDatabase {
   return {
     networkArrivals: jest.fn(() => Promise.resolve(arrivals)),
   } as unknown as PlanDatabase;
+}
+
+/**
+ * Does this verdict actually reach the channel from a clean slate?
+ *
+ * The defect these tests exist for lived in the *policy*, not in the status
+ * name: `decideAlerts` suppresses a `no_data` with nothing open as
+ * `not_notifiable`, forever. Asserting that the status is in some notifiable
+ * list only restates the line above it. Driving the record through the real
+ * policy is the property.
+ */
+function announcedFromCleanSlate(observation: {
+  checkName: string;
+  status: HealthCheckStatus;
+}): boolean {
+  const record: HealthCheckRecord = {
+    id: 1,
+    checkName: observation.checkName,
+    status: observation.status,
+    checkedAt: new Date('2026-08-30T12:00:00.000Z'),
+    detail: null,
+    alertedAt: null,
+  };
+
+  const decision = decideAlerts({
+    observations: [record],
+    lastAlert: new Map(),
+    alertsInWindow: new Map(),
+    maxAlertsPerWindow: 4,
+    healthyStreak: new Map(),
+    confirmRecoveryAfter: 2,
+    reAlertAfterMs: 24 * 60 * 60 * 1000,
+  });
+
+  return decision.announce.includes(record);
 }
 
 describe('ProxyRegistrationAliveCheck', () => {
@@ -146,7 +186,32 @@ describe('ProxyRegistrationAliveCheck', () => {
         config(),
       ).run();
 
-      expect(NOTIFIABLE_STATUSES).toContain(result.status);
+      expect(announcedFromCleanSlate(result)).toBe(true);
+    });
+
+    it('nao acusa banco errado quando a tabela tem linhas', async () => {
+      // A armadilha que este branch escondia ate 2026-08-30. `total` e um
+      // `COUNT(*)`; `lastRegisteredAt` passa pelo `toNumber`, que devolve null
+      // para tabela vazia E para qualquer formato inesperado — um `Date`, uma
+      // string nao numerica, um bump do driver que muda como o BIGINT chega.
+      //
+      // Com os dois no mesmo branch, um upgrade do mysql2 faria o canal dizer, a
+      // cada quinze minutos, que "a leitura provavelmente encontrou o banco
+      // errado" sobre um Plan perfeitamente saudavel — enquanto o `n` na mesma
+      // mensagem dizia 5566. Mandar alguem para o sistema errado e pior que nao
+      // alertar.
+      const [result] = await new ProxyRegistrationAliveCheck(
+        dbReturning({ total: 5566, lastRegisteredAt: null }),
+        config(),
+      ).run();
+
+      // Continua sendo `error` — a data e ilegivel e isso precisa ser ouvido —
+      // mas o texto nao inventa uma causa, e o `n` bate com a realidade.
+      expect(result.status).toBe('error');
+      expect(result.detail.n).toBe(5566);
+      expect(result.detail.summary).not.toContain('banco errado');
+      expect(result.detail.summary).toContain('5566');
+      expect(announcedFromCleanSlate(result)).toBe(true);
     });
   });
 

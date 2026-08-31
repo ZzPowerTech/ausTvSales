@@ -121,13 +121,18 @@ export class EnvironmentVariables {
   // itself the credential — anyone holding it can post to the channel — so it is
   // injected as a deploy secret and never logged, not even redacted.
   //
-  // Optional in every environment **for now**, and validated only for shape when
-  // present. Making it required in production here would be a deploy-ordering
-  // trap: this slice ships the alerter, but nothing schedules a check yet, so the
-  // container would refuse to boot for no gain. The slice that starts the
-  // scheduler is the one that must promote this to required-in-production —
-  // running checks that silently cannot alert is exactly the ADR-006 failure.
-  // Until then, DiscordAlerter warns loudly at boot when it is unset.
+  // Optional in every environment, validated only for shape when present — and
+  // that is now a **known gap**, not a deliberate staging. The original comment
+  // here said the scheduler did not exist yet and that the slice shipping it
+  // would promote this to required-in-production. `HealthCheckScheduler` shipped,
+  // and has been running in production since at least 2026-08-26; the promotion
+  // never happened.
+  //
+  // So production can boot with checks measuring, persisting, and never saying
+  // anything, and the only signal is one `logger.warn` from DiscordAlerter at
+  // boot. That is the ADR-006 failure with an easy-to-miss receipt. Treat the
+  // variable as mandatory by hand until a `@ValidateIf` on
+  // NODE_ENV=production && HEALTH_CHECK_ENABLED makes it so.
   @IsOptional()
   @IsUrl(
     { require_tld: true, require_protocol: true, protocols: ['https'] },
@@ -143,6 +148,43 @@ export class EnvironmentVariables {
   @Min(1)
   @Max(720)
   HEALTH_ALERT_REALERT_HOURS?: number;
+
+  // Quantos vereditos `ok` consecutivos uma recuperacao precisa antes de virar
+  // um "normalizado" no canal. A falha continua sendo anunciada no primeiro
+  // ciclo; so o all-clear espera confirmacao, porque um all-clear errado e pior
+  // que um all-clear atrasado.
+  //
+  // Qualquer valor daqui vale: o runner usa este numero como janela da propria
+  // consulta de sequencia, e a consulta le exatamente essa quantidade de linhas
+  // do check, sem corte por tempo. Um teto escondido no store — a versao
+  // anterior ignorava linhas com mais de 7 dias — tornaria a recuperacao
+  // inalcancavel para qualquer par (intervalo x limiar) que passasse do
+  // horizonte, e os dois sao configuraveis ate valores que passam.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(20)
+  HEALTH_ALERT_CONFIRM_RECOVERY?: number;
+
+  // Quantas vezes um check pode se REPETIR por janela de reenvio. Ao estourar,
+  // para de repetir; se a janela inteira for passar calada, a proxima
+  // observacao que nao seja `ok` sai como aviso de silenciamento. E o freio que nao depende de a regra de transicao ter
+  // previsto o formato da oscilacao — a regra ja errou duas vezes nisso.
+  //
+  // Nao barra um status que o canal ainda nao ouviu nesta janela: barrar isso
+  // foi como uma versao anterior deste teto segurou a morte de uma fonte por 45
+  // horas. Recuperacao confirmada e barrada um slot antes das demais — sem
+  // isso ela ganha a corrida para ser a ultima mensagem e o canal fica
+  // segurando um verde sobre um check ainda quebrado. REDUZ esse caso, nao o
+  // elimina (o passe do status-nao-ouvido e avaliado antes do limite), e e
+  // inerte para os valores 1 e 2. O mesmo passe libera a recuperacao quando os
+  // `ok` da propria oscilacao saem da janela; a espera aparece no log como
+  // `segurados_por_orcamento`.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  HEALTH_ALERT_MAX_PER_WINDOW?: number;
 
   // --- Plan JSON API (AusTV Admin S6.3, ADR-001/ADR-002) ---
 
@@ -301,8 +343,11 @@ export class EnvironmentVariables {
   PLATFORM_OFFLINE_WINDOW_DAYS?: number;
 
   // Teto da fracao de java_offline entre as chegadas da janela, de 0 a 1.
-  // PRECISA ser calibrado contra o baseline antes de ser levado a serio — o
-  // padrao de 0.5 e um chute conservador, nao uma medida.
+  // Calibrado em 2026-08-29 contra a leitura de producao de 2026-08-26 (nivel
+  // real ~51%): o padrao de 0.65 deixa folga acima do nivel medido. O valor
+  // anterior, 0.5, caia exatamente em cima dele e oscilava a cada jogador.
+  // As tres leituras sao janelas de 7 dias tomadas em 105 minutos e se sobrepoem
+  // quase inteiras — elas fixam o NIVEL, nao a estabilidade ao longo do tempo.
   @IsOptional()
   @IsNumber()
   @Min(0)

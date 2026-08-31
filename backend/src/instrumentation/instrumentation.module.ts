@@ -28,12 +28,20 @@ import { VersionDivergenceCheck } from './version-divergence.check';
  * alerter, Plan transport, the two adapters, the runner, the scheduler, and
  * **all seven checks** of spec §6.1.
  *
- * Code-complete is the whole claim, and the distinction is the one this epic is
- * about. Criterion 4 of S6.3 — *"verified by taking an instance down on
- * purpose"* — has **never been done**: nobody has run this layer with the
- * schedule enabled and a webhook configured and watched an alert arrive. Every
- * piece below is assembled and unit-tested; none of it has been observed
- * end-to-end. See `.specs/features/austv-admin/S6-VERIFICACAO.md`.
+ * Code-complete is not the same as verified, and the distinction is the one this
+ * epic is about. Half of criterion 4 of S6.3 closed on 2026-08-26: with the
+ * schedule enabled and a webhook configured, real `platform.offline_account_share`
+ * alerts were observed arriving in the channel — the failure path and the
+ * recovery path both.
+ *
+ * Two caveats on that, and both matter. The half still open is the *other*
+ * trigger the criterion names — *"taking an instance down on purpose"*, which
+ * exercises the `error` path, a source that dies rather than a threshold that
+ * trips; that is different code, and it is the one covering the three-month
+ * blackout. And what was observed was the **previous** alert policy: the
+ * comparison basis, the recovery hysteresis and the message budget all changed
+ * afterwards, so the delivery path is proven and the decision path is not.
+ * See `.specs/features/austv-admin/S6-VERIFICACAO.md`.
  *
  * ## The seventh arrived late, and why
  *

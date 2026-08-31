@@ -34,6 +34,8 @@ const DISCORD_LIMITS = {
 const COLOR_FAILURE = 0xd9_36_3c;
 const COLOR_RECOVERY = 0x2e_8b_57;
 const COLOR_LOST_SIGNAL = 0xd7_8b_1f;
+/** Grey: not a verdict about the game, a verdict about this layer's own noise. */
+const COLOR_FLAPPING = 0x6b_72_80;
 
 /** One retry is enough for a rate limit; beyond that the next cycle covers it. */
 const MAX_RATE_LIMIT_RETRIES = 1;
@@ -58,9 +60,25 @@ interface DiscordEmbed {
  * One group of observations and the embed that renders it.
  *
  * `cutOrder` is the order in which the aggregate budget takes fields away, not
- * the order the embeds appear in: recoveries are good news and can wait a cycle,
- * a lost signal is a failure we can no longer see, and an active failure is the
- * message's whole reason to exist. Display order stays as it reads best.
+ * the order the embeds appear in: a flapping notice is a message about this
+ * layer's own noise, recoveries are good news, a lost signal is a failure we can
+ * no longer see, and an active failure is the message's whole reason to exist.
+ * Display order stays as it reads best.
+ *
+ * "Can wait a cycle" is a claim about the alert policy, not a hope. A record cut
+ * here is never stamped, and `decideAlerts` compares against the last verdict
+ * that was *stamped* — so next cycle the check is in the same state as far as
+ * the channel is concerned.
+ *
+ * What comes back then depends on what the check reports next, and for three of
+ * the four buckets that is the same bucket. `flapping` is the exception: if the
+ * next observation is `ok`, the policy suppresses it rather than re-issuing a
+ * notice stamped `ok`, so a cut notice can wait more than one cycle. It is
+ * never lost — the summary line still reports the count — but it is the one
+ * bucket where the cut is not simply a one-cycle delay. Under the
+ * older policy, which compared against the previous **row**, that was false: a
+ * cut recovery was reclassified as `not_notifiable` the next cycle and lost for
+ * good. The comparison basis is what makes this cut safe.
  */
 interface AlertBucket {
   /** Everything the decision put in this bucket, before any cap. */
@@ -144,7 +162,8 @@ export class DiscordAlerter implements OnModuleInit {
       this.logger.warn(
         `Alerta suprimido por falta de webhook: ${decision.announce.length} falha(s), ` +
           `${decision.recovered.length} recuperacao(oes), ` +
-          `${decision.lostSignal.length} sem dados`,
+          `${decision.lostSignal.length} sem dados, ` +
+          `${decision.flapping.length} oscilando`,
       );
       return [];
     }
@@ -219,6 +238,12 @@ export class DiscordAlerter implements OnModuleInit {
         fields: [],
         cutOrder: 2,
         build: (fields, total) => this.buildLostSignalEmbed(fields, total),
+      },
+      {
+        records: decision.flapping,
+        fields: [],
+        cutOrder: 0,
+        build: (fields, total) => this.buildFlappingEmbed(fields, total),
       },
     ];
 
@@ -341,6 +366,33 @@ export class DiscordAlerter implements OnModuleInit {
       timestamp: new Date().toISOString(),
     };
   }
+
+  /**
+   * Checks that hit their message budget and are about to go quiet.
+   *
+   * This embed is the reason the budget is allowed to exist. Capping messages
+   * without saying so would leave the channel quiet about a check that is
+   * misbehaving, which is indistinguishable from a check that is fine — the
+   * exact confusion ADR-006 was written against. So the mute announces itself
+   * and points at where the truth still lives.
+   */
+  private buildFlappingEmbed(
+    shown: DiscordEmbedField[],
+    total: number,
+  ): DiscordEmbed {
+    return {
+      title: `⚪ Instrumentacao: ${total} check(s) oscilando — silenciado(s)`,
+      description:
+        'Estes checks mudaram de estado vezes demais nesta janela e gastaram o ' +
+        'orcamento de mensagens. NAO significa que estao bem: significa que o ' +
+        'alerta por evento parou de informar. O estado atual continua em ' +
+        '/health/instrumentation, e o limiar do check provavelmente precisa de ' +
+        'calibracao.',
+      color: COLOR_FLAPPING,
+      fields: shown,
+      timestamp: new Date().toISOString(),
+    };
+  }
 }
 
 /**
@@ -447,12 +499,16 @@ function buildSummary(decision: AlertDecision, shown: number): string {
   if (decision.lostSignal.length > 0) {
     parts.push(`${decision.lostSignal.length} sem dados`);
   }
+  if (decision.flapping.length > 0) {
+    parts.push(`${decision.flapping.length} oscilando (silenciado)`);
+  }
   // Counted from what was rendered, not from the field cap alone, so a field
   // dropped by the aggregate budget is reported here like any other.
   const overflow =
     decision.announce.length +
     decision.recovered.length +
-    decision.lostSignal.length -
+    decision.lostSignal.length +
+    decision.flapping.length -
     shown;
   if (overflow > 0) {
     // Silent truncation would read as "that was everything" when it was not.

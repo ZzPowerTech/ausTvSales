@@ -220,6 +220,145 @@ describe('health_checks (e2e)', () => {
     });
   });
 
+  describe('alertsInWindow', () => {
+    const DAY_MS = 86_400_000;
+
+    it('conta so o que foi entregue, nao o que foi apenas medido', async () => {
+      const check = scopedCheckName(HealthCheckName.OrphanInstance, 'budget');
+      const rows = await store.record([
+        { checkName: check, status: 'breached', detail: { summary: 'um' } },
+        { checkName: check, status: 'breached', detail: { summary: 'dois' } },
+        { checkName: check, status: 'breached', detail: { summary: 'tres' } },
+      ]);
+      await store.markAlerted([rows[0].id, rows[1].id]);
+
+      // Tres vereditos, duas mensagens. O orcamento e gasto pelo que o canal
+      // ouviu, nao pelo que a tabela guardou.
+      await expect(store.alertsInWindow(check, DAY_MS)).resolves.toEqual(
+        new Map([['breached', 2]]),
+      );
+    });
+
+    it('nao conta a mensagem de outro check', async () => {
+      const mine = scopedCheckName(HealthCheckName.OrphanInstance, 'mine');
+      const other = scopedCheckName(HealthCheckName.OrphanInstance, 'other');
+      const rows = await store.record([
+        { checkName: mine, status: 'breached', detail: { summary: 'meu' } },
+        { checkName: other, status: 'breached', detail: { summary: 'dele' } },
+      ]);
+      await store.markAlerted(rows.map((row) => row.id));
+
+      await expect(store.alertsInWindow(mine, DAY_MS)).resolves.toEqual(
+        new Map([['breached', 1]]),
+      );
+    });
+
+    it('ignora o que caiu fora da janela', async () => {
+      const check = scopedCheckName(HealthCheckName.OrphanInstance, 'expired');
+      const [row] = await store.record([
+        { checkName: check, status: 'breached', detail: { summary: 'velho' } },
+      ]);
+      await store.markAlerted([row.id]);
+
+      // Janela de um milissegundo: a mensagem acabou de sair e ja esta fora.
+      await expect(store.alertsInWindow(check, 1)).resolves.toEqual(new Map());
+    });
+
+    it('devolve zero para um check que nunca falou', async () => {
+      const check = scopedCheckName(HealthCheckName.OrphanInstance, 'quiet');
+      await store.record([
+        { checkName: check, status: 'ok', detail: { summary: 'ok' } },
+      ]);
+
+      await expect(store.alertsInWindow(check, DAY_MS)).resolves.toEqual(
+        new Map(),
+      );
+    });
+
+    it('separa por status, que e o que distingue repeticao de noticia', async () => {
+      // A quebra por status e o que impede o orcamento de calar um `error` so
+      // porque o check ja falou muito `breached` — o silencio de 45 horas que a
+      // primeira versao do orcamento produzia.
+      const check = scopedCheckName(HealthCheckName.OrphanInstance, 'mixed');
+      const rows = await store.record([
+        { checkName: check, status: 'breached', detail: { summary: 'um' } },
+        { checkName: check, status: 'breached', detail: { summary: 'dois' } },
+        { checkName: check, status: 'error', detail: { summary: 'morreu' } },
+      ]);
+      await store.markAlerted(rows.map((row) => row.id));
+
+      await expect(store.alertsInWindow(check, DAY_MS)).resolves.toEqual(
+        new Map([
+          ['breached', 2],
+          ['error', 1],
+        ]),
+      );
+    });
+  });
+
+  describe('healthyStreak', () => {
+    // A unica cobertura que executa a leitura contra Postgres de verdade. O unit
+    // spec mocka o builder e monta as linhas ja ordenadas, entao valida o laco de
+    // contagem, nao o SQL — um erro na ordenacao ou no LIMIT nao seria pego por
+    // nada sem este teste.
+
+    /** Grava vereditos em sequencia, um por chamada, do mais antigo ao mais novo. */
+    async function sequence(
+      checkName: string,
+      statuses: ReadonlyArray<'ok' | 'breached' | 'no_data' | 'error'>,
+    ): Promise<void> {
+      for (const status of statuses) {
+        await store.record([
+          { checkName, status, detail: { summary: `verdito ${status}` } },
+        ]);
+      }
+    }
+
+    it('conta os ok consecutivos e para no primeiro veredito ruim', async () => {
+      const check = scopedCheckName(HealthCheckName.CollectionAlive, 'streak');
+      await sequence(check, ['ok', 'breached', 'ok', 'ok']);
+
+      await expect(store.healthyStreak(check, 10)).resolves.toBe(2);
+    });
+
+    it('trata no_data como quebra de sequencia, nao como ok', async () => {
+      const check = scopedCheckName(HealthCheckName.CollectionAlive, 'gap');
+      await sequence(check, ['ok', 'no_data', 'ok']);
+
+      await expect(store.healthyStreak(check, 10)).resolves.toBe(1);
+    });
+
+    it('devolve zero quando o veredito mais recente nao e ok', async () => {
+      const check = scopedCheckName(HealthCheckName.CollectionAlive, 'down');
+      await sequence(check, ['ok', 'ok', 'breached']);
+
+      await expect(store.healthyStreak(check, 10)).resolves.toBe(0);
+    });
+
+    it('satura na janela pedida', async () => {
+      const capped = scopedCheckName(HealthCheckName.OrphanInstance, 'capped');
+      await sequence(capped, ['ok', 'ok', 'ok', 'ok']);
+
+      // A saturacao e o motivo de o runner passar o proprio limiar como janela:
+      // uma janela menor que o limiar jamais o satisfaria.
+      await expect(store.healthyStreak(capped, 2)).resolves.toBe(2);
+    });
+
+    it('nao ve o historico de outro check', async () => {
+      const mine = scopedCheckName(HealthCheckName.OrphanInstance, 'sane');
+      const other = scopedCheckName(HealthCheckName.OrphanInstance, 'noisy');
+      await sequence(mine, ['ok', 'ok']);
+      await sequence(other, ['error']);
+
+      await expect(store.healthyStreak(mine, 10)).resolves.toBe(2);
+      await expect(store.healthyStreak(other, 10)).resolves.toBe(0);
+    });
+
+    it('devolve zero para um check que nunca rodou', async () => {
+      await expect(store.healthyStreak('nao.existe', 10)).resolves.toBe(0);
+    });
+  });
+
   describe('alert bookkeeping', () => {
     it('marks only the given rows and reports the count', async () => {
       const records = await store.record([
@@ -246,7 +385,7 @@ describe('health_checks (e2e)', () => {
       ).toBeNull();
     });
 
-    it('lastAlertAt ignores rows that were never announced', async () => {
+    it('lastAlert ignores rows that were never announced', async () => {
       const [first] = await store.record([
         {
           checkName: HealthCheckName.CollectionAlive,
@@ -265,9 +404,7 @@ describe('health_checks (e2e)', () => {
         },
       ]);
 
-      const lastAlert = await store.lastAlertAt(
-        HealthCheckName.CollectionAlive,
-      );
+      const lastAlert = await store.lastAlert(HealthCheckName.CollectionAlive);
       const latest = await store.latest(HealthCheckName.CollectionAlive);
 
       expect(lastAlert).not.toBeNull();
@@ -285,7 +422,7 @@ describe('health_checks (e2e)', () => {
       ]);
 
       await expect(
-        store.lastAlertAt(HealthCheckName.NetworkToSurvival),
+        store.lastAlert(HealthCheckName.NetworkToSurvival),
       ).resolves.toBeNull();
     });
   });

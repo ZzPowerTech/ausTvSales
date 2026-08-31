@@ -7,10 +7,30 @@ import {
   HealthCheckStore,
   type HealthCheckObservation,
 } from './health-check.store';
-import type { HealthCheckStatus } from './health-check.types';
+import type { HealthCheckStatus, LastAlert } from './health-check.types';
 
 /** Matches the default documented in `.env.example`. */
 const DEFAULT_REALERT_HOURS = 24;
+/**
+ * Consecutive healthy verdicts a recovery needs before it is announced.
+ *
+ * Two, at the default 15-minute cadence, means an all-clear arrives ~15 minutes
+ * after it holds. That is the trade the production reading of 2026-08-26 paid
+ * for: three messages in two hours about a ratio that never left its band. See
+ * `AlertPolicyInput.confirmRecoveryAfter`.
+ */
+const DEFAULT_CONFIRM_RECOVERY = 2;
+/**
+ * How often a check may repeat itself per re-alert window.
+ *
+ * Not a ceiling on messages: a status the channel has not heard this window is
+ * never gated, so a real incident can still say "quebrou", "piorou" and "perdeu
+ * sinal" on top of the budget. What is gated is saying the same thing again —
+ * which is what a flap is made of. Loose on purpose; a flapping check burns it
+ * in an hour, gets a `flapping` notice, and goes quiet until the window rolls.
+ * See `AlertPolicyInput.maxAlertsPerWindow`.
+ */
+const DEFAULT_MAX_ALERTS_PER_WINDOW = 4;
 const MS_PER_HOUR = 3_600_000;
 
 /** What one cycle did. Returned for logging, and for the S7.1 `health` module. */
@@ -25,6 +45,25 @@ export interface HealthCheckRunSummary {
   recovered: number;
   lostSignal: number;
   suppressed: number;
+  /**
+   * Recoveries held back awaiting confirmation.
+   *
+   * Surfaced rather than buried in `suppressed` because it is the number to
+   * watch if `HEALTH_ALERT_CONFIRM_RECOVERY` is ever tuned: a value that keeps
+   * this permanently above zero is a value that never lets an all-clear out.
+   */
+  recoveryHeld: number;
+  /**
+   * Observations held back by the message budget, recoveries included.
+   *
+   * Separate from `recoveryHeld` and worth its own field for the same reason:
+   * an all-clear withheld by the budget is invisible in a total, and a value of
+   * `HEALTH_ALERT_MAX_PER_WINDOW` that keeps this permanently above zero is a
+   * value that keeps the channel believing fixed things are broken.
+   */
+  budgetHeld: number;
+  /** Checks that hit the message budget and were told the channel went quiet. */
+  flapping: number;
   /** Rows whose notification actually reached Discord and were stamped. */
   alerted: number;
 }
@@ -39,22 +78,24 @@ export interface HealthCheckRunSummary {
  *
  * ## Order is the whole design
  *
- * The previous status of every check must be read **before** the new verdicts are
- * inserted. `HealthCheckStore.latestAll()` returns the newest row per check, so
- * reading it after the insert would return the rows this cycle just wrote and
- * every check would look unchanged — no transition would ever be detected, and
- * the system would go permanently quiet while appearing to work. That is the
- * ADR-006 failure with extra steps, so the ordering is load-bearing rather than
- * incidental.
- *
  * `markAlerted` runs **last**, and only over the ids the alerter says it
  * delivered. A row stamped before the webhook succeeded would suppress its own
  * retry and lose the alert for good.
+ *
+ * Everything the policy compares against — `lastAlert` and `healthyStreak` — is
+ * read **after** the insert, on purpose: both questions are about the state
+ * including the verdict this cycle just produced. An earlier version compared
+ * against the previous *row* and therefore had to read it before inserting, an
+ * ordering whose inversion would have silenced the whole layer while it looked
+ * healthy. Comparing against what the channel was last told removed that trap
+ * rather than documenting it.
  */
 @Injectable()
 export class HealthCheckRunner {
   private readonly logger = new Logger(HealthCheckRunner.name);
   private readonly reAlertAfterMs: number;
+  private readonly confirmRecoveryAfter: number;
+  private readonly maxAlertsPerWindow: number;
 
   /**
    * Guards against overlapping cycles.
@@ -75,6 +116,12 @@ export class HealthCheckRunner {
     const hours =
       config.get<number>('HEALTH_ALERT_REALERT_HOURS') ?? DEFAULT_REALERT_HOURS;
     this.reAlertAfterMs = hours * MS_PER_HOUR;
+    this.confirmRecoveryAfter =
+      config.get<number>('HEALTH_ALERT_CONFIRM_RECOVERY') ??
+      DEFAULT_CONFIRM_RECOVERY;
+    this.maxAlertsPerWindow =
+      config.get<number>('HEALTH_ALERT_MAX_PER_WINDOW') ??
+      DEFAULT_MAX_ALERTS_PER_WINDOW;
   }
 
   async runAll(): Promise<HealthCheckRunSummary> {
@@ -99,14 +146,7 @@ export class HealthCheckRunner {
   }
 
   private async cycle(startedAt: Date): Promise<HealthCheckRunSummary> {
-    // 1. Snapshot the "before" picture. Must precede the insert — see the class
-    //    doc; reading it afterwards makes every check look unchanged forever.
-    const previous = await this.store.latestAll();
-    const previousStatus = new Map(
-      previous.map((record) => [record.checkName, record.status]),
-    );
-
-    // 2. Run the checks. One failing check must never silence the others.
+    // 1. Run the checks. One failing check must never silence the others.
     const observations = await this.runChecks();
 
     if (observations.length === 0) {
@@ -114,26 +154,63 @@ export class HealthCheckRunner {
       return emptySummary(startedAt, true);
     }
 
-    // 3. Persist before deciding, so the alert always references a stored row.
+    // 2. Persist before deciding, so the alert always references a stored row.
     const records = await this.store.record(observations);
 
-    // 4. `lastAlertAt` is per check and cannot come from `latestAll`: that gives
-    //    the newest row's `alerted_at`, not the newest row that *has* one.
+    // 3. What the channel was last told, per check. It cannot come from
+    //    `latestAll`: that gives the newest row's `alerted_at`, not the newest
+    //    row that *has* one.
     const names = [...new Set(records.map((record) => record.checkName))];
-    const lastAlertAt = new Map(
+    const lastAlert = new Map(
       await Promise.all(
         names.map(
           async (name) =>
-            [name, await this.store.lastAlertAt(name)] as [string, Date | null],
+            [name, await this.store.lastAlert(name)] as [
+              string,
+              LastAlert | null,
+            ],
+        ),
+      ),
+    );
+
+    // 3b. How much each check has already said in this window, for the message
+    //     budget. Counted from stamped rows, so it measures what the channel
+    //     actually heard rather than what was decided.
+    const alertsInWindow = new Map(
+      await Promise.all(
+        names.map(
+          async (name) =>
+            [
+              name,
+              await this.store.alertsInWindow(name, this.reAlertAfterMs),
+            ] as [string, Map<HealthCheckStatus, number>],
+        ),
+      ),
+    );
+
+    // 4. The healthy streak includes the verdict just written, because "has it
+    //    been ok for two cycles *including this one*" is the question asked.
+    //    The window is the threshold itself: a streak that saturated below it
+    //    could never satisfy it, and the all-clear would starve forever.
+    const healthyStreak = new Map(
+      await Promise.all(
+        names.map(
+          async (name) =>
+            [
+              name,
+              await this.store.healthyStreak(name, this.confirmRecoveryAfter),
+            ] as [string, number],
         ),
       ),
     );
 
     const decision = decideAlerts({
       observations: records,
-      previousStatus,
-      lastAlertAt,
-      now: new Date(),
+      lastAlert,
+      alertsInWindow,
+      maxAlertsPerWindow: this.maxAlertsPerWindow,
+      healthyStreak,
+      confirmRecoveryAfter: this.confirmRecoveryAfter,
       reAlertAfterMs: this.reAlertAfterMs,
     });
 
@@ -150,7 +227,14 @@ export class HealthCheckRunner {
       announced: decision.announce.length,
       recovered: decision.recovered.length,
       lostSignal: decision.lostSignal.length,
+      flapping: decision.flapping.length,
       suppressed: decision.suppressed.length,
+      recoveryHeld: decision.suppressed.filter(
+        (item) => item.reason === 'recovery_unconfirmed',
+      ).length,
+      budgetHeld: decision.suppressed.filter(
+        (item) => item.reason === 'flapping',
+      ).length,
       alerted,
     };
 
@@ -168,17 +252,44 @@ export class HealthCheckRunner {
    */
   private async runChecks(): Promise<HealthCheckObservation[]> {
     const observations: HealthCheckObservation[] = [];
+    const seen = new Set<string>();
+
+    /**
+     * Append one observation, refusing a name already produced this cycle.
+     *
+     * Two rows sharing a `check_name` and a cycle are always a configuration
+     * bug — a duplicated entry in `PLAN_SERVERS` is the way it happens — and
+     * they corrupt three things at once: `latestAll` picks between them by
+     * tiebreak, `healthyStreak` counts one cycle twice, and the alert budget
+     * jumps by two, which can step straight over the point where the `flapping`
+     * notice fires and mute a check with nothing ever said. Logged at error
+     * level because the fix is in the environment, not here.
+     */
+    const add = (observation: HealthCheckObservation): void => {
+      if (seen.has(observation.checkName)) {
+        this.logger.error(
+          `Check ${observation.checkName} produziu duas observacoes no mesmo ` +
+            'ciclo — a segunda foi descartada. Provavel nome repetido em ' +
+            'PLAN_SERVERS; corrija, porque isso corrompe o historico.',
+        );
+        return;
+      }
+      seen.add(observation.checkName);
+      observations.push(observation);
+    };
 
     for (const check of this.checks) {
       try {
-        observations.push(...(await check.run()));
+        for (const observation of await check.run()) {
+          add(observation);
+        }
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         this.logger.error(`Check ${check.name} lancou excecao: ${reason}`);
         // Becomes a notifiable `error` verdict rather than a gap in the record.
         // A check that vanishes from the history is indistinguishable from one
         // that never existed, which is precisely the blindness of ADR-006.
-        observations.push({
+        add({
           checkName: check.name,
           status: 'error',
           detail: {
@@ -202,6 +313,9 @@ export class HealthCheckRunner {
       `error=${summary.byStatus.error}`,
       `anunciados=${summary.announced}`,
       `entregues=${summary.alerted}`,
+      `recuperacoes_seguradas=${summary.recoveryHeld}`,
+      `segurados_por_orcamento=${summary.budgetHeld}`,
+      `oscilando=${summary.flapping}`,
     ];
 
     const failing = summary.byStatus.breached + summary.byStatus.error;
@@ -240,7 +354,10 @@ function emptySummary(startedAt: Date, ran: boolean): HealthCheckRunSummary {
     announced: 0,
     recovered: 0,
     lostSignal: 0,
+    flapping: 0,
     suppressed: 0,
+    recoveryHeld: 0,
+    budgetHeld: 0,
     alerted: 0,
   };
 }

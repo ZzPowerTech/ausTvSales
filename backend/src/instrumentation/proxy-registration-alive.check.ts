@@ -67,17 +67,34 @@ export class ProxyRegistrationAliveCheck implements HealthCheck {
       ];
     }
 
-    if (arrivals.lastRegisteredAt === null) {
+    if (arrivals.total === null) {
+      // The count itself came back unreadable. Says so and nothing more: with
+      // the row count unknown, every diagnosis below is unavailable, including
+      // the one about the wrong database.
+      return [
+        {
+          checkName: this.name,
+          status: 'error',
+          detail: {
+            summary:
+              'Nao foi possivel ler a contagem de plan_users — o driver ou o ' +
+              'tipo da coluna devolveu um formato inesperado',
+          },
+        },
+      ];
+    }
+
+    if (arrivals.total === 0) {
       // An empty identity table is not "nobody arrived recently" — it is a
       // network with no history at all, which on a live server means the read
       // found the wrong database. That is §1's founding disaster verbatim: the
       // production Plan on SQLite while the MySQL being queried was half empty.
       //
-      // So `error`, not `no_data`. `NOTIFIABLE_STATUSES` excludes `no_data`, and
-      // `decideAlerts` suppresses one as `not_notifiable` while nothing is open
-      // on the check — meaning the single verdict that would have named the
-      // SQLite disaster is the one that never reaches Discord. `no_data` is for
-      // a window that came back empty; an identity table has no window.
+      // So `error`, not `no_data`: `decideAlerts` suppresses a `no_data` with
+      // nothing open on the check as `not_notifiable`, forever, meaning the
+      // single verdict that would have named the SQLite disaster is the one that
+      // never reaches Discord. `no_data` is for a window that came back empty;
+      // an identity table has no window.
       return [
         {
           checkName: this.name,
@@ -86,6 +103,37 @@ export class ProxyRegistrationAliveCheck implements HealthCheck {
             summary:
               'plan_users nao tem nenhum registro — a leitura provavelmente ' +
               'encontrou o banco errado',
+            n: 0,
+          },
+        },
+      ];
+    }
+
+    if (arrivals.lastRegisteredAt === null) {
+      // Rows exist, but no usable `MAX(registered)`. Deliberately a *different*
+      // verdict from the one above, and it names no cause.
+      //
+      // These three were one branch until 2026-08-30, keyed on
+      // `lastRegisteredAt === null`. Both fields run through `toNumber`, which
+      // returns null for an empty result **and** for any shape it does not
+      // expect — a `Date`, a `bigint`, a `Buffer`, whatever the next driver bump
+      // decides a column looks like. `toNumber`'s own docblock names that as the
+      // bug that only shows up after a dependency upgrade.
+      //
+      // Collapsed, an unreadable read told the channel every fifteen minutes
+      // that it had "probably found the wrong database", about a perfectly
+      // healthy Plan. Alerting on a diagnosis the code never established is
+      // worse than not alerting: it sends someone to the wrong system. Three
+      // conditions, three verdicts, and only the middle one names a cause.
+      return [
+        {
+          checkName: this.name,
+          status: 'error',
+          detail: {
+            summary:
+              `plan_users tem ${arrivals.total} linha(s), mas MAX(registered) ` +
+              'nao veio legivel. NAO e o mesmo que tabela vazia; a causa pode ' +
+              'ser tipo de coluna, formato do driver ou a propria coluna nula.',
             n: arrivals.total,
           },
         },
