@@ -405,7 +405,7 @@ erro específico não seja repetido em código.
 não veio na unificação — identidade, sessão, ou parte de cada — **não está estabelecido**;
 as duas contagens acima não distinguem essas leituras. Ver o bloco abaixo.
 
-> #### ✅ MEDIDO em 2026-08-31: `plan_users` cobre desde **2024-06-02**, e o problema é outro
+> #### ✅ RESOLVIDO em 2026-08-31: a rede não está neste banco — o `plan_users` é o Survival
 >
 > Esta seção afirmava, como fato, que a métrica de rede só existia **desde 2026-08-20**, e
 > disso saíram o adiamento da S8.2, a data de 2026-09-19 e metade do DoD da S8. Uma versão
@@ -442,29 +442,76 @@ as duas contagens acima não distinguem essas leituras. Ver o bloco abaixo.
 > `networkArrivalsBetween` é `SELECT uuid, registered FROM plan_users WHERE registered
 > BETWEEN ? AND ?`, sem servidor e sem plataforma.
 >
-> **Duas leituras possíveis, e nenhuma está verificada:**
+> #### ✅ Resolvido no mesmo dia: o `plan_users` guarda o **Survival**, não a rede
 >
-> 1. o `plan_users` de hoje guarda essencialmente a população do **survival** — as linhas
->    do proxy realmente não vieram, e as que ficaram são antigas, o que explica ao mesmo
->    tempo a profundidade de 2024-06 e a coincidência com `survival`;
-> 2. a coluna `rede` da tabela veio de uma fonte que conta outra coisa (sessão, ou o banco
->    antigo), e é ela que está errada.
+> Três consultas, três fatos que apontam para o mesmo lugar.
 >
-> A leitura 1 é consistente com o que este documento já registra — que o histórico do proxy
-> ficou no banco antigo — e, se for ela, **a afirmação original não era boba: era mal
-> escrita**. A tabela não é rasa; falta nela a *metade da rede*. "Sem profundidade" e "sem a
-> população do proxy" são coisas diferentes, e as duas versões anteriores desta nota erraram
-> uma para cada lado.
+> **1. O proxy não tem uma linha sequer.**
 >
-> **Por que isto é urgente, e não uma curiosidade:** se a leitura 1 estiver certa, o degrau
-> `rede` do funil está **rotulado errado**, e a conversão rede→survival calculada a partir
-> dele daria perto de **100%**, não os ~54% conhecidos. Um número alto, plausível e falso —
-> exatamente a classe do 4500% e do "queda de 96%". Nada deve ser publicado como conversão
-> de rede antes de isto ser resolvido.
+> ```
+> total_plan_users   5638
+> vistos_em_backend  5575
+> vistos_no_proxy       0
+> ```
 >
-> **Como resolver:** descobrir se as linhas de `plan_users` carregam origem por servidor
-> (`plan_user_info` faz o vínculo) e comparar a contagem de um mês contra o survival puro.
-> Minutos, com acesso — e desta vez a fonte tem de ser a que responde, não uma vizinha.
+> **2. Só um servidor aparece em `plan_user_info`:** `Survival` (`is_proxy = 0`), com 5575
+> jogadores. O `AusTv` (`is_proxy = 1`) está no catálogo de `plan_servers`, com
+> `plan_version 5.8 build 3605` como o Survival, e **zero** jogadores associados.
+>
+> **3. E o fecho: as contagens mensais de `plan_users` são a coluna `survival` desta
+> tabela, exatamente.** Não "parecidas" — idênticas, nos oito meses:
+>
+> | mês | `plan_users` (SQL) | coluna `survival` | coluna `rede` |
+> |---|---|---|---|
+> | 2025-11 | 682 | **682** | 1403 |
+> | 2025-12 | 641 | **641** | 1259 |
+> | 2026-01 | 727 | **727** | 1177 |
+> | 2026-02 | 374 | **374** | 645 |
+> | 2026-03 | 258 | **258** | 445 |
+> | 2026-04 | 192 | **192** | 360 |
+> | 2026-05 | 1 | **1** | 1 |
+> | 2026-06 | 106 | **106** | *(Plan morto)* |
+>
+> A série vai de **2024-06** (286 chegadas) a 2026-06, com o vale de 1 em 2026-05 que a
+> tabela já registrava como manutenção.
+>
+> As diferenças de 1 a 6 entre isto e os buckets do funil são fuso: o funil agrupa em
+> `America/Sao_Paulo` e o SQL na sessão do MySQL, então quem registrou perto da virada do
+> mês cai de um lado ou do outro. É o comportamento correto, e confirma que o funil lê
+> exatamente esta tabela e nada mais.
+>
+> #### O que isso quebra
+>
+> **1. O degrau `rede` do funil não mede rede.** Mede o Survival, com outro nome. A
+> conversão rede→survival calculada dele é Survival ÷ Survival.
+>
+> **2. O check `funnel.network_to_survival` está estruturalmente cego.** Ele divide os
+> novatos do Survival (via `/v1/serverOverview`) pelas chegadas de `plan_users` — que são
+> a mesma população. O check foi construído para ver a conversão de rede cair, e não pode:
+> numerador e denominador se movem juntos. Ele vem reportando `ok`, e reportaria `ok` com a
+> rede inteira desaparecida.
+>
+> **3. Os ~54% rede→survival do DoD da S8 não saem desta base.** Não por falta de
+> profundidade — isso foi medido e é falso, são 26 meses — mas porque **a população da
+> rede não está neste banco**. Está no antigo, que é de onde a coluna `rede` desta tabela
+> veio. Isso agora é medição, não suposição.
+>
+> **4. A S8.2 continua viável, com o rótulo corrigido.** O `/v1/retention` serve a mesma
+> população, então as coortes que ela vai calcular são **coortes de jogadores do
+> Survival**, não da rede. Continua sendo retenção de verdade e continua derrubando a
+> premissa da exceção 1 — mas o rótulo tem de dizer Survival, pela mesma razão que
+> `lastSeenDate` tem de dizer intervalo de sobrevivência.
+>
+> #### A afirmação original estava certa, e mal escrita
+>
+> "Métrica de rede tem 3 dias de profundidade" apontava para um problema real — a rede não
+> está aqui — e o descreveu como profundidade, que é a única parte falsa. Quem leu
+> "profundidade" foi checar profundidade, achou 26 meses e concluiu que estava tudo bem.
+> Duas revisões deste documento erraram por isso, uma para cada lado.
+>
+> O que faltava não era mais rigor na verificação: era a frase dizer **qual** era o
+> problema. "Falta a população do proxy" teria sido checável em uma consulta desde o
+> primeiro dia.
 
 ---
 

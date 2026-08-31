@@ -138,17 +138,17 @@ sprints.
   **A exceção 1 ficou sem justificativa nenhuma e ninguém a fechou** — fechar é decisão do dono.
   **A ressalva que a S8.2 tem de carregar:** `lastSeenDate` mede intervalo de sobrevivência, não
   retorno no dia N. Publicar é aceitável; publicar sem o rótulo é o erro de denominador de novo.
-- **🔴 O degrau `rede` do funil pode estar medindo a população errada, e ninguém verificou.**
-  A profundidade foi medida em 2026-08-31: `coversFrom` = **2024-06-02**, 26 meses — a alegação
-  de "dias, não meses" era falsa. Mas na mesma resposta os buckets de `rede` batem, em oito meses,
-  com a coluna **`survival`** da tabela de números verificados (diferença de 0 a 6) e dão cerca de
-  **metade** da coluna `rede`. A query não filtra nada: é `SELECT uuid, registered FROM plan_users`
-  na janela.
-  Se o `plan_users` de hoje guarda essencialmente o survival — leitura consistente com o
-  histórico do proxy ter ficado no banco antigo — então a conversão rede→survival calculada dele
-  daria perto de **100%** em vez dos ~54% conhecidos: número alto, plausível e falso, a classe do
-  4500%. **Nada de conversão de rede publicada antes de resolver.** As duas leituras possíveis e
-  como decidir entre elas estão no `HANDOFF.md`.
+- **🔴 O degrau `rede` do funil mede o Survival, e o check que o vigia está cego. Medido em
+  2026-08-31.** O `plan_users` deste banco não tem a rede: o proxy (`AusTv`, `is_proxy=1`) está no
+  catálogo com **zero** jogadores em `plan_user_info`, só o Survival tem (5575 de 5638), e as
+  contagens mensais da tabela são **exatamente** a coluna `survival` dos números verificados do
+  `HANDOFF.md` — 682, 641, 727, 374, 258, 192, 1, 106, os oito meses sem diferença.
+  A profundidade, aliás, é boa: `coversFrom` = **2024-06-02**, 26 meses. A alegação de "3 dias"
+  apontava um problema real e o descreveu com a palavra errada.
+  **O que quebra:** o degrau `rede` do funil é Survival com outro nome; o
+  `funnel.network_to_survival` divide Survival por Survival e reportaria `ok` com a rede inteira
+  fora do ar; e os ~54% do DoD da S8 não saem desta base, porque a população da rede está no banco
+  antigo. **Nada de conversão de rede publicada até o degrau ser consertado.**
 - **O alerta de saúde CHEGA — comprovado em 2026-08-26.** Alertas reais do
   `platform.offline_account_share` foram observados no canal: `breached`, recuperação e o `n` ao
   lado do percentual, funcionando em produção. A camada deixou de ser construção sobre algo que
