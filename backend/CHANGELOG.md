@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.2](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.15.1...backend-v0.15.2) (2026-09-01)
+
+
+### Bug Fixes
+
+* **admin:** o degrau `rede` do funil media o Survival, e o check que o vigiava não podia enxergar nada ([#180](https://github.com/ZzPowerTech/ausTvSales/issues/180)) ([3b7d2d0](https://github.com/ZzPowerTech/ausTvSales/commit/3b7d2d02aaf398e4bdd06a677ceee6952c1b9207))
+
 ## [0.15.1](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.15.0...backend-v0.15.1) (2026-08-31)
 
 
