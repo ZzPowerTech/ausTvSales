@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDB } from '../db/database.module';
 import { playerDimension, playerPayments } from '../db/schema';
+import { toDate } from './economy-math';
 import type { EconomySourceState, Share } from './economy.types';
 import { PaymentsStore } from './payments.store';
 import { PlayerDimensionStore } from './player-dimension.store';
@@ -25,8 +26,13 @@ const DEFAULT_TUTORIAL_AMOUNT = 100;
 
 /** One player and how their first minutes went. */
 type ContactRow = {
-  registered_at: Date;
-  last_seen_at: Date;
+  /**
+   * Whatever `pg` hands back for a timestamp. Narrowed by `toDate` rather than
+   * trusted as typed — the economy service shipped `.getTime is not a function`
+   * on exactly this assumption, and the e2e is what caught it.
+   */
+  registered_at: unknown;
+  last_seen_at: unknown;
   /** Payments in the window whose amount matches the tutorial signature. */
   tutorial_like: number;
   /** Payments in the window whose amount does not. */
@@ -135,14 +141,23 @@ export class SocialService {
       if (bucket === undefined) {
         continue;
       }
+
+      const registered = toDate(row.registered_at);
+      const lastSeen = toDate(row.last_seen_at);
+      if (registered === null || lastSeen === null) {
+        // Unreadable dates make the D7 unanswerable for this player, and
+        // counting them in `players` while excluding them from the base would
+        // publish a group whose two numbers describe different populations.
+        continue;
+      }
       bucket.players += 1;
 
-      const registeredAt = row.registered_at.getTime();
+      const registeredAt = registered.getTime();
       if (now - registeredAt < D7_DAYS * MS_PER_DAY) {
         bucket.immature += 1;
         continue;
       }
-      if (row.last_seen_at.getTime() - registeredAt >= D7_DAYS * MS_PER_DAY) {
+      if (lastSeen.getTime() - registeredAt >= D7_DAYS * MS_PER_DAY) {
         bucket.survived += 1;
       }
     }

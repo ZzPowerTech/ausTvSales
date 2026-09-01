@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDB } from '../db/database.module';
 import { playerDimension } from '../db/schema';
-import { percentile } from './economy-math';
+import { percentile, toDate } from './economy-math';
 import type { EconomySourceState } from './economy.types';
 import { PaymentsStore, type StoredPayment } from './payments.store';
 import {
@@ -266,7 +266,12 @@ export class PaymentsFeedService {
     try {
       const result = await this.db.execute<{
         uuid: string;
-        registered_at: Date;
+        /**
+         * Whatever `pg` hands back for a timestamp. Narrowed by `toDate` rather
+         * than trusted as typed — the economy service shipped
+         * `.getTime is not a function` on exactly that assumption.
+         */
+        registered_at: unknown;
       }>(
         sql`
           SELECT ${playerDimension.uuid}::text AS uuid,
@@ -275,7 +280,15 @@ export class PaymentsFeedService {
            WHERE ${playerDimension.uuid}::text = ANY(${unique})
         `,
       );
-      return new Map(result.rows.map((row) => [row.uuid, row.registered_at]));
+
+      const dates = new Map<string, Date>();
+      for (const row of result.rows) {
+        const registered = toDate(row.registered_at);
+        if (registered !== null) {
+          dates.set(row.uuid, registered);
+        }
+      }
+      return dates;
     } catch (error) {
       // The mark is a nicety; the feed is the product. A failure here costs one
       // flag, and swallowing it keeps a moderation tool usable during a partial
