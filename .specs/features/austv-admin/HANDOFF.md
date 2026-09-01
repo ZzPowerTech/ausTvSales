@@ -694,16 +694,41 @@ DoD:
 que sobra é sempre o que exige tocar o ambiente real. A diferença é que desta vez ele foi tocado, e
 por isso a lacuna apareceu em vez de continuar suposta.
 
-### ⏳ Um item segue sem observação: o `pontos_cegos=` no log
+### ✅ O terceiro item fechou: o ciclo real de 03:50:24
 
-O `HealthCheckScheduler` agenda a primeira execução para **um intervalo depois do boot** (15 min), e
-o container subiu 03:35:24. O veredito mais novo na base é de **03:21:29**, do container antigo —
-ou seja, **nenhum ciclo rodou ainda sob o código novo**, e a linha `Ciclo de saude: … pontos_cegos=1`
-ainda não foi emitida. O `blindSpots` do resumo funciona porque o serviço novo classifica linhas
-antigas.
+O `HealthCheckScheduler` agenda a primeira execução um intervalo após o boot, e o container subiu
+03:35:24. O primeiro ciclo sob o código novo saiu **03:50:24**, no minuto previsto:
 
-Conferir depois de 03:50 com
-`docker compose logs backend --since 30m | grep "Ciclo de saude"`.
+```
+WARN [HealthCheckRunner] Ciclo de saude: 7 observacao(oes) em 138ms · ok=5 · breached=0
+· no_data=1 · error=1 · anunciados=0 · entregues=0 · recuperacoes_seguradas=0
+· segurados_por_orcamento=0 · pontos_cegos=1 · oscilando=0
+```
+
+Três coisas confirmadas de uma vez, e a segunda é a que mais importa:
+
+1. **`no_data=1`** — o `funnel.network_to_survival` emite `no_data` em produção. A mudança de
+   comportamento da S6.3 está viva.
+2. **`anunciados=0` · `entregues=0` com `pontos_cegos=1`** — o veredito foi suprimido pelo ramo
+   `accepted_blind_spot`, **não** por acaso. É a correção do achado da 2ª rodada de review: um
+   `no_data` permanente com alerta aberto no canal re-anunciaria uma vez por dia, para sempre. Aqui
+   ele não anunciou, e o contador diz por qual caminho.
+3. **`pontos_cegos=1`** — o campo `blindSpotHeld` aparece no log de um ciclo real, que era o outro
+   achado da 2ª rodada (o motivo existia mas não era contável em lugar nenhum).
+
+Nota de leitura sobre o `error=1` com `anunciados=0`: o `funnel.tutorial_entry_rate` já está em
+`error` de ciclos anteriores, então o canal segura o problema aberto e a política agrupa até vencer
+o `reAlertAfterMs` (24h). É `grouped`, não silêncio — comportamento correto.
+
+E a linha sai como **WARN** porque `breached + error > 0`, como o `log()` define.
+
+O que este ciclo **não** prova, e está dito para não virar alegação: a passagem de `breached`/`error`
+de um ponto cego (correção da 3ª rodada) não é observável aqui, porque este check só emite
+`no_data`. Essa metade continua fixada só em teste.
+
+> Observação sem baseline: o ciclo levou **138ms** para 7 observações, e o `network_to_survival`
+> deixou de fazer uma consulta MySQL e uma chamada HTTP por backend. Os dois fatos são
+> consistentes, mas ninguém mediu o tempo do ciclo antes, então isto **não** é medição de ganho.
 
 ---
 

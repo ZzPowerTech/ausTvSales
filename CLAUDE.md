@@ -176,7 +176,9 @@ sprints.
   motivo, a conversão `rede → survival` sai `null` em vez de ~100%, o `survival` traz **687**,
   `coversFrom` confirma **2024-06-02**, e o `/health/instrumentation` publica `blindSpots` com o
   check fora de `counts` e de `failing` — com o agregado ainda indo a `down` por um `error` de
-  outro check, que era a propriedade a não perder.
+  outro check, que era a propriedade a não perder. E o ciclo real de 03:50:24 fechou o terceiro:
+  `no_data=1 · anunciados=0 · entregues=0 · pontos_cegos=1` — o ponto cego não paginou o canal, e o
+  contador diz que foi pelo ramo `accepted_blind_spot`, não por acaso.
   **🔴 E a validação derrubou uma alegação minha:** eu disse que a segunda metade do DoD da S8
   (`~100%` de entrada no tutorial, `694/682`) era *calculável, só não rodada*. Rodou: **não é
   calculável em produção**, porque o `tutorial_daily` está `never_synced` — o **ETL da S8.0 não
