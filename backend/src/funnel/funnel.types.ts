@@ -145,8 +145,10 @@ export type StepCount =
        * Why this step has no number for this bucket.
        *
        * Carried per step rather than per response because the steps fail
-       * independently: the network step can be unreachable while the tutorial
+       * independently: the survival step can be unreachable while the tutorial
        * steps are fine, and a response-level flag would hide which is which.
+       * (`rede` is a third case again — it has no source at all, so its reason
+       * is the same in every bucket of every response.)
        */
       unavailableReason: string;
     };

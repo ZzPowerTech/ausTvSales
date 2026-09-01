@@ -34,15 +34,25 @@ const MS_PER_DAY = 86_400_000;
  * underlying store separately, so a caller can tell a database outage from an
  * empty period.
  *
- * The `survival` step has no daily source yet and says so in every bucket. That
- * is the step whose discovery started the epic, so it is stated loudly rather
- * than quietly omitted.
+ * The **`rede`** step has no source and says so in every bucket. That is the
+ * step whose discovery started the epic — 54% of everyone who connects to the
+ * network never reaches survival — so it is stated loudly rather than quietly
+ * omitted.
+ *
+ * ⚠️ Until 2026-08-31 this paragraph named the **`survival`** step instead, and
+ * the two are the wrong way round only because the code was. `plan_users` holds
+ * the Survival, not the network: measured that day, the proxy has zero players
+ * in `plan_user_info` and eight months of counts match the `survival` column of
+ * `HANDOFF.md` to the row. The steps swapped places; no count changed. What it
+ * fixed is the conversion `rede → survival`, which was Survival ÷ Survival.
  *
  * ## No player data
  *
- * Counts and dates only. The network step reads uuids to derive `platform`
+ * Counts and dates only. The **survival** step reads uuids to derive `platform`
  * (ADR-003) and discards them inside the aggregation — nothing identifying
- * reaches this contract, and spec §8 keeps it that way.
+ * reaches this contract, and spec §8 keeps it that way. That read is the
+ * widening of ADR-002's exception 2 recorded in `PlanDatabase`; it moved here
+ * with the step, and the `rede` step now reads nothing at all.
  */
 @ApiTags('Funil')
 @DashboardThrottle()

@@ -151,9 +151,49 @@ describe('FunnelService', () => {
         .unavailableReason;
       // The distinction the per-bucket reason exists for: this bucket is
       // outside the source's reach, which is not the source having failed.
-      expect(reason).toContain('anterior ao inicio da cobertura');
+      expect(reason).toContain('cobre por inteiro');
       expect(reason).not.toContain('falhou');
       expect(reason).toContain('2026-03-11');
+    });
+
+    it('nao contradiz `coversFrom` no mensal, onde os dois graos divergem', async () => {
+      // The regression: the reason used to say "a cobertura comeca em 2026-04"
+      // while `sources[].coversFrom` in the same response said "2026-03-11".
+      // Both true of different grains, published side by side under the same
+      // word — and a reader debugging "why is March empty?" concluded the data
+      // did not exist, when 21 days of it were there and only the month TOTAL
+      // was being refused.
+      const service = new FunnelService(
+        planDbWith({
+          arrivals: [],
+          earliestAt: Date.parse('2026-03-11T00:00:00-03:00'),
+        }),
+        tutorialWith({}),
+      );
+
+      const series = await service.series(
+        FunnelGranularity.Monthly,
+        '2026-03-01',
+        '2026-04-30',
+      );
+
+      const march = countOf(series.buckets[0], FunnelStep.Survival);
+      const reason = (march as { unavailableReason?: string })
+        .unavailableReason;
+      const source = series.sources.find((s) => s.name === 'plan_users');
+
+      expect(series.buckets[0].bucket).toBe('2026-03');
+      expect(march?.value).toBeNull();
+      // The first WHOLE bucket, said as such — not as "coverage starts here".
+      expect(reason).toContain(
+        'primeiro balde integralmente coberto e 2026-04',
+      );
+      // And it points at the field that carries the other grain, instead of
+      // silently disagreeing with it.
+      expect(reason).toContain('coversFrom');
+      expect(source?.coversFrom).toBe('2026-03-11');
+      // The exact contradiction that was published before.
+      expect(reason).not.toContain('cobertura comeca em 2026-04');
     });
 
     it('says the query failed only when it actually failed', async () => {

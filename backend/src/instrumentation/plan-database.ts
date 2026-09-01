@@ -309,8 +309,13 @@ export class PlanDatabase implements OnModuleInit, OnModuleDestroy {
    *   design, because deriving it any other way would need a plugin.
    *
    * So a funnel that honours §6.2 has to read the uuid. The alternative is
-   * shipping the network step without platform segmentation, which fails
+   * shipping the step this feeds without platform segmentation, which fails
    * criterion 2 of story S8.1.
+   *
+   * Which step that is changed on 2026-08-31 and the widening did not: these
+   * rows fed **`rede`** when the exception was extended and feed **`survival`**
+   * now, because `plan_users` was measured to hold the Survival. Same table,
+   * same three columns, same read-only grant.
    *
    * **What this is not:** a new table. `plan_users` was already opened by the
    * same approval, the access stays `SELECT`-only on the same read-only user,
@@ -342,22 +347,25 @@ export class PlanDatabase implements OnModuleInit, OnModuleDestroy {
    *
    * ## The number this exists to stop being invented
    *
-   * `plan_users` may not hold the network's whole history. The belief on
-   * record is that the proxy's rows did not come across in the 2026-08-20
-   * unification, leaving the network metric shallow — but that belief was
-   * **inferred, never measured**, and this very method is what measures it.
-   * Whatever it returns is the answer; the paragraph above is only why the
-   * question matters.
+   * ✅ **Measured on 2026-08-31, and the answer was not the one on record.** The
+   * belief was that the proxy's rows did not come across in the 2026-08-20
+   * unification, leaving the metric shallow. This method says **2024-06-02** —
+   * 26 months. The table is not shallow; what it does not hold is the proxy's
+   * population **at all**, which is a different problem and the one the funnel's
+   * `rede` step now reports as `null`.
    *
-   * A query for March 2026 therefore **succeeds and returns nothing**, and a
-   * caller that reads "the source answered, so an empty bucket is a measured
-   * zero" would publish `rede: 0` for a month when thousands of people
-   * connected. Beside a tutorial step whose ETL reads plugin files going back to
-   * 2025, that renders a funnel where more people enter the tutorial than reach
-   * the network.
+   * **The guard stays, and depth is not why.** A window can still start before
+   * the first row, and the monthly grain still has to refuse a month it covers
+   * only part of. A caller that reads "the source answered, so an empty bucket
+   * is a measured zero" would publish `survival: 0` for a month when hundreds of
+   * people arrived. Beside a tutorial step whose ETL reads plugin files going
+   * back to 2025, that renders a funnel where more people enter the tutorial
+   * than reach the server.
    *
    * This is the exact defect the epic exists to prevent, so the coverage floor
-   * is a first-class question the funnel must ask before trusting a zero.
+   * is a first-class question the funnel must ask before trusting a zero — at
+   * any depth, which is the part the old wording tied to a belief that has since
+   * been falsified.
    */
   async earliestArrivalAt(): Promise<number | null> {
     if (!this.pool) {

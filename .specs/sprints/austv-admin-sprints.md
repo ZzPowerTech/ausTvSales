@@ -555,8 +555,10 @@ existe para impedir.
 >
 > Este pré-requisito supunha que a S8.2 leria `plan_users` por SQL. Ela não lê: sai do
 > `/v1/retention`, cujo corpo lido em 2026-08-29 cobre 26 meses de `registerDate`. A
-> profundidade do `plan_users` deixou de ser pergunta **desta história** — continua sendo
-> pergunta do degrau de rede do funil, e continua sem medição.
+> profundidade do `plan_users` deixou de ser pergunta **desta história** — e, em 2026-08-31,
+> deixou de ser pergunta de qualquer história: foi medida em **2024-06-02**, 26 meses. O que
+> falta ao degrau `rede` do funil nunca foi profundidade, é a **população do proxy**, que não
+> está neste banco.
 >
 > A data de **2026-09-19** que este bloco produziu não tem base: ela saía da suposição
 > acima, não de uma leitura.

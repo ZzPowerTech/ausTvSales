@@ -358,7 +358,10 @@ export class FunnelService {
                 // every fifteen minutes that the read had "probably found the
                 // wrong database", about a perfectly healthy Plan.
                 null
-              : `${SOURCE_BEFORE_COVERAGE} A cobertura comeca em ${coversFromKey}.`,
+              : `${SOURCE_BEFORE_COVERAGE} O primeiro balde integralmente ` +
+                `coberto e ${coversFromKey}; \`sources[].coversFrom\` traz o dia ` +
+                'em que a fonte de fato comeca, que pode cair dentro de um balde ' +
+                'anterior a este.',
         state: {
           name: 'plan_users',
           ok: true,
@@ -568,10 +571,23 @@ const SOURCE_QUERY_FAILED =
 const SOURCE_COVERS_NOTHING =
   '`plan_users` nao tem nenhuma linha, entao a fonte nao cobre periodo nenhum ' +
   '— o que nao e o mesmo que ninguem ter chegado.';
+/**
+ * ⚠️ The second sentence is appended by the caller, and it exists because the
+ * first version of it said "a cobertura comeca em 2024-07" while
+ * `sources[].coversFrom` in the same response said "2024-06-02".
+ *
+ * Both were true of different grains — first whole *month* against first whole
+ * *day* — and the payload published them side by side under the same word. A
+ * reader debugging "why is June empty?" took the prose at face value, concluded
+ * the data did not exist for June, and stopped, when 28 days of it were there
+ * and only the month **total** was being refused. That is the partial-versus-
+ * complete conflation that produced the 4500% reading twice, surfacing in the
+ * explanation instead of in the arithmetic.
+ */
 const SOURCE_BEFORE_COVERAGE =
-  'Periodo anterior ao inicio da cobertura de `plan_users`: publicar o total ' +
-  'parcial como total do balde e um denominador menor contra um numerador ' +
-  'inteiro.';
+  'Balde anterior ao primeiro que `plan_users` cobre por inteiro: publicar o ' +
+  'total parcial como total do balde e um denominador menor contra um ' +
+  'numerador inteiro.';
 
 /**
  * First **whole** day the source can speak for, given the instant it starts.

@@ -89,7 +89,7 @@ documentadas e isoladas em módulo próprio**, sempre em usuário **read-only**:
 | # | escopo | tabelas | por quê a API não serve |
 |---|---|---|---|
 | 1 | Coorte histórica (§6.2, S8.2) | `plan_users`, `plan_user_info`, `plan_sessions` | ~~agregação por coorte × plataforma não existe em nenhum endpoint~~ — **premissa derrubada em 2026-08-29**, e **nenhuma justificativa a substitui**. Ver a nota abaixo |
-| 2 | **Inventário de instâncias e chegadas de rede (§6.1, S6.3)** — *aprovada em 2026-08-23; **premissa desmentida em 2026-08-26**, corpo lido em 2026-08-29* | **`plan_servers` e `plan_users`** | ~~o Plan não expõe lista de servidores~~ — **falso**: `/v1/networkMetadata` lista as instâncias. Mas o corpo **não traz `plan_version`**, e nenhum outro endpoint traz: `version_divergence` fica, `orphan_instance` pode sair. Justificativa reescrita abaixo. A parte sobre chegadas de rede não foi reavaliada |
+| 2 | **Inventário de instâncias e chegadas de rede (§6.1, S6.3)** — *aprovada em 2026-08-23; **premissa desmentida em 2026-08-26**, corpo lido em 2026-08-29* | **`plan_servers` e `plan_users`** | ~~o Plan não expõe lista de servidores~~ — **falso**: `/v1/networkMetadata` lista as instâncias. Mas o corpo **não traz `plan_version`**, e nenhum outro endpoint traz: `version_divergence` fica, `orphan_instance` pode sair. Justificativa reescrita abaixo. **A parte sobre chegadas de rede foi reavaliada em 2026-08-31, e caiu: `plan_users` guarda o Survival, não a rede** — as linhas passaram a alimentar o degrau `survival` |
 
 #### Exceção 1 — sem justificativa desde 2026-08-29
 
@@ -192,14 +192,20 @@ tabela de identidade — das mais estáveis do schema do Plan.
 > A §6.2 exige cada degrau **segmentável por `platform`**, e o ADR-003 diz que `platform` é
 > **derivada do UUID** — por desenho, porque derivá-la de outro jeito exigiria plugin (e foi o que
 > cancelou uma sprint inteira). Um funil que honra a §6.2 tem de ler o uuid. A alternativa é
-> entregar o degrau de rede sem segmentação por plataforma, o que reprova o critério 2 da S8.1.
+> entregar sem segmentação por plataforma o degrau que estas linhas alimentam, o que reprova o
+> critério 2 da S8.1.
+>
+> ⚠️ **Qual degrau é esse mudou em 2026-08-31, e o alargamento não.** Quando a exceção foi
+> estendida, estas linhas alimentavam o **`rede`**; hoje alimentam o **`survival`**, porque se
+> mediu que `plan_users` guarda o Survival. Mesma tabela, mesmas três colunas, mesma concessão
+> read-only — só o rótulo do degrau mudou.
 >
 > **O que isto não é:** tabela nova. O acesso continua `SELECT` no mesmo usuário read-only, e o
 > uuid é consumido por `platformOf` e **descartado dentro da agregação** — nada identificável chega
 > ao contrato nem é persistido, o que a §8 exige.
 >
 > **Custo:** três colunas em vez de duas, na tabela mais estável do schema do Plan. Se o dono
-> preferir não abrir, o degrau de rede sai sem plataforma e o critério 2 fica parcial.
+> preferir não abrir, o degrau `survival` sai sem plataforma e o critério 2 fica parcial.
 
 **Limites, que fazem parte da decisão:**
 

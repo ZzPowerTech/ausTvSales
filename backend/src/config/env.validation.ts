@@ -377,11 +377,18 @@ export class EnvironmentVariables {
   // (`plan_users`) e a mesma populacao do numerador (`serverOverview` do
   // Survival), medido no dia. Nenhum codigo le esta variavel hoje.
   //
-  // Ela fica aqui porque a validacao roda contra o `.env` implantado, e remover
-  // a chave transformaria um deploy existente num erro de boot para calibrar um
-  // limiar que ninguem esta usando. Ao restaurar o check com uma fonte de rede
-  // de verdade, o limiar volta a valer — e continua PRECISANDO de calibracao:
-  // 0.3 e margem conservadora abaixo do historico (~0,46), nao uma medida.
+  // Ela fica aqui para documentar o caminho de volta: quando existir fonte de
+  // chegadas no proxy, o check volta e este limiar volta a valer com ele — e
+  // continua PRECISANDO de calibracao, porque 0.3 e margem conservadora abaixo
+  // do historico (~0,46) e nunca foi medida. Apagar a chave agora significaria
+  // reescrever essa decisao do zero depois, sem o registro de que 0.3 era chute.
+  //
+  // ⚠️ O que NAO e motivo, e chegou a estar escrito aqui: "remover quebraria um
+  // deploy existente". Nao quebraria. O `validateEnv`, no fim deste arquivo,
+  // chama `validateSync` sem `whitelist` e sem `forbidNonWhitelisted`, entao
+  // variavel de ambiente sem campo declarado e simplesmente ignorada, nunca
+  // erro de boot. Fica registrado porque a afirmacao era checavel em trinta
+  // segundos, doze linhas abaixo, e mesmo assim passou.
   @IsOptional()
   @IsNumber()
   @Min(0)
