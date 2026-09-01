@@ -234,7 +234,9 @@ describe('Economy social (e2e)', () => {
 
     it('shows the feed with the thresholds and the disclaimer', async () => {
       const response = await request(app.getHttpServer())
-        .get('/economy/payments/feed?days=3650&limit=10')
+        // 366 is the cap; the seeded payments are inside it. Asking for more
+        // than the cap is what the next test asserts is refused.
+        .get('/economy/payments/feed?days=366&limit=10')
         .set('Cookie', authCookie)
         .expect(200);
 
