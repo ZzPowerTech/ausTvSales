@@ -511,9 +511,12 @@ export class EnvironmentVariables {
   // sido medido contra esta populacao. A primeira leitura de producao e o que
   // transforma isso em calibracao — e a evidencia necessaria (`stampDays`, com
   // dia, share e base) sai na propria resposta.
+  // O piso e 0.01 e nao 0 de proposito: em 0 todo dia vira carimbo, toda coorte
+  // fica 100% contaminada e o relatorio inteiro sai em branco. A guarda espelhada
+  // existe para o `CONTAMINATION_MAX` (`stamped > 0`, com teste); esta faltava.
   @IsOptional()
   @IsNumber()
-  @Min(0)
+  @Min(0.01)
   @Max(1)
   RETENTION_STAMP_DAY_MIN_SHARE?: number;
 
@@ -533,6 +536,16 @@ export class EnvironmentVariables {
   @Min(0)
   @Max(1)
   RETENTION_COHORT_CONTAMINATION_MAX?: number;
+
+  // TTL do cache do payload do `/v1/retention`, em segundos. A secao 8 do spec
+  // lista "cache com TTL por endpoint" como MITIGACAO, nao como otimizacao: sem
+  // ele, uma aba de dashboard pode puxar as 5565 linhas 120 vezes por janela da
+  // maquina do jogo, porque e isso que o throttle de dashboard permite.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(86_400)
+  RETENTION_CACHE_TTL_SECONDS?: number;
 
   // Express `trust proxy` setting, applied in main.ts so `req.ip` reflects the
   // real client from the Nginx-supplied X-Forwarded-For (and a header forged by a

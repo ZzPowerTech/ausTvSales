@@ -519,8 +519,14 @@ existe para impedir.
 
 > ## ✅ ENTREGUE em 2026-09-01, na Sprint 9 — e **sem abrir a exceção 1**
 >
+> ⚠️ **O bloco `🛑 NÃO INICIADA` mais abaixo é histórico.** Ele registra o estado de
+> 2026-08-28 e a decisão de mover a história para a S9, e fica de pé porque o raciocínio
+> dele — em especial a resposta à pergunta *"mas a S8.1 entregou com um degrau sem
+> fonte, por que a S8.2 não?"* — continua sendo o registro de por que esta história
+> esperou. Nada nele descreve o estado atual.
+>
 > Módulo `retention`: `GET /retention/cohorts`, coorte mensal × plataforma, `n` por horizonte.
-> Zero MySQL, zero credencial nova, zero linha que nomeie `plan_sessions` ou `plan_user_info`.
+> Zero MySQL, zero credencial nova.
 >
 > | critério | estado |
 > |---|---|
@@ -548,20 +554,57 @@ existe para impedir.
 > foi tirado), e a coorte que passa do teto sai `null` com `import_artifact` **e a evidência** —
 > nunca os ~100%, nunca silêncio.
 >
+> A detecção é por **janela de até dois dias adjacentes**, não por dia isolado, e isso saiu
+> do code review: o `HANDOFF.md` diz *"idêntico **ou colado** à data da unificação"*, e
+> "colado" é exatamente o caso que um teste por dia não vê — duas metades de ~8% contra um
+> limiar de 10%, com a saída de uma detecção perdida sendo uma coorte publicada a 100%.
+> Dois dias e não mais: com janela livre, um mês de jogo normal vira uma corrida única com
+> um terço da população e o detector passa a suprimir o dado saudável.
+>
+> **E há uma segunda guarda, independente do detector.** Uma coorte que sobrevive a ≥99% em
+> **todos** os horizontes não é retenção — coorte real perde gente já no D1 —, e essa forma
+> aparece qualquer que tenha sido o espalhamento dos carimbos. É ela que fecha o caso que o
+> detector populacional não enxerga: uma coorte antiga pequena, inteiramente importada, que
+> cabe abaixo do limiar de 10% de 5.565 linhas. Sai `implausible_survival`, com a base
+> publicada.
+>
 > ⚠️ **Os dois limiares do detector não estão calibrados**, e estão marcados como tal no
 > `.env.example`, na mesma prateleira dos três da S6.3. Foram escolhidos por estarem
 > obviamente fora de comportamento orgânico, não por medição contra esta população. **A
 > primeira leitura de produção é o que vira calibração** — e a evidência necessária sai na
 > própria resposta, de propósito.
 >
-> **2. Coorte do mês corrente imatura.** Coberta pelo filtro de maturidade acima, que é o mesmo
+> **2. Coorte do mês corrente imatura.** Coberta pelo filtro de maturidade, que é o mesmo
 > mecanismo: não há caso especial para "mês corrente", há oportunidade contada por jogador.
+>
+> ### 🔴 E uma terceira, que o code review encontrou e que era pior que as duas
+>
+> A maturidade era medida contra o **relógio** enquanto a sobrevivência é medida contra o
+> `lastSeenDate`, que vem do dado. Com a coleta parada, o calendário continua tornando todo
+> jogador "maduro" enquanto nenhum pode ser observado sobrevivendo — e o módulo publicava o
+> zero resultante como medição, com um `n` de aparência saudável ao lado.
+>
+> Isto é o apagão de três meses vestido de número certo, no módulo cujo docblock prometia
+> justamente nunca fazer isso. A oportunidade passou a ser limitada por `dataThrough`, e um
+> horizonte que a fonte não alcança sai `source_stale` — nunca `0,0%`. As duas ausências têm
+> motivos distintos de propósito: uma diz "espere", a outra diz "a fonte morreu".
 >
 > ### Degradação
 >
 > Plan inalcançável, não configurado ou respondendo forma desconhecida → relatório **sem
 > coortes e com a falha nomeada** (`not_configured` / `unreachable` / `contract_mismatch`),
 > nunca um relatório de zeros. `cohorts: []` ao lado de `source.ok: false` é o contrato.
+>
+> Com o Plan fora do ar **e um payload anterior em cache**, o anterior é servido marcado
+> `stale` com a idade — melhor que nada, e só aceitável porque a marca viaja junto. O cache
+> em si é a mitigação que a §8 do spec pede (*"cache com TTL por endpoint"*) e que faltava:
+> sem ele, uma aba de dashboard podia puxar as 5.565 linhas 120 vezes por janela da máquina
+> do jogo, porque é o que o throttle permite.
+>
+> E `cohorts: []` ao lado de `source.ok: **true**` também ganhou resposta: quando a janela
+> pedida cai fora do que a fonte cobre, sai `coverageWarning` dizendo isso. Sem ele, era
+> indistinguível de "ninguém se registrou nesse período" — a mesma confusão que o PR #180
+> consertou no funil com `coversFrom`.
 >
 > ### A dívida que esta história cria, e vale registrar antes que vire descoberta
 >
@@ -578,7 +621,7 @@ existe para impedir.
 3. ➖ ~~Único ponto do sistema autorizado a fazer SQL direto (ADR-002), em usuário read-only,
    isolado num módulo~~ — sem objeto: nenhum SQL foi escrito
 
-> ### 🛑 NÃO INICIADA — três pré-requisitos abertos, e escrever assim mesmo repetiria a S6.2
+> ### 🛑 [HISTÓRICO — estado de 2026-08-28] NÃO INICIADA — três pré-requisitos abertos
 >
 > Avaliada em **2026-08-28**, depois de S8.0 e S8.1 entregues. Recomendação: **mover para a S9**,
 > que é exatamente a válvula de escape que o próprio plano nomeia para esta história (`[CORTE]` da

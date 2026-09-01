@@ -11,10 +11,10 @@ import { Platform } from '../instrumentation/platform';
  * the first and the last time Plan saw them.
  *
  * "D30" in the literature usually means *the player returned on or around day
- * 30*. That is a different question, and answering it needs a session log
- * (`plan_sessions`), which is exception 1 of ADR-002 — an exception this story
- * deliberately does **not** open, because the interval reading answers the
- * business question (does this cohort stick?) without a MySQL credential.
+ * 30*. That is a different question, and answering it needs a per-session log,
+ * which is exception 1 of ADR-002 — an exception this story deliberately does
+ * **not** open, because the interval reading answers the business question
+ * (does this cohort stick?) without a MySQL credential.
  *
  * So the number published is the **survival interval**, and the label travels
  * with it in {@link RETENTION_SEMANTICS} rather than living in a docblock
@@ -31,8 +31,11 @@ export const RETENTION_SEMANTICS =
   'coisa derivavel delas e por quanto tempo a atividade do jogador se ' +
   'estendeu: "D30" aqui significa que o Plan ainda via o jogador 30 dias ' +
   'depois do registro, nao que ele voltou no trigesimo dia. Responder a ' +
-  'segunda pergunta exigiria `plan_sessions`, que e a excecao 1 do ADR-002 e ' +
-  'esta historia nao abre.';
+  'segunda pergunta exigiria um log de sessao por jogador, que e a excecao 1 ' +
+  'do ADR-002 e esta historia nao abre.';
+// O identificador da tabela fica no docblock acima e NAO nesta string: ela viaja
+// no corpo de toda resposta, e nome de tabela de terceiro em corpo HTTP e
+// exatamente o que a regra de CWE-209 deste projeto proibe.
 
 /**
  * The horizons published, in days.
@@ -79,6 +82,33 @@ export const RETENTION_UNAVAILABLE_REASONS = [
   'import_artifact',
   /** The Plan API could not be read at all. Never a zero. */
   'source_unavailable',
+  /**
+   * The dataset itself stopped advancing before this horizon could close.
+   *
+   * This is the distinction whose absence was the worst defect this module
+   * shipped. Maturity used to be measured against the **wall clock** while
+   * survival is measured against `lastSeenDate`, which comes from the data.
+   * When collection stalls, every player becomes "mature" by calendar while
+   * none of them can possibly have survived — and the resulting zero was
+   * published as a measurement, with a healthy-looking `n` beside it.
+   *
+   * That is the three-month-blackout reading this whole epic exists to
+   * eliminate, wearing the clothes of a real number. A horizon is now only
+   * measurable up to `dataThrough`.
+   */
+  'source_stale',
+  /**
+   * The cohort survives at ~100% across every horizon, which no real cohort
+   * does.
+   *
+   * An independent guard against the bulk-import artefact, sitting beside the
+   * stamp-day detector rather than depending on it. `HANDOFF.md` describes the
+   * contamination as `lastSeenDate` "posterior por construção" — not
+   * necessarily identical on one day — so a detector keyed on calendar days can
+   * miss it, and the output of a missed detection is exactly `100%`. This
+   * catches the *shape* of the result however the import spread its timestamps.
+   */
+  'implausible_survival',
 ] as const;
 
 export type RetentionUnavailableReason =
@@ -154,6 +184,18 @@ export interface StampDay {
   n: number;
   /** Population the share was taken over — the denominator, always published. */
   population: number;
+  /**
+   * The run of adjacent days this one belongs to, `YYYY-MM-DD..YYYY-MM-DD`.
+   *
+   * Detection is **per run**, not per day, and the difference is not cosmetic:
+   * an import that wrote across a midnight boundary leaves two days of ~8% each
+   * where the threshold is 10%, and a per-day test sees nothing at all. The
+   * `HANDOFF.md` wording is "idêntico **ou colado** à data da unificação", and
+   * "colado" is precisely the case a single-day test cannot see.
+   */
+  run: string;
+  /** Share of the whole population across the entire run. Never below `share`. */
+  runShare: number;
 }
 
 /** How much of one cohort landed on a stamp day. */
@@ -170,6 +212,16 @@ export interface CohortContamination {
    * and whoever reads the number deserves to know it is 40% and not 0%.
    */
   suspect: boolean;
+  /**
+   * Which detector fired, or `null` when none did.
+   *
+   * One value today — `population_stamp`, the cohort sitting on a run the whole
+   * dataset piles onto. The field exists rather than being implied by `suspect`
+   * because the *other* artefact guard, `implausible_survival`, reports through
+   * the measures instead, and a reader looking at a suppressed cohort needs to
+   * know which of the two spoke.
+   */
+  detectedBy: 'population_stamp' | null;
 }
 
 /** One cohort — a registration month and a platform. */
@@ -224,6 +276,36 @@ export interface RetentionSourceState {
   dataThrough: string | null;
   /** Rows the payload carried, before any filtering. */
   rows: number | null;
+  /**
+   * Rows that survived parsing — the base every number here was computed over.
+   *
+   * Published beside `rows` because the two can differ and the difference is
+   * otherwise invisible: `rows` is the pre-filter total, so a payload with 2.000
+   * unreadable dates out of 5.565 would advertise 5.565 next to cohorts summing
+   * 3.565, with nothing to notice. Same family as the `n` rule — the published
+   * base has to be the base the numbers came from.
+   */
+  parsed: number | null;
+  /** Rows dropped for an unreadable uuid or date. `rows - parsed`. */
+  dropped: number | null;
+  /**
+   * Earliest `registerDate` in the payload, `YYYY-MM-DD`.
+   *
+   * The coverage floor. A window entirely before it produces no cohorts, and
+   * without this field that is indistinguishable from "nobody registered then"
+   * — the same defect PR #180 fixed in the funnel with `coversFrom`.
+   */
+  dataFrom: string | null;
+  /**
+   * Whether the served payload came from cache after Plan failed.
+   *
+   * Spec §8 requires a TTL cache in front of `/v1/*`; when Plan is down and a
+   * previous payload exists, serving it beats serving nothing — but only if the
+   * consumer is told, which is what this field is for.
+   */
+  stale: boolean;
+  /** Age of the served payload in milliseconds, when it came from cache. */
+  ageMs: number | null;
 }
 
 /** A full cohort-retention read. */
@@ -244,6 +326,13 @@ export interface RetentionReport {
   /** Days detected as bulk-import stamps. Empty is the healthy case. */
   stampDays: StampDay[];
   cohorts: CohortRetention[];
+  /**
+   * Set when the requested window falls wholly outside what the source covers.
+   *
+   * Without it, `cohorts: []` beside `source.ok: true` reads as "nobody
+   * registered in that period" — a measurement the module never made.
+   */
+  coverageWarning?: string;
   source: RetentionSourceState;
 }
 

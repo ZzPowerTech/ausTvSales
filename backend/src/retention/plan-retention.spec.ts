@@ -18,10 +18,28 @@ describe('toEpochMs', () => {
     expect(toEpochMs(EPOCH_S)).toBe(EPOCH_S * 1000);
   });
 
-  it('parses a date string', () => {
+  it('parses a date string that carries an offset', () => {
     expect(toEpochMs('2026-03-10T15:00:00Z')).toBe(
       Date.parse('2026-03-10T15:00:00Z'),
     );
+    expect(toEpochMs('2026-03-10T12:00:00-03:00')).toBe(
+      Date.parse('2026-03-10T12:00:00-03:00'),
+    );
+  });
+
+  it('refuses a date string with no offset instead of guessing a zone', () => {
+    // Two silent failures this closes. `2026-09-01` is UTC midnight by spec,
+    // which is 21:00 BRT of the PREVIOUS day — every player registering on the
+    // 1st would land in the previous month's cohort. And a MySQL-style
+    // `2026-09-02 01:00:00` is parsed by V8 as process-local time, so the answer
+    // would depend on the container's TZ.
+    //
+    // The field types of /v1/retention were never observed, so the parser
+    // refuses rather than guesses: the row is dropped, counted, and published
+    // as dropped.
+    expect(toEpochMs('2026-09-01')).toBeNull();
+    expect(toEpochMs('2026-09-02 01:00:00')).toBeNull();
+    expect(toEpochMs('2026-09-02T01:00:00')).toBeNull();
   });
 
   it('returns null — never zero — for anything unreadable', () => {
@@ -88,6 +106,35 @@ describe('parseRetention', () => {
           { [key]: UUID, registerDate: EPOCH_MS, lastSeenDate: EPOCH_MS },
         ]);
         expect(result.ok && result.value.players[0].uuid).toBe(UUID);
+      }
+    });
+  });
+
+  describe('the uuid value, not only its field name', () => {
+    it('drops a uuid that is not in canonical form', () => {
+      // The field NAME got three accepted spellings, because being wrong about
+      // it "would produce `unknown` for every platform — a plausible-looking
+      // result, which is the dangerous kind". The VALUE has the same failure:
+      // an undashed uuid classifies as `unknown` for every row, and a cohort
+      // table full of `unknown` still carries real-looking percentages.
+      const result = parseRetention([
+        {
+          playerUUID: '11111111111141118111111111111111',
+          registerDate: EPOCH_MS,
+          lastSeenDate: EPOCH_MS,
+        },
+      ]);
+
+      expect(result.ok).toBe(false);
+      expect(result.ok === false && result.reason).toContain('nenhuma das 1');
+    });
+
+    it('keeps a canonical uuid in either case', () => {
+      for (const uuid of [UUID, UUID.toUpperCase()]) {
+        const result = parseRetention([
+          { playerUUID: uuid, registerDate: EPOCH_MS, lastSeenDate: EPOCH_MS },
+        ]);
+        expect(result.ok).toBe(true);
       }
     });
   });

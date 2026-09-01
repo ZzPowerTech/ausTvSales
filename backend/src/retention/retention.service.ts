@@ -2,8 +2,13 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PlanApiClient } from '../instrumentation/plan-api.client';
 import { PlanNotConfiguredError } from '../instrumentation/plan-api.errors';
+import { PlanCache } from '../metrics/plan-cache';
 import { toSaoPauloDay } from '../tutorial/tutorial-day';
-import { parseRetention, type RetentionPlayer } from './plan-retention';
+import {
+  parseRetention,
+  type ParsedRetention,
+  type RetentionPlayer,
+} from './plan-retention';
 import {
   buildCohorts,
   detectStampDays,
@@ -24,11 +29,24 @@ import {
 /** Path of the single endpoint this module reads. */
 const RETENTION_PATH = '/v1/retention';
 
+/** Cache key. One payload, no per-request variation — the window is applied here. */
+const CACHE_KEY = 'retention:v1';
+
 /** Defaults, all overridable. Documented in `.env.example` as uncalibrated. */
 const DEFAULT_MIN_COHORT_SIZE = 30;
 const DEFAULT_STAMP_DAY_MIN_SHARE = 0.1;
 const DEFAULT_STAMP_DAY_MIN_POPULATION = 200;
 const DEFAULT_CONTAMINATION_MAX = 0.5;
+/**
+ * Five minutes.
+ *
+ * Spec §8 requires a TTL cache in front of `/v1/*` as a **mitigation**, not an
+ * optimisation: this module pulls the entire 5.565-row payload on every request
+ * and the dashboard throttle allows 120 of those per window per caller, against
+ * a webserver that runs inside the Minecraft process. Cohort retention moves on
+ * the scale of days, so five minutes costs the reader nothing.
+ */
+const DEFAULT_CACHE_TTL_SECONDS = 300;
 
 /**
  * Cohort retention by month × platform (story S8.2, spec §6.2).
@@ -43,9 +61,7 @@ const DEFAULT_CONTAMINATION_MAX = 0.5;
  * axes §6.2 asks for.
  *
  * So there is no MySQL connection here, no dedicated read-only account to
- * provision, and no second place in the codebase that knows Plan's schema. The
- * exception stays closed, and its stated justification stays falsified rather
- * than quietly repaired — see the ADR.
+ * provision, and no second place in the codebase that knows Plan's schema.
  *
  * ## What the numbers mean, and why the label is in the payload
  *
@@ -54,12 +70,23 @@ const DEFAULT_CONTAMINATION_MAX = 0.5;
  * the endpoint only answers the first; calling it the second would be the
  * denominator error this epic has already paid for once.
  *
+ * ## Horizons are bounded by the data, never by the clock
+ *
+ * The single most dangerous thing this module could do — and did, in its first
+ * version — is measure maturity against wall-clock time while measuring survival
+ * against `lastSeenDate`. When collection stalls, the calendar keeps making
+ * players eligible while none of them can be observed surviving, and the ratio
+ * falls to zero for reasons that have nothing to do with players. `dataThrough`
+ * is what bounds eligibility now, and a horizon it cannot reach comes back
+ * `source_stale`, never `0.0%`.
+ *
  * ## Degradation
  *
  * Plan unreachable, misconfigured, or answering a shape this module does not
  * know produces a report with **no cohorts and a named failure**, never a report
- * of zeroes. Same rule as the funnel, same reason: a collection gap read as a
- * measurement is the failure mode ADR-006 exists to remove.
+ * of zeroes. When Plan fails and a previous payload is cached, that payload is
+ * served **marked stale with its age**, which is better than nothing and is only
+ * acceptable because the mark travels with it.
  */
 @Injectable()
 export class RetentionService {
@@ -69,9 +96,11 @@ export class RetentionService {
   private readonly stampDayMinShare: number;
   private readonly stampDayMinPopulation: number;
   private readonly contaminationMax: number;
+  private readonly cacheTtlMs: number;
 
   constructor(
     private readonly plan: PlanApiClient,
+    private readonly cache: PlanCache,
     config: ConfigService,
   ) {
     this.minimumCohortSize =
@@ -86,6 +115,9 @@ export class RetentionService {
     this.contaminationMax =
       config.get<number>('RETENTION_COHORT_CONTAMINATION_MAX') ??
       DEFAULT_CONTAMINATION_MAX;
+    this.cacheTtlMs =
+      (config.get<number>('RETENTION_CACHE_TTL_SECONDS') ??
+        DEFAULT_CACHE_TTL_SECONDS) * 1000;
   }
 
   /**
@@ -110,23 +142,26 @@ export class RetentionService {
       return this.emptyReport(fromMonth, toMonth, evaluatedAt, loaded.state);
     }
 
+    const players = loaded.parsed.players;
+
     // Stamp detection runs over the WHOLE payload, not over the requested
     // window. An import stamp is a property of the dataset, and a request for
-    // three months would otherwise be unable to see that the day it lands on is
+    // three months would otherwise be unable to see that the run it lands on is
     // shared by five thousand players outside the window.
     const stampDays = detectStampDays(
-      loaded.players,
+      players,
       this.stampDayMinShare,
       this.stampDayMinPopulation,
     );
 
-    const inWindow = loaded.players.filter((player) => {
+    const inWindow = players.filter((player) => {
       const month = toSaoPauloMonth(player.registeredAt);
       return month !== null && month >= fromMonth && month <= toMonth;
     });
 
     const cohorts = buildCohorts(inWindow, {
       evaluatedAt,
+      dataThrough: latestEpoch(players),
       stampDays,
       minimumCohortSize: this.minimumCohortSize,
       contaminationMax: this.contaminationMax,
@@ -142,23 +177,34 @@ export class RetentionService {
       minimumCohortSize: this.minimumCohortSize,
       stampDays,
       cohorts,
+      ...this.coverageWarning(loaded.state, fromMonth, toMonth, cohorts.length),
       source: loaded.state,
     };
   }
 
-  /** Fetch and parse the payload, turning every failure into a closed label. */
+  /**
+   * Fetch and parse the payload, turning every failure into a closed label.
+   *
+   * The fetch goes through `PlanCache`: inside the TTL nothing reaches the game
+   * machine at all, and when Plan fails with a previous payload in hand that
+   * payload is served marked stale rather than dropped.
+   */
   private async load(): Promise<LoadResult> {
     if (!this.plan.configured) {
       return { ok: false, state: this.failed('not_configured', null) };
     }
 
-    let body: unknown;
-    try {
-      body = await this.plan.getJson(RETENTION_PATH);
-    } catch (error) {
+    const result = await this.cache.read<unknown>(
+      CACHE_KEY,
+      this.cacheTtlMs,
+      () => this.plan.getJson(RETENTION_PATH),
+    );
+
+    if (result.outcome === 'unavailable') {
       // The message names the host and sometimes an upstream body. It goes to
       // the log; the response gets a closed label (CWE-209, the same call story
       // S7.2 made for `MetricsFailureReason`).
+      const error = result.error;
       this.logger.warn(
         `Retencao por coorte indisponivel: ${
           error instanceof Error ? error.message : String(error)
@@ -167,8 +213,6 @@ export class RetentionService {
       // Only two labels here, and that is deliberate: from a reader's point of
       // view "we are misconfigured" and "the game VPS did not answer" send you
       // to different places, while a 403 and a timeout send you to the same one.
-      // The taxonomy that separates those lives in `plan-api.errors.ts` and
-      // reaches the log; the body gets the distinction that changes behaviour.
       const failure: RetentionSourceFailure =
         error instanceof PlanNotConfiguredError
           ? 'not_configured'
@@ -176,7 +220,7 @@ export class RetentionService {
       return { ok: false, state: this.failed(failure, null) };
     }
 
-    const parsed = parseRetention(body);
+    const parsed = parseRetention(result.value);
     if (!parsed.ok) {
       // Loud on purpose. A shape mismatch means a Plan upgrade moved the
       // contract, and the reason names which field went missing — the single
@@ -192,19 +236,32 @@ export class RetentionService {
       this.logger.warn(
         `${parsed.value.dropped} de ${parsed.value.rows} linhas de ` +
           `${RETENTION_PATH} foram descartadas por data ou uuid ilegivel. As ` +
-          'coortes abaixo cobrem o resto.',
+          'coortes abaixo cobrem o resto, e o payload publica as duas contagens.',
+      );
+    }
+
+    const stale = result.outcome === 'stale';
+    if (stale) {
+      this.logger.warn(
+        `Plan fora do ar; servindo o payload anterior de ${RETENTION_PATH} com ` +
+          `${result.ageMs ?? 0}ms de idade, marcado como stale no corpo.`,
       );
     }
 
     return {
       ok: true,
-      players: parsed.value.players,
+      parsed: parsed.value,
       state: {
         name: 'plan_retention',
         ok: true,
-        asOf: new Date().toISOString(),
+        asOf: (result.storedAt ?? new Date()).toISOString(),
         dataThrough: latestDay(parsed.value.players),
+        dataFrom: earliestDay(parsed.value.players),
         rows: parsed.value.rows,
+        parsed: parsed.value.players.length,
+        dropped: parsed.value.dropped,
+        stale,
+        ageMs: result.ageMs,
       },
     };
   }
@@ -219,7 +276,45 @@ export class RetentionService {
       asOf: null,
       failure,
       dataThrough: null,
+      dataFrom: null,
       rows,
+      parsed: null,
+      dropped: null,
+      stale: false,
+      ageMs: null,
+    };
+  }
+
+  /**
+   * Say so when the window falls outside what the source covers.
+   *
+   * `cohorts: []` beside `source.ok: true` is otherwise indistinguishable from
+   * "nobody registered in that period" — a measurement this module never made.
+   * PR #180 fixed the same confusion in the funnel with `coversFrom`.
+   */
+  private coverageWarning(
+    state: RetentionSourceState,
+    fromMonth: string,
+    toMonth: string,
+    cohorts: number,
+  ): { coverageWarning?: string } {
+    if (cohorts > 0 || state.dataFrom === null || state.dataThrough === null) {
+      return {};
+    }
+
+    const coversFrom = state.dataFrom.slice(0, 7);
+    const coversTo = state.dataThrough.slice(0, 7);
+    if (toMonth >= coversFrom && fromMonth <= coversTo) {
+      // Inside coverage and genuinely empty. That is a real answer.
+      return {};
+    }
+
+    return {
+      coverageWarning:
+        `A janela ${fromMonth}..${toMonth} esta fora do que a fonte cobre ` +
+        `(${coversFrom}..${coversTo}). A lista vazia NAO significa "ninguem se ` +
+        'registrou nesse periodo" — significa que este sistema nao tem como ' +
+        'saber. Ver `source.dataFrom` e `source.dataThrough`.',
     };
   }
 
@@ -271,23 +366,40 @@ export class RetentionService {
         `carimbo de importacao (limiar ${this.contaminationMax}). Dias ` +
         `detectados: ${
           stampDays.map((stamp) => `${stamp.day} (n=${stamp.n})`).join(', ') ||
-          'nenhum'
+          'nenhum (deteccao por coorte)'
         }.`,
     );
   }
 }
 
 type LoadResult =
-  | { ok: true; players: RetentionPlayer[]; state: RetentionSourceState }
+  | { ok: true; parsed: ParsedRetention; state: RetentionSourceState }
   | { ok: false; state: RetentionSourceState };
 
-/** Most recent `lastSeenDate` in the payload, as a São Paulo day. */
-function latestDay(players: readonly RetentionPlayer[]): string | null {
+/** Most recent `lastSeenDate` in the payload, epoch ms. */
+function latestEpoch(players: readonly RetentionPlayer[]): number | null {
   let latest = 0;
   for (const player of players) {
     if (player.lastSeenAt > latest) {
       latest = player.lastSeenAt;
     }
   }
-  return latest === 0 ? null : toSaoPauloDay(latest);
+  return latest === 0 ? null : latest;
+}
+
+/** Most recent `lastSeenDate` in the payload, as a São Paulo day. */
+function latestDay(players: readonly RetentionPlayer[]): string | null {
+  const latest = latestEpoch(players);
+  return latest === null ? null : toSaoPauloDay(latest);
+}
+
+/** Earliest `registerDate` in the payload — the coverage floor. */
+function earliestDay(players: readonly RetentionPlayer[]): string | null {
+  let earliest = Number.POSITIVE_INFINITY;
+  for (const player of players) {
+    if (player.registeredAt < earliest) {
+      earliest = player.registeredAt;
+    }
+  }
+  return Number.isFinite(earliest) ? toSaoPauloDay(earliest) : null;
 }

@@ -35,9 +35,19 @@ function player(
   };
 }
 
+/**
+ * Collection is current unless a test says otherwise.
+ *
+ * `dataThrough` follows `evaluatedAt` by default rather than being pinned to
+ * `NOW`, so a test that moves the clock does not accidentally leave the data
+ * ahead of it — which would silently exercise the stalled-source path while
+ * looking like a maturity test.
+ */
 function options(over: Partial<CohortOptions> = {}): CohortOptions {
+  const evaluatedAt = over.evaluatedAt ?? NOW;
   return {
-    evaluatedAt: NOW,
+    evaluatedAt,
+    dataThrough: evaluatedAt,
     stampDays: [],
     minimumCohortSize: 30,
     contaminationMax: 0.5,
@@ -95,6 +105,8 @@ describe('detectStampDays', () => {
       share: 0.6667,
       n: 200,
       population: 300,
+      run: '2026-08-20..2026-08-20',
+      runShare: 0.6667,
     });
   });
 
@@ -115,6 +127,56 @@ describe('detectStampDays', () => {
       expect(stamp.n).toBeGreaterThan(0);
       expect(stamp.population).toBe(250);
     }
+  });
+
+  it('sees an import that ran across midnight, which a per-day test cannot', () => {
+    // The `HANDOFF.md` wording is "idêntico **ou colado** à data da unificação",
+    // and "colado" is the case the first version of this detector missed
+    // entirely — two adjacent days of ~8% each against a 10% per-day threshold.
+    // The output of a missed detection is a cohort published at 100%.
+    const stamped = [
+      ...Array.from({ length: 250 }, (_, i) =>
+        player(premium(i), '2024-11-10', '2026-08-20'),
+      ),
+      ...Array.from({ length: 250 }, (_, i) =>
+        player(premium(300 + i), '2024-11-10', '2026-08-21'),
+      ),
+    ];
+    const organic = Array.from({ length: 2500 }, (_, i) =>
+      player(
+        premium(1000 + i),
+        '2026-06-10',
+        `2026-07-${String((i % 28) + 1).padStart(2, '0')}`,
+      ),
+    );
+
+    const stamps = detectStampDays([...stamped, ...organic], 0.1, 200);
+
+    expect(stamps.map((s) => s.day).sort()).toEqual([
+      '2026-08-20',
+      '2026-08-21',
+    ]);
+    // Neither day reaches the threshold on its own; the run does.
+    for (const stamp of stamps) {
+      expect(stamp.share).toBeLessThan(0.1);
+      expect(stamp.runShare).toBeGreaterThanOrEqual(0.1);
+      expect(stamp.run).toBe('2026-08-20..2026-08-21');
+    }
+  });
+
+  it('does not treat a month of ordinary play as one long import', () => {
+    // With unbounded runs, 28 consecutive days of normal activity form a single
+    // run holding a third of the population, and every day of it gets flagged —
+    // the detector would suppress the healthy data and leave nothing to read.
+    const organic = Array.from({ length: 280 }, (_, i) =>
+      player(
+        premium(i),
+        '2026-06-10',
+        `2026-07-${String((i % 28) + 1).padStart(2, '0')}`,
+      ),
+    );
+
+    expect(detectStampDays(organic, 0.1, 200)).toEqual([]);
   });
 
   it('orders the biggest stamp first when an import left two marks', () => {
@@ -236,7 +298,14 @@ describe('buildCohorts', () => {
 
   describe('import artifact', () => {
     const stampDays: StampDay[] = [
-      { day: '2026-08-20', share: 0.6, n: 600, population: 1000 },
+      {
+        day: '2026-08-20',
+        share: 0.6,
+        n: 600,
+        population: 1000,
+        run: '2026-08-20..2026-08-20',
+        runShare: 0.6,
+      },
     ];
 
     it('suppresses the horizons of a contaminated cohort with the reason', () => {
@@ -256,6 +325,7 @@ describe('buildCohorts', () => {
         share: 0.8,
         n: 80,
         suspect: true,
+        detectedBy: 'population_stamp',
       });
       for (const measure of cohort.measures) {
         expect(measure.percent).toBeNull();
@@ -277,6 +347,7 @@ describe('buildCohorts', () => {
         share: 0.1,
         n: 10,
         suspect: false,
+        detectedBy: null,
       });
       // Ninety players stopped after ten days and ten carry the stamp, so D30 is
       // 10% — measured and published, because 10% contamination is under the
@@ -286,8 +357,14 @@ describe('buildCohorts', () => {
 
     it('never marks a cohort with no stamped player, even at a zero threshold', () => {
       // A misconfigured `contaminationMax` of 0 must not blank the whole report.
+      // Their last-seen days are spread, so the per-cohort route cannot fire
+      // either — which is what makes this a test of the guard and not of luck.
       const members = Array.from({ length: 50 }, (_, i) =>
-        player(premium(i), '2025-01-10', '2025-02-01'),
+        player(
+          premium(i),
+          '2025-01-10',
+          `2025-02-${String((i % 28) + 1).padStart(2, '0')}`,
+        ),
       );
 
       const [cohort] = buildCohorts(
@@ -329,6 +406,106 @@ describe('buildCohorts', () => {
 
       expect(cohorts).toHaveLength(1);
       expect(cohorts[0].size).toBe(1);
+    });
+  });
+
+  describe('a stalled source is never published as a zero', () => {
+    it('returns source_stale, not 0%, when the data stops before the horizon', () => {
+      // The defect this closes: maturity used to be measured against the wall
+      // clock while survival is measured against `lastSeenDate`. With collection
+      // frozen, every player is "mature" by calendar and none can be observed
+      // surviving, so the module published `D30: 0.0%` over a base of hundreds —
+      // a three-month blackout wearing the clothes of a measurement.
+      const members = Array.from({ length: 400 }, (_, i) =>
+        player(premium(i), '2026-05-01', '2026-05-30'),
+      );
+
+      const [cohort] = buildCohorts(
+        members,
+        options({
+          evaluatedAt: NOW,
+          // Plan stopped collecting on 2026-05-30.
+          dataThrough: Date.parse('2026-05-30T12:00:00-03:00'),
+        }),
+      );
+
+      const d30 = measureOf(cohort.measures, 'D30');
+      expect(d30.percent).not.toBe(0);
+      expect(d30.percent).toBeNull();
+      expect(d30).toMatchObject({ reason: 'source_stale' });
+      // D1 and D7 are inside what the data can answer, and stay measured.
+      expect(measureOf(cohort.measures, 'D1').percent).toBe(100);
+      expect(measureOf(cohort.measures, 'D7').percent).toBe(100);
+    });
+
+    it('still says immature_horizon when it is the calendar that is short', () => {
+      // The two absences look identical in the payload without the distinction:
+      // one means "wait", the other means "the source died".
+      const members = [player(premium(1), '2026-07-31', '2026-07-31')];
+
+      const [cohort] = buildCohorts(members, options());
+
+      expect(measureOf(cohort.measures, 'D30')).toMatchObject({
+        reason: 'immature_horizon',
+      });
+    });
+
+    it('measures nothing at all when the payload carries no usable date', () => {
+      const members = [player(premium(1), '2026-01-10', '2026-03-01')];
+
+      const [cohort] = buildCohorts(members, options({ dataThrough: null }));
+
+      for (const measure of cohort.measures) {
+        expect(measure.percent).toBeNull();
+      }
+    });
+  });
+
+  describe('the implausibility guard', () => {
+    it('refuses a cohort that survives at ~100% on every horizon', () => {
+      // The independent guard. It holds whatever the import did to the
+      // timestamps, which is why it is not downstream of the stamp detector:
+      // an import spread widely enough to stay under the stamp threshold still
+      // produces this shape, and the shape is impossible for real players.
+      const members = Array.from({ length: 500 }, (_, i) =>
+        player(premium(i), '2024-11-10', '2026-08-20'),
+      );
+
+      const [cohort] = buildCohorts(members, options());
+
+      expect(cohort.contamination.suspect).toBe(false);
+      for (const measure of cohort.measures) {
+        expect(measure.percent).toBeNull();
+        expect(measure).toMatchObject({ reason: 'implausible_survival' });
+        // The base stays counted, so the payload still says how large the
+        // suppressed cohort was.
+        expect(measure.n).toBe(500);
+      }
+    });
+
+    it('leaves a tiny cohort alone — small samples are marked, not hidden', () => {
+      const members = Array.from({ length: 5 }, (_, i) =>
+        player(premium(i), '2024-11-10', '2026-08-20'),
+      );
+
+      const [cohort] = buildCohorts(members, options());
+
+      expect(measureOf(cohort.measures, 'D30').percent).toBe(100);
+      expect(cohort.belowMinimum).toBe(true);
+    });
+
+    it('leaves a cohort with one unmeasured horizon alone', () => {
+      // A young cohort at 100% on D1 is a young cohort, not an artefact.
+      const members = Array.from({ length: 50 }, (_, i) =>
+        player(premium(i), '2026-07-28', '2026-08-01'),
+      );
+
+      const [cohort] = buildCohorts(members, options());
+
+      expect(measureOf(cohort.measures, 'D1').percent).toBe(100);
+      expect(measureOf(cohort.measures, 'D30')).toMatchObject({
+        reason: 'immature_horizon',
+      });
     });
   });
 

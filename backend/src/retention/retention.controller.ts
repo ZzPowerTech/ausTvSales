@@ -90,11 +90,26 @@ function currentMonth(): string {
   return (toSaoPauloDay(Date.now()) ?? '1970-01').slice(0, 7);
 }
 
-/** `YYYY-MM` arithmetic that does not go through Date, so no day rolls over. */
+/**
+ * `YYYY-MM` arithmetic that does not go through Date, so no day rolls over.
+ *
+ * Clamped at {@link MONTH_FLOOR}: `MONTH_PATTERN` accepts `0000-01`, and
+ * subtracting twelve months from it produced `00-1-01` — a malformed month
+ * echoed straight back in `report.from`. A window before the epoch cannot
+ * contain a cohort anyway, so clamping loses nothing and the response stays
+ * well-formed.
+ */
 function monthsBefore(month: string, months: number): string {
   const [year, monthIndex] = month.split('-').map(Number);
   const zeroBased = year * 12 + (monthIndex - 1) - months;
+  if (zeroBased < FLOOR_ZERO_BASED) {
+    return MONTH_FLOOR;
+  }
   const targetYear = Math.floor(zeroBased / 12);
   const targetMonth = zeroBased - targetYear * 12 + 1;
   return `${String(targetYear).padStart(4, '0')}-${String(targetMonth).padStart(2, '0')}`;
 }
+
+/** No cohort can predate the epoch; nothing is lost by refusing to go below it. */
+const MONTH_FLOOR = '1970-01';
+const FLOOR_ZERO_BASED = 1970 * 12;

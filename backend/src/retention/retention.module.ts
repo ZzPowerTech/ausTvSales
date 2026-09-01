@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { InstrumentationModule } from '../instrumentation/instrumentation.module';
+import { MetricsModule } from '../metrics/metrics.module';
 import { RetentionController } from './retention.controller';
 import { RetentionService } from './retention.service';
 
@@ -16,9 +17,16 @@ import { RetentionService } from './retention.service';
  * SQL against Plan's tables — exception 1 of ADR-002 — and reading
  * `/v1/retention` on 2026-08-29 removed the need. Nothing here writes, nothing
  * here is scheduled, and no new credential is provisioned.
+ *
+ * `MetricsModule` is imported for `PlanCache`, not for its service. Spec §8
+ * lists a TTL cache in front of `/v1/*` as a **mitigation** — *"query pesada
+ * afeta o jogo"* — and this module fetches the whole 5.565-row payload on every
+ * request, which the dashboard throttle would happily allow 120 times a window.
+ * The cache is what keeps that off the game machine, and it doubles as the
+ * stale-fallback path when Plan is down.
  */
 @Module({
-  imports: [InstrumentationModule],
+  imports: [InstrumentationModule, MetricsModule],
   controllers: [RetentionController],
   providers: [RetentionService],
   exports: [RetentionService],

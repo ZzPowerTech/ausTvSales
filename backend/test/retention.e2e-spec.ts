@@ -45,17 +45,42 @@ describe('Retention (e2e)', () => {
         from: string;
         to: string;
         cohorts: unknown[];
-        source: { ok: boolean; failure?: string; dataThrough: string | null };
+        source: {
+          ok: boolean;
+          failure?: string;
+          dataThrough: string | null;
+          parsed: number | null;
+          dropped: number | null;
+        };
       };
 
       expect(body.source.ok).toBe(false);
       expect(body.source.failure).toBe('not_configured');
+      // The parse accounting is null rather than zero when nothing was read:
+      // "we parsed zero rows" and "we never got a payload" are different facts.
+      expect(body.source.parsed).toBeNull();
+      expect(body.source.dropped).toBeNull();
       // An empty array next to a failed source is the contract. It must never be
       // read as "no cohorts exist" — that confusion is the whole reason for the
       // epic.
       expect(body.cohorts).toEqual([]);
       expect(body.from).toBe('2026-01');
       expect(body.to).toBe('2026-03');
+    });
+
+    it('never ships an upstream table name in the body', async () => {
+      // The label is required; the schema identifier is not. It shipped in every
+      // response, including the degraded one, until this test existed — spec §8
+      // and CWE-209 both name internal identifiers explicitly.
+      const response = await request(app.getHttpServer())
+        .get('/retention/cohorts')
+        .set('Cookie', authCookie)
+        .expect(200);
+
+      const body = JSON.stringify(response.body);
+      for (const identifier of ['plan_sessions', 'plan_user_info']) {
+        expect(body).not.toContain(identifier);
+      }
     });
 
     it('carries the survival-interval label in every response', async () => {

@@ -4,6 +4,7 @@ import {
   PlanNotConfiguredError,
   PlanUnreachableError,
 } from '../instrumentation/plan-api.errors';
+import { PlanCache } from '../metrics/plan-cache';
 import { RetentionService } from './retention.service';
 import { RETENTION_SEMANTICS } from './retention.types';
 
@@ -26,6 +27,18 @@ function planStub(over: Partial<PlanApiClient>): PlanApiClient {
   } as unknown as PlanApiClient;
 }
 
+/**
+ * A real `PlanCache`, not a stub.
+ *
+ * It is a pure in-memory class with no I/O of its own, so using the real one
+ * costs nothing and means these tests exercise the code path production takes —
+ * including the single-flight and the stale fallback. A fresh instance per test
+ * keeps them independent.
+ */
+function cache(): PlanCache {
+  return new PlanCache();
+}
+
 function row(uuid: string, registeredDay: string, lastSeenDay: string) {
   return {
     playerUUID: uuid,
@@ -40,6 +53,7 @@ describe('RetentionService', () => {
       const getJson = jest.fn();
       const service = new RetentionService(
         planStub({ configured: false, getJson }),
+        cache(),
         config(),
       );
 
@@ -64,6 +78,7 @@ describe('RetentionService', () => {
               new PlanUnreachableError('http://plan/v1/retention'),
             ),
         }),
+        cache(),
         config(),
       );
 
@@ -82,6 +97,7 @@ describe('RetentionService', () => {
           configured: true,
           getJson: () => Promise.reject(new PlanNotConfiguredError()),
         }),
+        cache(),
         config(),
       );
 
@@ -93,6 +109,7 @@ describe('RetentionService', () => {
     it('reports contract_mismatch when the payload changed shape', async () => {
       const service = new RetentionService(
         planStub({ getJson: () => Promise.resolve([{ nope: 1 }]) }),
+        cache(),
         config(),
       );
 
@@ -112,12 +129,42 @@ describe('RetentionService', () => {
               new PlanUnreachableError('http://10.0.0.5:25504/v1/retention'),
             ),
         }),
+        cache(),
         config(),
       );
 
       const report = await service.report('2026-01', '2026-08');
 
-      expect(JSON.stringify(report)).not.toContain('10.0.0.5');
+      const body = JSON.stringify(report);
+      expect(body).not.toContain('10.0.0.5');
+      // Widened past one sample host: the rule is that NO upstream identifier
+      // reaches a body, and the narrow assertion passed for months while the
+      // semantics string shipped an upstream table name in every response.
+      for (const identifier of [
+        'plan_sessions',
+        'plan_user_info',
+        'plan_users',
+        '25504',
+      ]) {
+        expect(body).not.toContain(identifier);
+      }
+    });
+
+    it('keeps every upstream identifier out of a SUCCESSFUL body too', async () => {
+      const service = new RetentionService(
+        planStub({
+          getJson: () =>
+            Promise.resolve([row(UUID_PREMIUM(1), '2026-01-10', '2026-02-10')]),
+        }),
+        cache(),
+        config(),
+      );
+
+      const body = JSON.stringify(await service.report('2026-01', '2026-01'));
+
+      for (const identifier of ['plan_sessions', 'plan_user_info']) {
+        expect(body).not.toContain(identifier);
+      }
     });
   });
 
@@ -125,6 +172,7 @@ describe('RetentionService', () => {
     it('publishes the survival-interval semantics on every report', async () => {
       const service = new RetentionService(
         planStub({ getJson: () => Promise.resolve([]) }),
+        cache(),
         config(),
       );
 
@@ -151,6 +199,7 @@ describe('RetentionService', () => {
     it('returns one row per cohort and platform, with the base and rows read', async () => {
       const service = new RetentionService(
         planStub({ getJson: () => Promise.resolve(payload) }),
+        cache(),
         config(),
       );
 
@@ -170,6 +219,7 @@ describe('RetentionService', () => {
     it('filters to one platform without summing the others into it', async () => {
       const service = new RetentionService(
         planStub({ getJson: () => Promise.resolve(payload) }),
+        cache(),
         config(),
       );
 
@@ -185,6 +235,7 @@ describe('RetentionService', () => {
     it('restricts the rendered cohorts to the window', async () => {
       const service = new RetentionService(
         planStub({ getJson: () => Promise.resolve(payload) }),
+        cache(),
         config(),
       );
 
@@ -206,6 +257,7 @@ describe('RetentionService', () => {
 
       const service = new RetentionService(
         planStub({ getJson: () => Promise.resolve([...stamped, ...inWindow]) }),
+        cache(),
         config({ RETENTION_STAMP_DAY_MIN_POPULATION: 200 }),
       );
 
@@ -219,9 +271,91 @@ describe('RetentionService', () => {
       }
     });
 
+    it('publishes what it parsed beside what it read', async () => {
+      // `rows` is the pre-filter total. Publishing only that would advertise
+      // 5.565 next to cohorts summing 3.565, with no way to notice — the same
+      // family as the `n` rule: the published base has to be the base the
+      // numbers came from.
+      const service = new RetentionService(
+        planStub({
+          getJson: () =>
+            Promise.resolve([
+              row(UUID_PREMIUM(1), '2026-01-10', '2026-02-10'),
+              { playerUUID: 'nao-e-uuid', registerDate: 1, lastSeenDate: 2 },
+            ]),
+        }),
+        cache(),
+        config(),
+      );
+
+      const report = await service.report('2026-01', '2026-01');
+
+      expect(report.source).toMatchObject({
+        rows: 2,
+        parsed: 1,
+        dropped: 1,
+      });
+    });
+
+    it('says so when the window falls outside what the source covers', async () => {
+      // An empty list beside `source.ok: true` is otherwise indistinguishable
+      // from "nobody registered in that period" — a measurement never made.
+      const service = new RetentionService(
+        planStub({ getJson: () => Promise.resolve(payload) }),
+        cache(),
+        config(),
+      );
+
+      const report = await service.report('2023-01', '2023-12');
+
+      expect(report.cohorts).toEqual([]);
+      expect(report.source.ok).toBe(true);
+      expect(report.coverageWarning).toContain('fora do que a fonte cobre');
+      expect(report.source.dataFrom).toBe('2026-01-10');
+    });
+
+    it('does not cry coverage for a genuinely empty month inside coverage', async () => {
+      const service = new RetentionService(
+        planStub({ getJson: () => Promise.resolve(payload) }),
+        cache(),
+        config(),
+      );
+
+      const report = await service.report('2026-02', '2026-02');
+
+      expect(report.cohorts).toEqual([]);
+      expect(report.coverageWarning).toBeUndefined();
+    });
+
+    it('serves the previous payload marked stale when Plan goes down', async () => {
+      // Spec section 8 asks for the cache as a mitigation. Serving the last good
+      // payload beats serving nothing — but only because the mark travels with
+      // it, so nobody reads month-old cohorts as today's.
+      const getJson = jest
+        .fn()
+        .mockResolvedValueOnce(payload)
+        .mockRejectedValue(new PlanUnreachableError('http://plan/x'));
+      const shared = cache();
+
+      const service = new RetentionService(
+        planStub({ getJson }),
+        shared,
+        config({ RETENTION_CACHE_TTL_SECONDS: 0.001 }),
+      );
+
+      await service.report('2026-01', '2026-03');
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      const second = await service.report('2026-01', '2026-03');
+
+      expect(second.source.ok).toBe(true);
+      expect(second.source.stale).toBe(true);
+      expect(second.cohorts.length).toBeGreaterThan(0);
+    });
+
     it('publishes the configured minimum so a consumer can explain the mark', async () => {
       const service = new RetentionService(
         planStub({ getJson: () => Promise.resolve(payload) }),
+        cache(),
         config({ RETENTION_MIN_COHORT_SIZE: 25 }),
       );
 
@@ -240,8 +374,15 @@ describe('RetentionService', () => {
 
     it('asks Plan exactly once per report', async () => {
       const getJson = jest.fn().mockResolvedValue(payload);
-      const service = new RetentionService(planStub({ getJson }), config());
+      const service = new RetentionService(
+        planStub({ getJson }),
+        cache(),
+        config(),
+      );
 
+      await service.report('2026-01', '2026-03');
+      // Twice, and the second one is served from cache without touching Plan —
+      // spec section 8 asks for the TTL cache as a mitigation, not a nicety.
       await service.report('2026-01', '2026-03');
 
       expect(getJson).toHaveBeenCalledTimes(1);
@@ -256,6 +397,7 @@ describe('RetentionService', () => {
           getJson: () =>
             Promise.resolve([row(UUID_PREMIUM(7), '2026-01-10', '2026-02-10')]),
         }),
+        cache(),
         config(),
       );
 

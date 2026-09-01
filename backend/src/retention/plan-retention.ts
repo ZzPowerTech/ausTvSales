@@ -197,9 +197,46 @@ export function toEpochMs(raw: unknown): number | null {
     return null;
   }
 
-  const parsed = Date.parse(raw.trim());
+  const trimmed = raw.trim();
+
+  // An explicit offset is REQUIRED, and refusing the string without one is the
+  // point rather than an inconvenience. Two ways a bare string goes wrong, both
+  // silent:
+  //
+  //  - `2026-09-01` is UTC midnight by spec, which is 21:00 BRT of the PREVIOUS
+  //    day. Every player registering on the 1st would land in the previous
+  //    month's cohort, and every `lastSeenDate` would shift a day — moving the
+  //    stamp-day histogram with it.
+  //  - `2026-09-02 01:00:00` (a MySQL DATETIME rendering) is parsed by V8 as
+  //    **process-local** time, so the answer would depend on the container's TZ.
+  //
+  // The repo rule is not to guess an unobserved contract. The field types of
+  // `/v1/retention` were never recorded, so a string without an offset is
+  // refused: the row is dropped, counted, and published as dropped.
+  if (!HAS_TIMEZONE.test(trimmed)) {
+    return null;
+  }
+
+  const parsed = Date.parse(trimmed);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
+
+/** `Z`, `+00`, `-0300`, `-03:00` — any explicit UTC offset at the end. */
+const HAS_TIMEZONE = /(Z|[+-]\d{2}:?\d{2}?)$/i;
+
+/**
+ * Canonical dashed UUID, the only form ADR-003 can classify.
+ *
+ * The field NAME got careful treatment (three accepted spellings, because being
+ * wrong about it "would produce `unknown` for every platform — a
+ * plausible-looking result, which is the dangerous kind"). The VALUE did not,
+ * and it has the same failure: an undashed or truncated uuid classifies as
+ * `unknown` for every row, and a cohort table full of `unknown` still carries
+ * real-looking percentages. Rows that do not match are dropped and counted, so
+ * the failure surfaces as a drop count instead of as a platform split.
+ */
+const CANONICAL_UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function firstDefined(
   row: Record<string, unknown>,
@@ -222,7 +259,8 @@ function firstString(
     return null;
   }
   const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  // Shape-checked, not merely non-empty — see `CANONICAL_UUID`.
+  return CANONICAL_UUID.test(trimmed) ? trimmed : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
