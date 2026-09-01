@@ -43,6 +43,13 @@
       "when": 1788300124989,
       "tag": "0005_weekly_reports",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788300997966,
+      "tag": "0006_player_dimension",
+      "breakpoints": true
     }
   ]
 }

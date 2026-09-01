@@ -11,6 +11,7 @@ import { InstrumentationModule } from './instrumentation/instrumentation.module'
 import { ItemsModule } from './items/items.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { FunnelModule } from './funnel/funnel.module';
+import { EconomyModule } from './economy/economy.module';
 import { ReportModule } from './report/report.module';
 import { RetentionModule } from './retention/retention.module';
 import { TutorialModule } from './tutorial/tutorial.module';
@@ -54,6 +55,11 @@ import { SalesModule } from './sales/sales.module';
     // deixou de ser necessaria quando o corpo do endpoint foi lido, e este
     // modulo nao abre conexao MySQL nenhuma.
     RetentionModule,
+    // Camada de economia (S9.1, secao 6.4). E1 e E2 saem do proprio `sales`; a
+    // dimensao de jogador que da o eixo de coorte e preenchida por ETL noturno
+    // sobre o `/v1/retention`, porque o ADR-008 proibe cruzar duas fontes vivas
+    // em memoria. Nenhum Java, nenhuma credencial nova.
+    EconomyModule,
     // Relatorio periodico no Discord (S9.2). Nao calcula metrica nenhuma: le o
     // funil, a retencao e o read model de saude, e o unico dado que possui e o
     // registro do que foi reportado em cada semana.
