@@ -661,9 +661,16 @@ existe para impedir.
       a publicar. O bloqueio alegado antes (`/v1/graph?type=uniqueAndNew` nunca observado) caiu
       junto: a fonte é `plan_users`, que já estava aqui.
 
-      **Calculável não é calculado.** Ninguém rodou isto contra produção, e é o mesmo passo que a
-      S6.2b e a S6.3 deixaram em aberto — o que exige tocar um ambiente real. Marcar esta linha
-      exige rodar `/api/funnel/monthly` e conferir o par de nov/2025.
+      🔴 **Rodado contra produção em 2026-09-01, e NÃO é calculável lá.** O
+      `/api/funnel/monthly` devolveu `tutorial_entrou: null` com
+      `sources[].tutorial_daily: {ok: false, failure: "never_synced"}`: o **ETL da S8.0 não está
+      configurado na VPS** (`TUTORIAL_PLAYERDATA_DIR` vazio, `TUTORIAL_SYNC_ENABLED=false`, ambos
+      avisados no boot). O degrau `survival` veio certo — **687**, com `n` publicado ao lado do
+      percentual nulo —, então falta só o numerador.
+
+      O bloqueio mudou de natureza: não é mais "payload do `/v1/graph` nunca observado", é
+      **configuração de ambiente ausente**. Duas variáveis separam este número de existir.
+      Detalhe no [`HANDOFF.md`](../features/austv-admin/HANDOFF.md).
 
       A data de **2026-09-19** que aparecia aqui saía da suposição sobre `plan_users`, não de
       uma leitura, e não deve ser citada como prazo de nada.

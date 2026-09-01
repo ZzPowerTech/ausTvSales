@@ -624,6 +624,114 @@ comportamento não.**
 
 ---
 
+## ✅ Comportamento validado em produção em 2026-09-01 — e a validação derrubou uma alegação
+
+`backend-v0.15.2` implantado na VPS (release publicado 03:34, `Deploy to VPS: success`). É a
+primeira vez que o épico fecha o ciclo que a auditoria de 2026-08-27 cobrava: entregar **e** tocar
+o ambiente real.
+
+### ✅ O defeito central está corrigido, medido
+
+`GET /api/funnel/monthly?from=2025-11-01&to=2025-11-30`, produção:
+
+| verificação | resultado |
+|---|---|
+| degrau `rede` | **`value: null`** com o motivo nomeando `plan_users` e o proxy |
+| conversão `rede → survival` | **`percent: null, n: null`** — não mais ~100% |
+| degrau `survival` | **`687`** — a série preservada, agora sob o rótulo certo |
+| `sources[].coversFrom` | **`2024-06-02`** — os 26 meses, confirmados ao vivo |
+| `sources[].provenance` | presente, com a ressalva de coincidência medida |
+
+Os 687 batem com o bucket que o `HANDOFF` já registrava para 2025-11 (687 no funil contra 682 no
+SQL — a diferença é fuso, como documentado).
+
+`GET /api/health/instrumentation`, produção:
+
+```json
+{"status":"down","total":7,"counts":{"ok":5,"breached":0,"no_data":0,"error":1},
+ "failing":["funnel.tutorial_entry_rate:Survival"],
+ "blindSpots":["funnel.network_to_survival:Survival"]}
+```
+
+- `blindSpots` publica o ponto cego ✅
+- ele **não** está em `failing` ✅
+- **`counts.no_data: 0`** — fora do agregado ✅
+- `total: 7` — continua contado ✅
+- e a prova que mais importava: **`status: "down"` por um `error` de OUTRO check**. A exclusão não
+  deixou o resumo surdo. Em produção, com o ponto cego presente, um problema real ainda move o
+  agregado — que é a propriedade que o teste unitário fixou e que agora está observada.
+
+### 🔴 A validação derrubou a alegação dos ~100% de entrada no tutorial
+
+O PR #180 afirmou que a segunda metade do DoD da S8 (*"~100% antes de dez/2025"*) tinha destravado
+e era **calculável**, faltando só rodar. Rodou. **Não é calculável em produção**, e o motivo não é
+o que estava escrito:
+
+```
+"tutorial_entrou": {"value": null, "unavailableReason": "sem fonte para este degrau no periodo"}
+"sources": [..., {"name":"tutorial_daily","ok":false,"failure":"never_synced"}]
+```
+
+`tutorial_daily` **nunca sincronizou**. Os logs do container dizem por quê, no boot:
+
+> `TUTORIAL_PLAYERDATA_DIR/TUTORIAL_QUESTS_DIR nao configurados — o funil do tutorial fica sem
+> fonte` · `TUTORIAL_SYNC_ENABLED nao esta ligado — o funil do tutorial NAO vai ser reconstruido`
+
+**O ETL da S8.0 não está configurado em produção.** Consequências, que valem mais que a linha de
+DoD:
+
+1. **Dois dos quatro degraus do funil nunca produziram dado em produção.** `tutorial_entrou` e
+   `tutorial_concluiu` saem `null` desde sempre, não desde este PR.
+2. O `funnel.tutorial_entry_rate` está em **`error`** — corretamente, e é ele que põe o agregado em
+   `down`. O check se comporta como projetado; o que falta é a fonte.
+3. O bloqueio dos `694/682 = 101,8%` **mudou de natureza**: não é mais "payload nunca observado"
+   (isso caiu em 2026-09-01), é **configuração de ambiente ausente**. Duas variáveis no `.env` da
+   VPS separam o número de existir.
+4. A contabilidade da S8.0 como "entregue" merece a mesma ressalva que a S6.2b e a S6.3 levaram: o
+   código existe, o ETL nunca rodou onde importa.
+
+**Este é o padrão que a auditoria de 2026-08-27 nomeou**, aparecendo pela terceira vez — o passo
+que sobra é sempre o que exige tocar o ambiente real. A diferença é que desta vez ele foi tocado, e
+por isso a lacuna apareceu em vez de continuar suposta.
+
+### ✅ O terceiro item fechou: o ciclo real de 03:50:24
+
+O `HealthCheckScheduler` agenda a primeira execução um intervalo após o boot, e o container subiu
+03:35:24. O primeiro ciclo sob o código novo saiu **03:50:24**, no minuto previsto:
+
+```
+WARN [HealthCheckRunner] Ciclo de saude: 7 observacao(oes) em 138ms · ok=5 · breached=0
+· no_data=1 · error=1 · anunciados=0 · entregues=0 · recuperacoes_seguradas=0
+· segurados_por_orcamento=0 · pontos_cegos=1 · oscilando=0
+```
+
+Três coisas confirmadas de uma vez, e a segunda é a que mais importa:
+
+1. **`no_data=1`** — o `funnel.network_to_survival` emite `no_data` em produção. A mudança de
+   comportamento da S6.3 está viva.
+2. **`anunciados=0` · `entregues=0` com `pontos_cegos=1`** — o veredito foi suprimido pelo ramo
+   `accepted_blind_spot`, **não** por acaso. É a correção do achado da 2ª rodada de review: um
+   `no_data` permanente com alerta aberto no canal re-anunciaria uma vez por dia, para sempre. Aqui
+   ele não anunciou, e o contador diz por qual caminho.
+3. **`pontos_cegos=1`** — o campo `blindSpotHeld` aparece no log de um ciclo real, que era o outro
+   achado da 2ª rodada (o motivo existia mas não era contável em lugar nenhum).
+
+Nota de leitura sobre o `error=1` com `anunciados=0`: o `funnel.tutorial_entry_rate` já está em
+`error` de ciclos anteriores, então o canal segura o problema aberto e a política agrupa até vencer
+o `reAlertAfterMs` (24h). É `grouped`, não silêncio — comportamento correto.
+
+E a linha sai como **WARN** porque `breached + error > 0`, como o `log()` define.
+
+O que este ciclo **não** prova, e está dito para não virar alegação: a passagem de `breached`/`error`
+de um ponto cego (correção da 3ª rodada) não é observável aqui, porque este check só emite
+`no_data`. Essa metade continua fixada só em teste.
+
+> Observação sem baseline: o ciclo levou **138ms** para 7 observações, e o `network_to_survival`
+> deixou de fazer uma consulta MySQL e uma chamada HTTP por backend. Os dois fatos são
+> consistentes, mas ninguém mediu o tempo do ciclo antes, então isto **não** é medição de ganho.
+
+---
+
 ## ✅ A lista autoritativa de endpoints do Plan foi encontrada (2026-08-26)
 
 O `/docs` do webserver — `http://198.89.99.70:25504/docs` — serve um **OpenAPI 3.0.1 completo**.
