@@ -546,6 +546,36 @@ export class EnvironmentVariables {
   @Min(1)
   @Max(86_400)
   RETENTION_CACHE_TTL_SECONDS?: number;
+  // --- Relatorio semanal no Discord (AusTV Admin S9.2) ---
+
+  // Webhook do canal onde o relatorio semanal e publicado. DELIBERADAMENTE
+  // separado do `DISCORD_ALERT_WEBHOOK_URL`, e sem fallback para ele: o alerta
+  // pagina ("quebrou, olha agora") e o relatorio e leitura de rotina. Misturar
+  // os dois dilui o canal de alerta ate ninguem mais ler — que e exatamente
+  // como um canal do Discord vira mudo, e este epico ja tem uma historia sobre
+  // isso. Sem webhook, o relatorio ainda e gerado e persistido, e o boot avisa.
+  @IsOptional()
+  @IsUrl(
+    { protocols: ['https'], require_protocol: true },
+    { message: 'DISCORD_REPORT_WEBHOOK_URL must be an https URL' },
+  )
+  DISCORD_REPORT_WEBHOOK_URL?: string;
+
+  // Chave geral do relatorio semanal. Desligada por padrao. Desligada, o boot
+  // avisa em frase inteira: o modo de falha de um relatorio desligado e
+  // SILENCIO, e silencio e o que este epico existe para tornar impossivel de
+  // confundir com boa noticia.
+  @IsOptional()
+  @IsBoolean()
+  WEEKLY_REPORT_ENABLED?: boolean;
+
+  // Quando o relatorio e gerado, em cron, no fuso America/Sao_Paulo. Padrao:
+  // segunda-feira as 09:00 BRT — relatorio que chega quando ninguem esta lendo
+  // e relatorio que ninguem le. Expressao invalida deixa o job SEM agendar e
+  // diz isso; nunca cai no padrao.
+  @IsOptional()
+  @MinLength(1, { message: 'WEEKLY_REPORT_CRON must not be empty when set' })
+  WEEKLY_REPORT_CRON?: string;
 
   // Express `trust proxy` setting, applied in main.ts so `req.ip` reflects the
   // real client from the Nginx-supplied X-Forwarded-For (and a header forged by a

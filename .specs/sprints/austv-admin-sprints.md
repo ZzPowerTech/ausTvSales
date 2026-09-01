@@ -836,15 +836,67 @@ jogo.**
 
 ### S9.2 — Relatório periódico no Discord · 5 SP · `feat/api-weekly-report`
 
-1. Semanal: funil de 4 degraus, retenção por coorte e plataforma, saúde da instrumentação
-2. `n` ao lado de cada percentual
-3. Falha do job avisa no canal — degradação honesta, nunca silêncio
-4. Versão gerada persistida
+> ## ✅ ENTREGUE em 2026-09-01
+>
+> Módulo `report`: cron opt-in (segunda 09:00 BRT), tabela `weekly_reports`, publicação em
+> webhook **próprio**, e `GET /reports/weekly{,/latest,/:id}` + `POST /reports/weekly/run`.
+>
+> | critério | estado |
+> |---|---|
+> | 1. Funil, retenção por coorte e plataforma, saúde da instrumentação | ✅ as três seções, cada uma degradando por conta própria |
+> | 2. `n` ao lado de cada percentual | ✅ imposto pelo tipo, não pelo cuidado do renderer |
+> | 3. Falha do job avisa no canal | ✅ linha `error` persistida **e** aviso vermelho publicado |
+> | 4. Versão gerada persistida | ✅ payload estruturado + o texto exato que foi enviado |
+>
+> ### O rollup semanal recusa uma semana parcial
+>
+> Um degrau só é somado quando **todos** os sete dias trazem número. Faltou um, o total sai
+> `null` com o motivo — e o motivo distingue *"a fonte está fora"* de *"a semana está
+> incompleta"*, que são coisas diferentes e teriam a mesma cara sob um `null` mudo. Somar seis
+> dias e publicar como semana é numerador menor contra denominador de semana inteira: a mesma
+> forma de erro do 4500% e do mês parcial.
+>
+> A janela termina **ontem**, não hoje. Incluir o dia corrente faria o balde mais novo ser
+> estruturalmente menor que os outros seis, e toda comparação semana-a-semana leria como queda —
+> errado na mesma direção toda semana, que é o tipo mais difícil de notar.
+>
+> ### Webhook próprio, sem fallback para o de alerta
+>
+> `DISCORD_REPORT_WEBHOOK_URL` é variável separada e **não** cai no `DISCORD_ALERT_WEBHOOK_URL`
+> quando ausente. O alerta pagina; o relatório é leitura de rotina. Misturar dilui o canal de
+> alerta até ninguém mais ler — que é como um canal do Discord vira mudo, e este épico já tem
+> uma história sobre isso. Sem webhook o relatório ainda é gerado e persistido, e o boot avisa.
+>
+> ### `POST /reports/weekly/run` existe por causa do DoD
+>
+> O DoD da S9 pede *"um relatório real gerado e conferido à mão"*. Esperar uma segunda-feira
+> faria da própria conferência uma atividade de cadência semanal, e a história deste épico diz
+> que o que só acontece por agendamento é o que nunca acontece. Limitado a 6 execuções por hora:
+> cada uma consulta o Plan na máquina do jogo e manda mensagem no canal.
+>
+> ### A falha que este módulo **não** consegue anunciar
+>
+> O agendador nunca disparar. Nada dentro de um processo que não rodou pode dizer que não rodou,
+> e por isso a ausência de linha em `weekly_reports` significa exatamente isso. As duas defesas
+> são o aviso de boot em frase inteira e o próprio corpo do relatório, que imprime toda semana se
+> o ciclo de checks está ligado.
+
+1. [x] Semanal: funil de 4 degraus, retenção por coorte e plataforma, saúde da instrumentação
+2. [x] `n` ao lado de cada percentual
+3. [x] Falha do job avisa no canal — degradação honesta, nunca silêncio
+4. [x] Versão gerada persistida
 
 ### DoD da S9
 
-- [ ] Timings anexado ao PR provando ausência de regressão de tick
-- [ ] Um relatório real gerado e conferido à mão
+- [ ] **Timings anexado ao PR provando ausência de regressão de tick** — pertence à S9.1, e
+      **não é produzível fora da produção**: exige rodar o ETL contra o MySQL do PlayerPoints na
+      máquina do jogo. O que a sessão pôde fazer foi instrumentar o ETL para *medir e persistir* o
+      próprio tempo, de modo que a primeira execução real produza a evidência. Ver o bloco da S9.1
+- [~] **Um relatório real gerado e conferido à mão** — o gatilho existe
+      (`POST /reports/weekly/run`) e o caminho inteiro é exercitado no e2e contra Postgres real,
+      com **todas** as fontes ausentes: o run é persistido, o corpo nomeia cada falha e nada vira
+      zero. O que falta é o run em **produção**, com Plan alcançável e webhook configurado, e a
+      conferência humana do texto que chega no canal. É item de dono
 
 **[CORTE]** S9.1.
 

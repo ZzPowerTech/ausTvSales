@@ -36,6 +36,13 @@
       "when": 1788124462131,
       "tag": "0004_health_checks_alerted_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788300124989,
+      "tag": "0005_weekly_reports",
+      "breakpoints": true
     }
   ]
 }
