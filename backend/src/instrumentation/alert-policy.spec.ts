@@ -922,6 +922,42 @@ describe('decideAlerts', () => {
       expect(decision.suppressed[0].reason).toBe('accepted_blind_spot');
     });
 
+    it('ANUNCIA um `breached` vindo de um ponto cego', () => {
+      // The guard buys silence for the verdict the check was accepted for, and
+      // for nothing else. A member of the set that starts failing for real is a
+      // member that no longer belongs in it, and the alert is how that surfaces.
+      // Suppressing by name alone would have turned this mechanism into a way
+      // to hide an unbounded outage — a channel going mute about something
+      // real, which is the outcome this layer exists to prevent.
+      const decision = decide({
+        observations: [observation(BLIND, 'breached')],
+      });
+
+      expect(decision.announce.map((r) => r.checkName)).toEqual([BLIND]);
+      expect(decision.suppressed).toEqual([]);
+    });
+
+    it('ANUNCIA um `error` vindo de um ponto cego', () => {
+      const decision = decide({
+        observations: [observation(BLIND, 'error')],
+      });
+
+      expect(decision.announce.map((r) => r.checkName)).toEqual([BLIND]);
+    });
+
+    it('deixa um `ok` de ponto cego seguir as regras de recuperacao', () => {
+      // An `ok` here means the check started measuring again — the set's
+      // membership is stale and the channel should hear the all-clear it is
+      // owed, not be told to keep believing a failure that ended.
+      const decision = decide({
+        observations: [observation(BLIND, 'ok')],
+        lastAlert: told(BLIND, 'breached', 3),
+        healthyStreak: confirmed(BLIND),
+      });
+
+      expect(decision.recovered.map((r) => r.checkName)).toEqual([BLIND]);
+    });
+
     it('nao silencia os outros checks do mesmo lote', () => {
       // The guard is per record. A blind spot must not become a way to lose a
       // real failure that happened to be evaluated in the same cycle.

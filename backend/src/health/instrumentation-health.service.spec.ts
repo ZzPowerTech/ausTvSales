@@ -153,6 +153,30 @@ describe('InstrumentationHealthService', () => {
       expect(summary.counts.no_data).toBe(1);
     });
 
+    it('e marcado em `checks()`, nao so no resumo', async () => {
+      // The two views must not disagree. Without the flag this row is
+      // byte-identical in shape to a check that came back `no_data` for one
+      // quiet window, and only 656 characters of prose inside `detail.summary`
+      // separate them — which a dashboard would have to substring-match.
+      const service = build([
+        record(BLIND, 'no_data'),
+        record(HealthCheckName.TutorialEntryRate, 'no_data'),
+      ]);
+
+      const listed = await service.checks(NOW);
+      const byName = new Map(listed.checks.map((view) => [view.name, view]));
+
+      expect(byName.get(BLIND)?.blindSpot).toBe(true);
+      // Same `status`, opposite meaning: this one is a quiet window and will
+      // clear on its own.
+      expect(byName.get(HealthCheckName.TutorialEntryRate)?.status).toBe(
+        'no_data',
+      );
+      expect(byName.get(HealthCheckName.TutorialEntryRate)?.blindSpot).toBe(
+        false,
+      );
+    });
+
     it('ainda envelhece: se parar de escrever, entra em `staleChecks`', async () => {
       // Excluded from the verdict, NOT from the freshness window. A blind spot
       // that stops writing rows has stopped running, which is a different

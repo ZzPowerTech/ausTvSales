@@ -156,9 +156,16 @@ sprints.
   não-`ok` se resolve — com um alerta aberto no canal o `decideAlerts` re-anunciava **um por dia,
   eternamente**, e o `resolveStatus` fixava o `/health/instrumentation` em `degraded`, onde um
   segundo check piorando já não movia nada. Saiu daí o conceito de **`ACCEPTED_BLIND_SPOTS`**:
-  nunca notifica, fica fora do agregado, e é publicado por nome no campo novo `blindSpots` — fora do
-  veredito, não do payload. A régua para entrar está no código e é dura: *nenhuma fonte alcançável
-  responde à pergunta*, nunca "o check é barulhento".
+  silencia **só o veredito pelo qual o check foi aceito** (`no_data`), fica fora do agregado, e é
+  publicado por nome em `blindSpots` e como flag por linha em `/health/instrumentation/checks` —
+  fora do veredito, não do payload. A régua para entrar está no código e é dura: *nenhuma fonte
+  alcançável responde à pergunta*, nunca "o check é barulhento".
+  **Uma segunda rodada de review apertou os três pontos que o mecanismo abria:** suprimir pelo nome
+  sozinho engoliria um `breached` real de um membro futuro — agora qualquer status inesperado é
+  anunciado, e é assim que a contradição aparece; os vereditos suprimidos passaram a ter campo
+  próprio no resumo de ciclo (`blindSpotHeld` / `pontos_cegos=`), porque dentro do total genérico o
+  número é ilegível; e a listagem por check ganhou a flag, já que `no_data` permanente e `no_data` de
+  janela vazia tinham exatamente a mesma cara.
   **O que sobra, e é do dono:** os ~54% deixaram de ser vigiados — não é rebaixamento de sinal, é o
   reconhecimento de que nunca houve sinal —, e restaurá-los exige uma **fonte de chegadas no
   proxy** que nem a API nem o banco autorizado hoje têm. E o

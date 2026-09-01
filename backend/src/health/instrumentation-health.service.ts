@@ -240,6 +240,13 @@ function toView(record: HealthCheckRecord, stale: boolean): HealthCheckViewDto {
     target,
     status: record.status,
     stale,
+    // Machine-readable, because the summary endpoint already publishes the same
+    // fact in `blindSpots` and the two views must not disagree. Without it, this
+    // row is byte-identical in shape to a check that came back `no_data` for one
+    // quiet window, and the only thing separating them is 656 characters of
+    // prose inside `detail.summary` — which the S12 dashboard would have to
+    // substring-match to render them differently.
+    blindSpot: isAcceptedBlindSpot(record.checkName),
     checkedAt: record.checkedAt.toISOString(),
     alertedAt: record.alertedAt?.toISOString() ?? null,
     detail: record.detail,

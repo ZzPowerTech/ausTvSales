@@ -232,6 +232,17 @@ export class HealthCheckViewDto {
   stale!: boolean;
 
   @ApiProperty({
+    description:
+      'True quando este check NAO CONSEGUE medir, por decisao registrada — a ' +
+      'fonte que responderia a pergunta nao existe em lugar nenhum que este ' +
+      'sistema alcance. E um `no_data` permanente, nao a janela vazia de um ' +
+      'ciclo: as duas coisas tem a mesma cara em `status`, e so esta flag as ' +
+      'separa sem ler a prosa do `detail.summary`. Os mesmos checks aparecem ' +
+      'em `blindSpots`, no resumo.',
+  })
+  blindSpot!: boolean;
+
+  @ApiProperty({
     description: 'ISO-8601. Carimbado pelo banco, nunca pelo container da API.',
   })
   checkedAt!: string;

@@ -98,19 +98,35 @@ export type HealthCheckName =
  *
  * ## What membership means
  *
- * **Never notifies, ever** — not the first time, not after a window rolls, and
- * regardless of what the channel is holding. And **excluded from the aggregate
- * verdict**, while still published by name in `blindSpots`, because a blind spot
- * that vanished from the payload would be the "absence reads as fine" mistake
- * this whole layer exists to prevent. It stays registered and keeps writing a
- * fresh row per cycle, so it never ages into `staleChecks` and its reason is
- * always one request away.
+ * **Silence for the verdict it was accepted for, and nothing else.** For
+ * `funnel.network_to_survival` that is `no_data`: those never notify — not the
+ * first time, not after a window rolls, and regardless of what the channel is
+ * holding. **Any other status is announced normally.**
+ *
+ * That second half is not a hedge, it is the safety property. Suppressing by
+ * name alone — the first version of this — is safe only while every member can
+ * emit nothing but its accepted verdict, which is enforced by nothing. A future
+ * member that hit a real outage and began returning `error` would have had every
+ * one of those verdicts dropped, for as long as it lasted: a mechanism built to
+ * stop one check paging daily, hiding an unbounded real failure instead. Letting
+ * the unexpected status through is also how the contradiction surfaces — a
+ * member of this set that alerts is a member that no longer belongs in it.
+ *
+ * And **excluded from the aggregate verdict**, while still published by name in
+ * `blindSpots` and flagged per row as `blindSpot` in the check listing, because
+ * a blind spot that vanished from the payload would be the "absence reads as
+ * fine" mistake this whole layer exists to prevent. It stays registered and
+ * keeps writing a fresh row per cycle, so it never ages into `staleChecks` and
+ * its reason is always one request away. Suppressed verdicts are counted apart
+ * in the cycle summary (`blindSpotHeld`), so how much of the layer has been
+ * switched off is a number somebody can read.
  *
  * ## The cost, which is real and is not hidden
  *
- * Suppression is unconditional, so a check that enters this set while the
- * channel is holding a `breached` or `error` about it leaves that message
- * standing as the last word, with no closing note. That is deliberate: the
+ * A check that enters this set while the channel is holding a `breached` or
+ * `error` about it leaves that message standing as the last word, with no
+ * closing note, for as long as it keeps returning its accepted verdict. That is
+ * deliberate: the
  * alternative is a "deliver exactly once, then stop" rule, and the transition
  * rules in `decideAlerts` have already been wrong twice by reasoning about
  * shapes of oscillation. A stale **failure** misleads in the safe direction; a

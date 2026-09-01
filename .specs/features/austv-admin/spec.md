@@ -553,21 +553,34 @@ Cada check roda periodicamente e **alerta ativamente no Discord** quando falha.
 > **A saída foi um conceito novo, `ACCEPTED_BLIND_SPOTS`** (em `health-check.types.ts`), consultado
 > pelos dois consumidores. Um membro do conjunto:
 >
-> - **nunca notifica** — nem na primeira vez, nem quando a janela vira, e não importa o que o canal
->   está segurando (supressão com motivo próprio, `accepted_blind_spot`, para que o quanto da camada
->   foi desligado seja contável);
+> - **nunca notifica o veredito pelo qual foi aceito** — para o `funnel.network_to_survival` isso é
+>   `no_data`: nem na primeira vez, nem quando a janela vira, e não importa o que o canal está
+>   segurando. **Qualquer outro status é anunciado normalmente**, e essa metade não é ressalva, é a
+>   propriedade de segurança: suprimir só pelo nome é seguro apenas enquanto todo membro emitir
+>   exclusivamente o veredito aceito, o que nada garante. Um membro futuro que batesse numa falha
+>   real e passasse a devolver `error` teria todos esses vereditos descartados — o mecanismo feito
+>   para impedir um check de paginar diariamente estaria escondendo um apagão real. Deixar o status
+>   inesperado passar é também como a contradição aparece: membro deste conjunto que alerta é membro
+>   que não pertence mais a ele;
 > - **fica de fora de `counts`, de `failing` e do `status` agregado**, e é publicado por nome no
->   campo novo **`blindSpots`** do `/health/instrumentation`. Fora do veredito, **não** do payload:
->   ponto cego que some se lê como tudo bem, que é o erro que esta camada inteira existe para evitar;
+>   campo novo **`blindSpots`** do `/health/instrumentation` e como flag `blindSpot` em cada linha de
+>   `/health/instrumentation/checks`. Fora do veredito, **não** do payload: ponto cego que some se lê
+>   como tudo bem, que é o erro que esta camada inteira existe para evitar. E a flag por linha existe
+>   porque `status: no_data` permanente e `status: no_data` de uma janela vazia têm a mesma cara —
+>   sem ela, só a prosa do `detail.summary` as separa;
 > - **continua em `total`, em `reporting` e na janela de frescor** — está registrado, escrevendo
->   linha por ciclo, e se parar de escrever ainda cai em `staleChecks`.
+>   linha por ciclo, e se parar de escrever ainda cai em `staleChecks`;
+> - **os vereditos suprimidos são contados à parte** no resumo de ciclo (`blindSpotHeld`, no log
+>   `pontos_cegos=`), ao lado de `recoveryHeld` e `budgetHeld`. Dentro do total genérico de
+>   `suppressed` o número ficaria ilegível: num ciclo saudável quase tudo ali é `not_notifiable` de
+>   rotina, e o que se quer vigiar é quanto da camada foi desligada.
 >
-> **O custo, que não está escondido:** a supressão é incondicional, então um check que entra no
-> conjunto enquanto o canal segura um `breached` ou `error` deixa essa mensagem como última palavra,
-> sem nota de encerramento. É deliberado — a alternativa é uma regra de "entrega exatamente uma vez,
-> depois nunca", e as regras de transição do `decideAlerts` já erraram duas vezes raciocinando sobre
-> formatos. Uma falha velha engana na direção segura; carimbar um `ok` para limpar o canal é a única
-> coisa que esta camada não pode fazer.
+> **O custo, que não está escondido:** um check que entra no conjunto enquanto o canal segura um
+> `breached` ou `error` deixa essa mensagem como última palavra, sem nota de encerramento, enquanto
+> continuar devolvendo o veredito aceito. É deliberado — a alternativa é uma regra de "entrega
+> exatamente uma vez, depois nunca", e as regras de transição do `decideAlerts` já erraram duas vezes
+> raciocinando sobre formatos. Uma falha velha engana na direção segura; carimbar um `ok` para
+> limpar o canal é a única coisa que esta camada não pode fazer.
 >
 > **A régua para entrar no conjunto:** *nenhuma fonte alcançável por este sistema responde à
 > pergunta*, e isso está escrito em algum lugar durável. Não serve para check barulhento, mal
