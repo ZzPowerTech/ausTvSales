@@ -84,10 +84,17 @@ export const RATIO_STRUCTURALLY_BLIND =
  *
  * The 54% is no longer watched by anything. That is a real loss and not a
  * downgrade of an existing signal: it was never watched, because this check
- * could not see it. Restoring it needs a count of arrivals **at the proxy** —
- * the old database is one candidate; `/v1/networkMetadata` and `/v1/playersTable`
- * have never been read for this. When one exists, the arithmetic below comes
- * back unchanged from git history: only the denominator was ever wrong.
+ * could not see it. Restoring it needs a count of arrivals **at the proxy**.
+ *
+ * ✅ **Two of the three candidates were checked against production on
+ * 2026-09-01, and neither has it.** `/v1/networkMetadata` lists the proxy but
+ * carries no player data at all; `/v1/playersTable?server=AusTv` answers with
+ * **zero** players against 2500 for `Survival`. `graph?type=uniqueAndNew` on the
+ * proxy is empty arrays. So the API cannot supply this denominator — measured,
+ * not assumed — and **the old database is the only remaining candidate**.
+ *
+ * When a source exists, the arithmetic below comes back unchanged from git
+ * history: only the denominator was ever wrong.
  */
 @Injectable()
 export class NetworkToSurvivalCheck implements HealthCheck {

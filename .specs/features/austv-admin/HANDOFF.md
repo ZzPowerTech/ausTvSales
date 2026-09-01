@@ -556,6 +556,74 @@ as duas contagens acima não distinguem essas leituras. Ver o bloco abaixo.
 
 ---
 
+## ✅ Validação contra produção em 2026-09-01 — o que ela confirmou, e o que ela **não** pôde tocar
+
+Quatro endpoints do Plan de produção (`198.89.99.70:25504`), lidos direto, sem autenticação
+(`authRequired: false` segue valendo). É a **segunda fonte independente** que a lição de método
+deste documento exige: a medição de 2026-08-31 foi feita por SQL em `plan_user_info`; esta foi
+feita pela API HTTP, que é outro caminho para a mesma pergunta.
+
+### ✅ A premissa central do PR #180 está confirmada
+
+| consulta | resultado |
+|---|---|
+| `/v1/playersTable?server=AusTv` (proxy) | **`players: 0`** |
+| `/v1/playersTable?server=Survival` | `players: 2500` — número redondo, quase certamente o teto do endpoint, **não** uma contagem; o SQL de 31/08 deu 5575 |
+| `/v1/graph?type=uniqueAndNew&server=AusTv` | `uniquePlayers: []`, `newPlayers: []` |
+| `/v1/graph?type=uniqueAndNew&server=Survival` | `newPlayers`: lista de **181** pontos |
+| `/v1/networkMetadata` | dois servidores: `AusTv` (`proxy: true`), `Survival` (`proxy: false`) — e **sem `plan_version`**, confirmando que a exceção 2 fica de pé para o `version_divergence` |
+| `/v1/serverOverview?server=Survival` | `last_7_days.new_players: 28` |
+
+**O proxy não tem jogador nenhum nesta instalação do Plan, por duas fontes independentes.** É a
+base de tudo que o PR #180 decidiu, e agora está cruzada.
+
+### ✅ O caminho de volta ficou mais estreito, e isso é resultado
+
+O `network_to_survival` só volta a medir com uma contagem de chegadas **no proxy**. Os três
+candidatos nomeados eram o banco antigo, o `/v1/networkMetadata` e o `/v1/playersTable`. **Os dois
+últimos foram lidos e não têm essa população.** Sobra o banco antigo — que passa a ser o único
+candidato, não mais "um dos três".
+
+### ⚠️ Um fato registrado em 2026-08-23 derivou, e a forma nova é a pior
+
+Estava escrito que `serverOverview` do proxy vem com **`numbers: {}`**. Hoje vem com **14 campos**,
+com todo o que é derivado de sessão em **zero** — `sessions: 0`, `total_players: 0`, `playtime: 0`,
+`player_kills: 0` — ao lado dos que são nativos do proxy e são reais (`online_players: 19`,
+`best_peak_players: "37"`, `current_uptime`). E `last_7_days.new_players` do proxy é **`0`**.
+
+A substância segue: métrica de sessão é estruturalmente vazia num proxy. **A forma piorou.** Campo
+ausente é obviamente ausente; `0` é um número, e este épico existe porque lacuna de coleta lida
+como zero ficou invisível por meses. Hoje **nada consome isso** — todo check itera
+`PlanServersConfig.backends()`, que exclui o proxy, e essa classe existe exatamente para isso —,
+mas `serverOverview?server=<proxy>` é uma fonte viva de zeros plausíveis.
+
+### ⚠️ E o bloqueio do `/v1/graph` caiu: o payload **foi observado**
+
+O spec, o plano de sprints e o código diziam que *"ninguém observou o payload de
+`/v1/graph?type=uniqueAndNew`"*, e isso sustentava a alegação de que o degrau `survival` não tinha
+série diária. Foi observado agora: `{timestamp, timestamp_f, uniquePlayers, newPlayers, colors}`,
+com `newPlayers` em 181 pontos para o Survival. Não muda o que o funil publica — desde 2026-08-31 o
+degrau `survival` sai de `plan_users` —, mas **o bloqueio citado deixou de existir** e não deve
+seguir sendo repetido como se existisse.
+
+### ❌ O que esta validação NÃO conseguiu tocar, e é a maior parte
+
+**As cinco commits do PR #180 não estão em produção.** O `origin/main` está em `dc4dfaa`, anterior a
+todas elas. A API admin implantada roda o código **antigo**, então:
+
+- `/api/funnel/monthly` de produção ainda publica o degrau `rede` com números (o defeito), e
+  `survival: null`. Consultá-la valida o bug, não a correção;
+- o par `survival → tutorial_entrou` de nov/2025 — os **`694 / 682 = 101,8%`** — **não existe** no
+  código implantado. Segue calculável e **não calculado**;
+- `blindSpots`, a flag `blindSpot` e o `pontos_cegos=` no log de ciclo não existem em produção;
+- o caminho **`error`** do critério 4 da S6.3 — derrubar uma fonte de propósito — continua sem teste.
+
+**Validar o comportamento novo exige implantar a branch**, o que é outra ação e depende de merge.
+Enquanto isso não acontece, o estado honesto é: **premissas confirmadas contra produção,
+comportamento não.**
+
+---
+
 ## ✅ A lista autoritativa de endpoints do Plan foi encontrada (2026-08-26)
 
 O `/docs` do webserver — `http://198.89.99.70:25504/docs` — serve um **OpenAPI 3.0.1 completo**.

@@ -17,10 +17,23 @@ const MS_PER_HOUR = 3_600_000;
  * names the table, not an endpoint. That is why ADR-002 exception 2 was extended
  * to `plan_users`: the spec already assumed database access here, and the API
  * genuinely cannot serve it. The proxy records **users** and the backends record
- * **sessions** (§2), so every session-derived endpoint is structurally empty for
- * the proxy — `graph?type=uniqueAndNew` returns empty arrays for it and
- * `serverOverview` returns `numbers: {}`. Verified against production on
- * 2026-08-23.
+ * **sessions** (§2), so every session-derived metric is structurally empty for
+ * the proxy.
+ *
+ * Re-measured against production on **2026-09-01**, and half the old wording had
+ * drifted. `graph?type=uniqueAndNew&server=AusTv` still returns empty arrays for
+ * `uniquePlayers` and `newPlayers` — unchanged since 2026-08-23. But
+ * `serverOverview?server=AusTv` **no longer returns `numbers: {}`**: it returns
+ * fourteen fields, with every session-derived one at **zero** (`sessions: 0`,
+ * `total_players: 0`, `playtime: 0`) beside proxy-native ones that are real
+ * (`online_players: 19`, `best_peak_players: "37"`).
+ *
+ * ⚠️ **The substance held and the form got more dangerous.** An absent field is
+ * self-evidently absent; a `0` is a number, and this project exists because a
+ * collection gap read as zero stayed invisible for months. Nothing here consumes
+ * it today — every check iterates `PlanServersConfig.backends()`, which excludes
+ * the proxy, and that class exists precisely so this mistake is not repeated —
+ * but `serverOverview?server=<proxy>` is now a live source of plausible zeros.
  *
  * ## ⚠️ It does not watch the proxy, and its name says it does
  *

@@ -151,7 +151,8 @@ abaixo**:
 Verificado em 2026-08-23 que a API **não** serve esse dado: o proxy grava usuário
 e os backends gravam sessão (§2), então toda métrica derivada de sessão é
 estruturalmente vazia no proxy. `graph?type=uniqueAndNew` devolve arrays vazios
-para o proxy, e `serverOverview` do proxy vem com `numbers: {}`.
+para o proxy, e as metricas de sessao do `serverOverview` do proxy sao estruturalmente vazias.
+> ⚠️ **Medido de novo em 2026-09-01:** o `graph` do proxy segue devolvendo arrays vazios, mas o `serverOverview` **nao devolve mais `numbers: {}`** — vem com 14 campos, todo derivado de sessao em **zero**. A substancia se manteve e a forma piorou: ausencia vira numero. Detalhe no [`HANDOFF.md`](HANDOFF.md).
 
 Só duas colunas são lidas: `registered` e a contagem de linhas. `plan_users` é
 tabela de identidade — das mais estáveis do schema do Plan.

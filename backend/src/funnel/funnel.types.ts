@@ -80,10 +80,13 @@ export const FUNNEL_STEPS: readonly FunnelStep[] = [
  * twice — high, believable and false — and the project rule that settles it is
  * the one in §6.1: a collection gap never becomes a zero **nor a healthy value**.
  *
- * **Trigger to revisit:** a source that counts arrivals at the *proxy*. The old
- * database is one candidate; `/v1/networkMetadata` and `/v1/playersTable` have
- * never been read for this purpose. Until one exists, saying “não sei” is the
- * only answer this step is entitled to.
+ * **Trigger to revisit:** a source that counts arrivals at the *proxy*. Checked
+ * against production on 2026-09-01: `/v1/playersTable?server=AusTv` returns
+ * **zero** players (against 2500 for `Survival`), `graph?type=uniqueAndNew` on
+ * the proxy returns empty arrays, and `/v1/networkMetadata` carries no player
+ * data at all. **The API does not have this population** — measured, not
+ * assumed — which leaves the old database as the only candidate. Until one
+ * exists, saying “não sei” is the only answer this step is entitled to.
  */
 export const NETWORK_STEP_UNAVAILABLE =
   'A populacao da rede nao esta nesta fonte: `plan_users` guarda o Survival — ' +
