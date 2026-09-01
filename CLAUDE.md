@@ -172,9 +172,18 @@ sprints.
   `plan.proxy_registration_alive` tem o mesmo defeito de rótulo: lê `plan_users`, logo **não cobre
   o apagão do proxy** que lhe deu origem. Os sumários dele passaram a dizer isso; **renomear o
   identificador persistido é decisão do dono**, porque partiria o histórico do check.
-  **Ganho colateral:** a segunda metade do DoD da S8 (`~100%` de entrada no tutorial) é
-  `tutorial ÷ survival` e virou um par consecutivo do endpoint — nov/2025 dá `694/682 = 101,8%`.
-  Calculável; **ainda não rodado contra produção**.
+  **✅ Validado em produção em 2026-09-01** (`backend-v0.15.2`): o degrau `rede` sai `null` com
+  motivo, a conversão `rede → survival` sai `null` em vez de ~100%, o `survival` traz **687**,
+  `coversFrom` confirma **2024-06-02**, e o `/health/instrumentation` publica `blindSpots` com o
+  check fora de `counts` e de `failing` — com o agregado ainda indo a `down` por um `error` de
+  outro check, que era a propriedade a não perder.
+  **🔴 E a validação derrubou uma alegação minha:** eu disse que a segunda metade do DoD da S8
+  (`~100%` de entrada no tutorial, `694/682`) era *calculável, só não rodada*. Rodou: **não é
+  calculável em produção**, porque o `tutorial_daily` está `never_synced` — o **ETL da S8.0 não
+  está configurado na VPS** (`TUTORIAL_PLAYERDATA_DIR` vazio, `TUTORIAL_SYNC_ENABLED=false`).
+  Dois dos quatro degraus do funil nunca produziram dado em produção, e o
+  `funnel.tutorial_entry_rate` está em `error` por isso. É o padrão da auditoria de 2026-08-27 pela
+  terceira vez — só que desta vez o ambiente foi tocado, então a lacuna apareceu.
 - **O alerta de saúde CHEGA — comprovado em 2026-08-26.** Alertas reais do
   `platform.offline_account_share` foram observados no canal: `breached`, recuperação e o `n` ao
   lado do percentual, funcionando em produção. A camada deixou de ser construção sobre algo que

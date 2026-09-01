@@ -624,6 +624,89 @@ comportamento não.**
 
 ---
 
+## ✅ Comportamento validado em produção em 2026-09-01 — e a validação derrubou uma alegação
+
+`backend-v0.15.2` implantado na VPS (release publicado 03:34, `Deploy to VPS: success`). É a
+primeira vez que o épico fecha o ciclo que a auditoria de 2026-08-27 cobrava: entregar **e** tocar
+o ambiente real.
+
+### ✅ O defeito central está corrigido, medido
+
+`GET /api/funnel/monthly?from=2025-11-01&to=2025-11-30`, produção:
+
+| verificação | resultado |
+|---|---|
+| degrau `rede` | **`value: null`** com o motivo nomeando `plan_users` e o proxy |
+| conversão `rede → survival` | **`percent: null, n: null`** — não mais ~100% |
+| degrau `survival` | **`687`** — a série preservada, agora sob o rótulo certo |
+| `sources[].coversFrom` | **`2024-06-02`** — os 26 meses, confirmados ao vivo |
+| `sources[].provenance` | presente, com a ressalva de coincidência medida |
+
+Os 687 batem com o bucket que o `HANDOFF` já registrava para 2025-11 (687 no funil contra 682 no
+SQL — a diferença é fuso, como documentado).
+
+`GET /api/health/instrumentation`, produção:
+
+```json
+{"status":"down","total":7,"counts":{"ok":5,"breached":0,"no_data":0,"error":1},
+ "failing":["funnel.tutorial_entry_rate:Survival"],
+ "blindSpots":["funnel.network_to_survival:Survival"]}
+```
+
+- `blindSpots` publica o ponto cego ✅
+- ele **não** está em `failing` ✅
+- **`counts.no_data: 0`** — fora do agregado ✅
+- `total: 7` — continua contado ✅
+- e a prova que mais importava: **`status: "down"` por um `error` de OUTRO check**. A exclusão não
+  deixou o resumo surdo. Em produção, com o ponto cego presente, um problema real ainda move o
+  agregado — que é a propriedade que o teste unitário fixou e que agora está observada.
+
+### 🔴 A validação derrubou a alegação dos ~100% de entrada no tutorial
+
+O PR #180 afirmou que a segunda metade do DoD da S8 (*"~100% antes de dez/2025"*) tinha destravado
+e era **calculável**, faltando só rodar. Rodou. **Não é calculável em produção**, e o motivo não é
+o que estava escrito:
+
+```
+"tutorial_entrou": {"value": null, "unavailableReason": "sem fonte para este degrau no periodo"}
+"sources": [..., {"name":"tutorial_daily","ok":false,"failure":"never_synced"}]
+```
+
+`tutorial_daily` **nunca sincronizou**. Os logs do container dizem por quê, no boot:
+
+> `TUTORIAL_PLAYERDATA_DIR/TUTORIAL_QUESTS_DIR nao configurados — o funil do tutorial fica sem
+> fonte` · `TUTORIAL_SYNC_ENABLED nao esta ligado — o funil do tutorial NAO vai ser reconstruido`
+
+**O ETL da S8.0 não está configurado em produção.** Consequências, que valem mais que a linha de
+DoD:
+
+1. **Dois dos quatro degraus do funil nunca produziram dado em produção.** `tutorial_entrou` e
+   `tutorial_concluiu` saem `null` desde sempre, não desde este PR.
+2. O `funnel.tutorial_entry_rate` está em **`error`** — corretamente, e é ele que põe o agregado em
+   `down`. O check se comporta como projetado; o que falta é a fonte.
+3. O bloqueio dos `694/682 = 101,8%` **mudou de natureza**: não é mais "payload nunca observado"
+   (isso caiu em 2026-09-01), é **configuração de ambiente ausente**. Duas variáveis no `.env` da
+   VPS separam o número de existir.
+4. A contabilidade da S8.0 como "entregue" merece a mesma ressalva que a S6.2b e a S6.3 levaram: o
+   código existe, o ETL nunca rodou onde importa.
+
+**Este é o padrão que a auditoria de 2026-08-27 nomeou**, aparecendo pela terceira vez — o passo
+que sobra é sempre o que exige tocar o ambiente real. A diferença é que desta vez ele foi tocado, e
+por isso a lacuna apareceu em vez de continuar suposta.
+
+### ⏳ Um item segue sem observação: o `pontos_cegos=` no log
+
+O `HealthCheckScheduler` agenda a primeira execução para **um intervalo depois do boot** (15 min), e
+o container subiu 03:35:24. O veredito mais novo na base é de **03:21:29**, do container antigo —
+ou seja, **nenhum ciclo rodou ainda sob o código novo**, e a linha `Ciclo de saude: … pontos_cegos=1`
+ainda não foi emitida. O `blindSpots` do resumo funciona porque o serviço novo classifica linhas
+antigas.
+
+Conferir depois de 03:50 com
+`docker compose logs backend --since 30m | grep "Ciclo de saude"`.
+
+---
+
 ## ✅ A lista autoritativa de endpoints do Plan foi encontrada (2026-08-26)
 
 O `/docs` do webserver — `http://198.89.99.70:25504/docs` — serve um **OpenAPI 3.0.1 completo**.
