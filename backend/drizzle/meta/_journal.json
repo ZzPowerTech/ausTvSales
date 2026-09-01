@@ -50,6 +50,13 @@
       "when": 1788300997966,
       "tag": "0006_player_dimension",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788304573345,
+      "tag": "0007_player_payments",
+      "breakpoints": true
     }
   ]
 }

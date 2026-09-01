@@ -607,6 +607,124 @@ export class EnvironmentVariables {
   })
   PLAYER_DIMENSION_SYNC_CRON?: string;
 
+  // --- PlayerPoints, somente leitura (AusTV Admin S9.1, ADR-007) ---
+  //
+  // Banco DIFERENTE do MySQL do Plan, e a distincao importa: a excecao 2 do
+  // ADR-002 governa o schema do Plan, e este e outro plugin, autorizado pelo
+  // ADR-007 ("leitura direta de schema de plugin e acoplamento aceito apenas
+  // onde o schema e trivial e estavel" — seis colunas que nao se mexeram).
+  //
+  // ⚠️ O usuario tem de ser READ-ONLY e DEDICADO. O usuario dos plugins e
+  // exatamente o que NAO se deve reusar: as credenciais dele estao em texto
+  // plano em quatro configs de plugin no servidor do jogo.
+  //
+  // ⚠️ A tabela de origem NAO TEM INDICE NENHUM. Toda leitura e full table scan
+  // no MySQL que o servidor de Minecraft usa. Por isso o ETL e noturno, opt-in,
+  // e mede o proprio tempo dentro da query.
+
+  @IsOptional()
+  @MinLength(1, { message: 'PLAYERPOINTS_DB_HOST must not be empty when set' })
+  PLAYERPOINTS_DB_HOST?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(65_535)
+  PLAYERPOINTS_DB_PORT?: number;
+
+  @IsOptional()
+  @MinLength(1, { message: 'PLAYERPOINTS_DB_NAME must not be empty when set' })
+  PLAYERPOINTS_DB_NAME?: string;
+
+  @IsOptional()
+  @MinLength(1, { message: 'PLAYERPOINTS_DB_USER must not be empty when set' })
+  PLAYERPOINTS_DB_USER?: string;
+
+  // Nunca logada.
+  @IsOptional()
+  PLAYERPOINTS_DB_PASSWORD?: string;
+
+  // Nome da tabela de transacoes. Configuravel porque o PlayerPoints permite
+  // prefixo — e validado por charset porque nome de tabela e IDENTIFICADOR, nao
+  // parametro: ele e interpolado na query, e interpolacao e onde injecao mora.
+  // O valor vem do nosso proprio .env, entao isto nao e a ultima linha de
+  // defesa; e a que faz "alguem colou a coisa errada" falhar no boot em vez de
+  // as 03:45.
+  @IsOptional()
+  @Matches(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/, {
+    message:
+      'PLAYERPOINTS_TABLE must be a plain SQL identifier (letters, digits, underscore)',
+  })
+  PLAYERPOINTS_TABLE?: string;
+
+  // Chave geral do ETL de pagamentos. Desligado e o estado SEGURO: este e o
+  // unico job do sistema que poe uma query no banco que o servidor de Minecraft
+  // esta usando. Desligado, E3 e E4 reportam `never_synced`, nunca zero.
+  @IsOptional()
+  @IsBoolean()
+  PAYMENTS_SYNC_ENABLED?: boolean;
+
+  // Quando o ETL roda, em cron, America/Sao_Paulo. Padrao 03:45 — 15 minutos
+  // depois da dimensao de jogador e 45 depois do ETL do tutorial. O escalonamento
+  // nao e sobre carga (sao poucos milhares de linhas); e sobre nao ter tres jobs
+  // alcancando a maquina do jogo no mesmo instante.
+  @IsOptional()
+  @MinLength(1, { message: 'PAYMENTS_SYNC_CRON must not be empty when set' })
+  PAYMENTS_SYNC_CRON?: string;
+
+  // --- E3: contato social nos primeiros minutos (S9.1) ---
+
+  // Quantos minutos depois do registro contam como "os primeiros minutos".
+  // ⚠️ NAO CALIBRADO. O spec diz "primeiros minutos" sem numero; 60 e um chute.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1_440)
+  ECONOMY_SOCIAL_CONTACT_MINUTES?: number;
+
+  // Valor que marca um pagamento como o passo `10tutorial` (`/pagar <nick> 100`).
+  // A separacao entre tutorial e interacao espontanea e por ASSINATURA DE VALOR,
+  // que e heuristica e vem rotulada como tal no payload: o log registra valor,
+  // nao intencao.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  ECONOMY_TUTORIAL_PAYMENT_AMOUNT?: number;
+
+  // --- E4: limiares do feed de moderacao (S9.1) ---
+  //
+  // ⚠️ OS QUATRO SAO CHUTES NAO CALIBRADOS, na mesma prateleira dos tres da
+  // S6.3. Eles saem no payload de proposito, para poderem ser julgados sem ler
+  // o codigo — marcar e sinalizacao, nunca acusacao, e uma marca cujo limiar
+  // ninguem consegue ver pede confianca cega.
+
+  // Repeticoes do mesmo par emissor->receptor na janela que ligam a marca.
+  @IsOptional()
+  @IsInt()
+  @Min(2)
+  ECONOMY_FEED_REPEATED_PAIR_MIN?: number;
+
+  // Receptores distintos de um mesmo emissor na janela que ligam a marca.
+  @IsOptional()
+  @IsInt()
+  @Min(2)
+  ECONOMY_FEED_FUNDING_MANY_MIN?: number;
+
+  // Idade maxima da conta, em dias, para "conta nova recebendo alto".
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(90)
+  ECONOMY_FEED_NEW_ACCOUNT_DAYS?: number;
+
+  // Pagamentos minimos na janela para a marca de valor atipico existir. Um p95
+  // sobre quatro observacoes e o maximo de quatro observacoes, e marcar isso
+  // sinalizaria o maior pagamento comum de um mes tranquilo como anomalia.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  ECONOMY_FEED_MIN_WINDOW_FOR_OUTLIER?: number;
+
   // Express `trust proxy` setting, applied in main.ts so `req.ip` reflects the
   // real client from the Nginx-supplied X-Forwarded-For (and a header forged by a
   // direct client is ignored). A number = trust that many hops; otherwise a

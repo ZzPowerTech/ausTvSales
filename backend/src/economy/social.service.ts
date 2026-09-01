@@ -1,0 +1,259 @@
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { sql } from 'drizzle-orm';
+import { DRIZZLE, type DrizzleDB } from '../db/database.module';
+import { playerDimension, playerPayments } from '../db/schema';
+import type { EconomySourceState, Share } from './economy.types';
+import { PaymentsStore } from './payments.store';
+import { PlayerDimensionStore } from './player-dimension.store';
+import {
+  CONTACT_GROUPS,
+  SOCIAL_D7_SEMANTICS,
+  TUTORIAL_SEPARATION_CAVEAT,
+  type ContactGroup,
+  type ContactGroupResult,
+  type SocialContactReport,
+} from './social.types';
+
+const TZ = 'America/Sao_Paulo';
+const MS_PER_DAY = 86_400_000;
+const D7_DAYS = 7;
+
+/** Defaults, documented in `.env.example` as uncalibrated. */
+const DEFAULT_CONTACT_MINUTES = 60;
+const DEFAULT_TUTORIAL_AMOUNT = 100;
+
+/** One player and how their first minutes went. */
+type ContactRow = {
+  registered_at: Date;
+  last_seen_at: Date;
+  /** Payments in the window whose amount matches the tutorial signature. */
+  tutorial_like: number;
+  /** Payments in the window whose amount does not. */
+  spontaneous: number;
+};
+
+/**
+ * E3 — social contact in the first minutes (story S9.1, spec §6.4).
+ *
+ * ## Why this metric exists
+ *
+ * *"Pagamento entre jogadores é registro de contato social real — um dos
+ * preditores mais fortes de retenção em jogo multiplayer."* The question is
+ * whether a newcomer who talks to somebody in their first hour sticks around
+ * longer than one who does not.
+ *
+ * ## Two things this number cannot hide, and does not try to
+ *
+ * 1. **The sample is small, and known to be.** R4 of ADR-007: 666 payments in
+ *    6,7 months, ~3 a day, against ~579 active players. *"E3 nasce com amostra
+ *    pequena; medir sim, esperar conclusão rápida não."* Every group publishes
+ *    its `players` count next to its D7 for exactly this reason.
+ * 2. **The D7 is a survival interval**, not a return on day seven — see
+ *    `SOCIAL_D7_SEMANTICS`, which travels in the payload.
+ *
+ * ## Immature players are excluded from D7 and counted
+ *
+ * A player who registered three days ago cannot have a seven-day outcome.
+ * Leaving them in the denominator would drag every group down by however many
+ * of them it happens to contain — an effect invisible without the count, and
+ * one that would look like a real decline in a recent cohort.
+ */
+@Injectable()
+export class SocialService {
+  private readonly logger = new Logger(SocialService.name);
+
+  private readonly contactMinutes: number;
+  private readonly tutorialAmount: number;
+
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDB,
+    private readonly payments: PaymentsStore,
+    private readonly dimension: PlayerDimensionStore,
+    config: ConfigService,
+  ) {
+    this.contactMinutes =
+      config.get<number>('ECONOMY_SOCIAL_CONTACT_MINUTES') ??
+      DEFAULT_CONTACT_MINUTES;
+    this.tutorialAmount =
+      config.get<number>('ECONOMY_TUTORIAL_PAYMENT_AMOUNT') ??
+      DEFAULT_TUTORIAL_AMOUNT;
+  }
+
+  async contact(
+    fromMonth: string,
+    toMonth: string,
+  ): Promise<SocialContactReport> {
+    const sources = await this.sourceStates();
+    const envelope = {
+      from: fromMonth,
+      to: toMonth,
+      contactWindowMinutes: this.contactMinutes,
+      tutorialPaymentAmount: this.tutorialAmount,
+      d7Semantics: SOCIAL_D7_SEMANTICS,
+      tutorialSeparationCaveat: TUTORIAL_SEPARATION_CAVEAT,
+      sources,
+    };
+
+    const broken = sources.filter((source) => !source.ok);
+    if (broken.length > 0) {
+      return {
+        ...envelope,
+        groups: null,
+        unavailableReason:
+          'Sem base para medir contato social: ' +
+          broken
+            .map(
+              (source) => `\`${source.name}\` (${source.failure ?? 'falha'})`,
+            )
+            .join(', ') +
+          '. Publicar grupos vazios aqui se leria como "ninguem teve contato", ' +
+          'que e a confusao que este epico existe para remover.',
+      };
+    }
+
+    const rows = await this.contactRows(fromMonth, toMonth);
+    const now = Date.now();
+
+    const buckets = new Map<
+      ContactGroup,
+      { players: number; survived: number; immature: number }
+    >();
+    for (const group of CONTACT_GROUPS) {
+      buckets.set(group, { players: 0, survived: 0, immature: 0 });
+    }
+
+    for (const row of rows) {
+      const group: ContactGroup =
+        row.spontaneous > 0
+          ? 'spontaneous'
+          : row.tutorial_like > 0
+            ? 'tutorial_only'
+            : 'none';
+
+      const bucket = buckets.get(group);
+      if (bucket === undefined) {
+        continue;
+      }
+      bucket.players += 1;
+
+      const registeredAt = row.registered_at.getTime();
+      if (now - registeredAt < D7_DAYS * MS_PER_DAY) {
+        bucket.immature += 1;
+        continue;
+      }
+      if (row.last_seen_at.getTime() - registeredAt >= D7_DAYS * MS_PER_DAY) {
+        bucket.survived += 1;
+      }
+    }
+
+    const groups: ContactGroupResult[] = CONTACT_GROUPS.map((group) => {
+      const bucket = buckets.get(group) ?? {
+        players: 0,
+        survived: 0,
+        immature: 0,
+      };
+      const base = bucket.players - bucket.immature;
+      return {
+        group,
+        players: bucket.players,
+        immature: bucket.immature,
+        d7: this.share(bucket.survived, base),
+      };
+    });
+
+    return { ...envelope, groups };
+  }
+
+  /**
+   * One row per player registered in the cohort window, with their first-minutes
+   * payment counts split by the tutorial amount signature.
+   *
+   * The join is on **either side** of the payment: the spec asks for newcomers
+   * who *send or receive*, and a newcomer being paid by a veteran is social
+   * contact just as much as the reverse — arguably more, since it is the
+   * veteran choosing to engage.
+   */
+  private async contactRows(
+    fromMonth: string,
+    toMonth: string,
+  ): Promise<ContactRow[]> {
+    const result = await this.db.execute<ContactRow>(sql`
+      SELECT
+        ${playerDimension.registeredAt} AS registered_at,
+        ${playerDimension.lastSeenAt} AS last_seen_at,
+        count(*) FILTER (
+          WHERE ${playerPayments.amount} IS NOT NULL
+            AND abs(${playerPayments.amount}) = ${this.tutorialAmount}
+        )::int AS tutorial_like,
+        count(*) FILTER (
+          WHERE ${playerPayments.amount} IS NOT NULL
+            AND abs(${playerPayments.amount}) <> ${this.tutorialAmount}
+        )::int AS spontaneous
+      FROM ${playerDimension}
+      LEFT JOIN ${playerPayments}
+        ON (
+             ${playerPayments.receiver} = ${playerDimension.uuid}::text
+          OR ${playerPayments.source} = ${playerDimension.uuid}::text
+        )
+        AND ${playerPayments.occurredAt} >= ${playerDimension.registeredAt}
+        AND ${playerPayments.occurredAt} <
+            ${playerDimension.registeredAt}
+              + (${this.contactMinutes} * interval '1 minute')
+      WHERE ${playerDimension.registeredAt}
+              >= ((${fromMonth} || '-01')::date::timestamp AT TIME ZONE ${TZ})
+        AND ${playerDimension.registeredAt}
+              < (((${toMonth} || '-01')::date + interval '1 month')::timestamp
+                 AT TIME ZONE ${TZ})
+      GROUP BY ${playerDimension.uuid}, ${playerDimension.registeredAt},
+               ${playerDimension.lastSeenAt}
+    `);
+
+    return result.rows;
+  }
+
+  /** Both stores have to have run for this metric to mean anything. */
+  private async sourceStates(): Promise<EconomySourceState[]> {
+    const [dimension, payments] = await Promise.all([
+      this.syncState('player_dimension', () =>
+        this.dimension.lastSuccessfulSync(),
+      ),
+      this.syncState('player_payments', () =>
+        this.payments.lastSuccessfulSync(),
+      ),
+    ]);
+    return [dimension, payments];
+  }
+
+  private async syncState(
+    name: EconomySourceState['name'],
+    read: () => Promise<{ ranAt: Date } | null>,
+  ): Promise<EconomySourceState> {
+    try {
+      const last = await read();
+      return last === null
+        ? { name, ok: false, asOf: null, failure: 'never_synced' }
+        : { name, ok: true, asOf: last.ranAt.toISOString() };
+    } catch (error) {
+      this.logger.warn(
+        `Procedencia de ${name} ilegivel: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return { name, ok: false, asOf: null, failure: 'query_failed' };
+    }
+  }
+
+  private share(part: number, whole: number): Share {
+    if (whole === 0) {
+      return {
+        percent: null,
+        n: 0,
+        unavailableReason:
+          'nenhum jogador deste grupo teve 7 dias de oportunidade ainda — ' +
+          'publicar 0% aqui seria o calendario, nao a retencao',
+      };
+    }
+    return { percent: Math.round((part / whole) * 1000) / 10, n: whole };
+  }
+}

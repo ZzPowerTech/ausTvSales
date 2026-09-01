@@ -865,22 +865,48 @@ jogo.**
 1. [~] **E1 e E2 saem do `ausTvSales` sozinho** — receita por plataforma e coorte, tempo até o primeiro
    gasto, ~~gasto por posição no funil~~ (ver o bloco acima). **Nenhuma dependência de PlayerPoints** (R3 resolvido:
    analytics apenas, sem reconciliação)
-2. **ETL noturno apenas das linhas `PAY_SENDER`/`PAY_RECEIVER`** (1.332 de 6.664) para o
+2. [x] **ETL noturno apenas das linhas `PAY_SENDER`/`PAY_RECEIVER`** (1.332 de 6.664) para o
    PostgreSQL, em usuário read-only na origem. Tabela sem índice — nada roda ao vivo no MySQL do
    jogo (ADR-007). Idempotente e re-executável
-3. **E3** — contato social nos primeiros minutos e D7 desse grupo contra o resto; conclusão do
-   `10tutorial` separada de interação espontânea
-4. **E4** — feed de pagamentos **admin-only** com marcação de anomalia (valor fora do percentil,
+3. [x] **E3** — contato social nos primeiros minutos e D7 desse grupo contra o resto; conclusão do
+   `10tutorial` separada de interação espontânea — **por assinatura de valor, e rotulada como
+   heurística**: o log registra valor, não intenção
+4. [x] **E4** — feed de pagamentos **admin-only** com marcação de anomalia (valor fora do percentil,
    par repetido, conta nova recebendo alto, conta financiando muitas). Marcação é sinalização,
-   nunca acusação automática
-5. Feed e valores **não** aparecem no site público em nenhuma hipótese
-6. Fonte indisponível → **vazio, nunca zero**; agregação pesada fora do pico
-7. **Grant administrativo excluído de toda métrica de receita** (R2 — existe linha de 9.999.999 na
-   origem)
-8. Regra de desempate do join `transaction_log` × `ausTvSales` documentada e testada com colisão
-   proposital (R3)
-9. Série `SET`/`Starting balance` publicada como fonte de reconciliação do funil, cobrindo o apagão
-   do Plan de mai–jul/2026 (R1)
+   nunca acusação automática — cada marca publica **o que foi observado e contra que limiar**
+5. [x] Feed e valores **não** aparecem no site público em nenhuma hipótese
+6. [x] Fonte indisponível → **vazio, nunca zero**; agregação pesada fora do pico
+7. [x] **Grant administrativo excluído de toda métrica de receita** (R2) — **por construção**: a
+   receita lê o `sales`, e o `OFFSET` de 9.999.999 nunca entra no ETL
+8. [x] Regra de desempate documentada e testada com colisão proposital — ~~do join
+   `transaction_log` × `ausTvSales`~~, que a R3 eliminou. **A colisão que existe de verdade é
+   outra, e é pior**: a tabela de origem não tem chave primária nenhuma, então ela não distingue
+   uma releitura de um segundo pagamento. Ver o bloco abaixo
+9. [x] Série `SET`/`Starting balance` publicada como fonte de reconciliação do funil, cobrindo o
+   apagão do Plan de mai–jul/2026 (R1) — `GET /economy/account-creations`
+
+> ### O critério 8 aponta para uma colisão que não existe mais, e havia outra que existe
+>
+> A redação pede a regra de desempate do **join** `transaction_log` × `ausTvSales`. Esse join foi
+> eliminado pela própria R3 em 2026-08-21: *"não existe join... o escopo é analytics apenas"*. Ler
+> o critério ao pé da letra entregaria um teste sobre um cruzamento que o spec proíbe.
+>
+> **A colisão real é a da origem.** `playerpoints_transaction_log` **não tem chave primária**, e
+> nenhum outro índice. Dois jogadores podem pagar o mesmo valor à mesma pessoa no mesmo segundo, e
+> o log grava isso como duas linhas byte a byte idênticas. Uma cópia noturna precisa fazer a mesma
+> coisa com elas toda noite:
+>
+> - **fundir** → um pagamento some para sempre, e o feed que existe para pegar abuso é o primeiro a
+>   perder linha;
+> - **chave surrogate por execução** → a tabela cresce pela população inteira toda noite;
+> - **contar dentro da execução** → o que foi feito. A chave é
+>   `(transaction_type, source, receiver, amount, occurred_at, ordinal)`, e o `ordinal` conta linhas
+>   idênticas numa ordem determinística imposta pelo `ORDER BY` da consulta. A mesma entrada
+>   reproduz os mesmos ordinais — é isso que faz a re-execução ser no-op — e duas linhas
+>   genuinamente iguais ficam com 0 e 1, ambas vivas.
+>
+> Testado com colisão proposital em duas camadas: em unitário sobre a regra, e em e2e contra o
+> Postgres real, onde a segunda linha só entra se a chave composta de fato incluir o ordinal.
 
 ### S9.2 — Relatório periódico no Discord · 5 SP · `feat/api-weekly-report`
 
@@ -967,6 +993,26 @@ jogo.**
 2. [x] `n` ao lado de cada percentual
 3. [x] Falha do job avisa no canal — degradação honesta, nunca silêncio
 4. [x] Versão gerada persistida
+
+> ### O que a fatia social entrega, e o que ela custa ao ambiente
+>
+> `GET /economy/social-contact` (E3), `GET /economy/payments/feed` (E4) e
+> `GET /economy/account-creations` (R1), sobre uma cópia noturna do log do PlayerPoints.
+>
+> **Esta é a única parte do sistema que põe uma query no banco que o servidor de Minecraft está
+> usando.** A tabela não tem índice nenhum, então toda leitura é full table scan por construção —
+> não existe forma de consulta que evite isso, e é literalmente o que o ADR-007 foi escrito para
+> disciplinar. Daí: job noturno, opt-in, escalonado 15 minutos depois dos outros dois, e medindo o
+> próprio tempo **dentro** da query.
+>
+> **Exige credencial nova**: usuário MySQL read-only e dedicado no `jogar.austv.net`. O usuário dos
+> plugins é exatamente o que não se deve reusar — as credenciais dele estão em texto plano em
+> quatro configs no servidor do jogo.
+>
+> **Uma premissa fica medida em vez de afirmada.** Que `PAY_SENDER` e `PAY_RECEIVER` sejam as duas
+> metades de um mesmo pagamento é a leitura natural do schema e **não foi confirmada contra um
+> pagamento conhecido**. Os dois tipos são copiados verbatim e contados separadamente a cada
+> execução; se as contagens divergirem, a premissa caiu e o número diz isso.
 
 ### DoD da S9
 
