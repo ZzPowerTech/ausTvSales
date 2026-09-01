@@ -481,6 +481,59 @@ export class EnvironmentVariables {
   @MinLength(1, { message: 'TUTORIAL_SYNC_CRON must not be empty when set' })
   TUTORIAL_SYNC_CRON?: string;
 
+  // --- Retencao por coorte (AusTV Admin S8.2, secao 6.2) ---
+  //
+  // Este bloco NAO tem credencial nova. A historia foi planejada como o unico
+  // ponto autorizado a fazer SQL direto no Plan (excecao 1 do ADR-002), e ler o
+  // corpo do `/v1/retention` em 2026-08-29 dispensou a excecao: coorte sai de
+  // `registerDate` e plataforma sai do `playerUUID` (ADR-003). O modulo usa o
+  // `PLAN_BASE_URL` que ja existe.
+
+  // Tamanho de coorte abaixo do qual a linha vem MARCADA (`belowMinimum`),
+  // nunca escondida. Esconder amostra pequena e o mesmo erro de omitir o `n`:
+  // sobra so a coorte que por acaso ficou grande, e ruido vira tendencia.
+  // 30 e um chute conservador, marcado como tal — nao foi medido contra esta
+  // populacao.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  RETENTION_MIN_COHORT_SIZE?: number;
+
+  // Fracao da populacao inteira que, caida num mesmo dia de `lastSeenDate`,
+  // caracteriza aquele dia como CARIMBO DE IMPORTACAO em vez de comportamento
+  // de jogador. Mecanismo, nao data: o `HANDOFF.md` registra que coortes ate
+  // 2025-08 dao D1/D7/D30 de 100% por causa da unificacao de 2026-08-20, e
+  // registra tambem por que a fronteira de 2025-08 nao pode virar constante
+  // ("ajuste empirico, nao mecanismo").
+  //
+  // ⚠️ NAO CALIBRADO, no mesmo sentido dos tres limiares da S6.3: 0.10 foi
+  // escolhido por estar obviamente fora de comportamento organico, nao por ter
+  // sido medido contra esta populacao. A primeira leitura de producao e o que
+  // transforma isso em calibracao — e a evidencia necessaria (`stampDays`, com
+  // dia, share e base) sai na propria resposta.
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  RETENTION_STAMP_DAY_MIN_SHARE?: number;
+
+  // Populacao minima para o detector de carimbo opinar. Em vinte jogadores um
+  // unico dia e trivialmente 10% da amostra, e chamar isso de importacao
+  // suprimiria coortes reais na forca do ruido.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  RETENTION_STAMP_DAY_MIN_POPULATION?: number;
+
+  // Fracao de uma coorte caida em dia de carimbo acima da qual os D1/D7/D30
+  // dela saem `null` COM o motivo e a evidencia — nunca os ~100% que o carimbo
+  // produz, e nunca em silencio. Tambem nao calibrado.
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  RETENTION_COHORT_CONTAMINATION_MAX?: number;
+
   // Express `trust proxy` setting, applied in main.ts so `req.ip` reflects the
   // real client from the Nginx-supplied X-Forwarded-For (and a header forged by a
   // direct client is ignored). A number = trust that many hops; otherwise a

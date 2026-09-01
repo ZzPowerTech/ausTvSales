@@ -11,6 +11,7 @@ import { InstrumentationModule } from './instrumentation/instrumentation.module'
 import { ItemsModule } from './items/items.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { FunnelModule } from './funnel/funnel.module';
+import { RetentionModule } from './retention/retention.module';
 import { TutorialModule } from './tutorial/tutorial.module';
 import { SalesModule } from './sales/sales.module';
 
@@ -47,6 +48,11 @@ import { SalesModule } from './sales/sales.module';
     // Funil de 4 degraus (S8.1, secao 6.2). Le o PlanDatabase e o TutorialStore;
     // nao escreve nada e nao agenda nada.
     FunnelModule,
+    // Retencao por coorte (S8.2, secao 6.2). Le so o `/v1/retention` pelo
+    // PlanApiClient: a excecao 1 do ADR-002 — SQL direto em `plan_sessions` —
+    // deixou de ser necessaria quando o corpo do endpoint foi lido, e este
+    // modulo nao abre conexao MySQL nenhuma.
+    RetentionModule,
     CategoriesModule,
     ItemsModule,
     SalesModule,

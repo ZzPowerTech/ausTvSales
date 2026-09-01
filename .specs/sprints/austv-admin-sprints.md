@@ -517,10 +517,66 @@ existe para impedir.
 
 ### S8.2 — Retenção D1/D7/D30 por coorte e plataforma · 5 SP · `feat/api-cohort-retention`
 
-1. Coorte mensal × plataforma, com `n`
-2. Coortes com `n` abaixo do mínimo configurável são marcadas, não escondidas
-3. Único ponto do sistema autorizado a fazer SQL direto (ADR-002), em usuário read-only, isolado
-   num módulo
+> ## ✅ ENTREGUE em 2026-09-01, na Sprint 9 — e **sem abrir a exceção 1**
+>
+> Módulo `retention`: `GET /retention/cohorts`, coorte mensal × plataforma, `n` por horizonte.
+> Zero MySQL, zero credencial nova, zero linha que nomeie `plan_sessions` ou `plan_user_info`.
+>
+> | critério | estado |
+> |---|---|
+> | 1. Coorte mensal × plataforma, com `n` | ✅ e o `n` é **por horizonte**, não por coorte — ver abaixo |
+> | 2. Coortes abaixo do mínimo **marcadas, não escondidas** | ✅ `belowMinimum`, com o mínimo em vigor publicado ao lado |
+> | 3. Único ponto autorizado a fazer SQL direto | ➖ **sem objeto**: a história não faz SQL. O critério pressupunha a exceção 1, que caiu em 2026-08-29 |
+>
+> ### O `n` é por horizonte, e isso não é detalhe de implementação
+>
+> Um jogador registrado há dez dias teve oportunidade de sobreviver a um dia e **não** a trinta.
+> Dividir a coorte inteira no D30 é o que faz o mês corrente sair `0,0%` — um número que se lê
+> como colapso e é o calendário. Então cada horizonte conta só quem teve `N` dias de
+> oportunidade e publica **essa** contagem como sua base. As três bases de uma mesma coorte
+> divergem de propósito; um `n` único ao lado de três percentuais estaria errado em dois deles.
+>
+> Coorte cuja base madura é vazia sai `null` com `immature_horizon`. Nunca zero.
+>
+> ### As duas armadilhas do `HANDOFF.md`, e como cada uma foi tratada
+>
+> **1. Coortes antigas dando 100% por causa da unificação.** O `HANDOFF.md` é explícito que a
+> fronteira de 2025-08 é *"ajuste empírico, não mecanismo"* e pede **um teste sobre o dado**. O
+> que entrou é isso: uma escrita em massa deixa a **mesma** `lastSeenDate` em toda linha que
+> tocou, e população orgânica não concentra um décimo de si num único dia de calendário. Os dias
+> que concentram saem no payload (`stampDays`, com dia, `n` e a população sobre a qual o share
+> foi tirado), e a coorte que passa do teto sai `null` com `import_artifact` **e a evidência** —
+> nunca os ~100%, nunca silêncio.
+>
+> ⚠️ **Os dois limiares do detector não estão calibrados**, e estão marcados como tal no
+> `.env.example`, na mesma prateleira dos três da S6.3. Foram escolhidos por estarem
+> obviamente fora de comportamento orgânico, não por medição contra esta população. **A
+> primeira leitura de produção é o que vira calibração** — e a evidência necessária sai na
+> própria resposta, de propósito.
+>
+> **2. Coorte do mês corrente imatura.** Coberta pelo filtro de maturidade acima, que é o mesmo
+> mecanismo: não há caso especial para "mês corrente", há oportunidade contada por jogador.
+>
+> ### Degradação
+>
+> Plan inalcançável, não configurado ou respondendo forma desconhecida → relatório **sem
+> coortes e com a falha nomeada** (`not_configured` / `unreachable` / `contract_mismatch`),
+> nunca um relatório de zeros. `cohorts: []` ao lado de `source.ok: false` é o contrato.
+>
+> ### A dívida que esta história cria, e vale registrar antes que vire descoberta
+>
+> O corpo do `/v1/retention` foi lido em 2026-08-29, mas o que ficou registrado foram os
+> **nomes dos campos e a contagem de linhas** — não os tipos JSON deles, nem o envelope. O
+> parser foi escrito tolerante às três formas plausíveis de data (epoch ms, epoch s, string) e
+> **recusa ruidosamente** o que não reconhece, em vez de adivinhar. É o mais perto da regra do
+> repo que dá para chegar sem acesso à instância: **a primeira execução em produção é a
+> observação que ninguém fez**, e ela produz ou o número ou um `contract_mismatch` que nomeia
+> o campo faltante.
+
+1. [x] Coorte mensal × plataforma, com `n`
+2. [x] Coortes com `n` abaixo do mínimo configurável são marcadas, não escondidas
+3. ➖ ~~Único ponto do sistema autorizado a fazer SQL direto (ADR-002), em usuário read-only,
+   isolado num módulo~~ — sem objeto: nenhum SQL foi escrito
 
 > ### 🛑 NÃO INICIADA — três pré-requisitos abertos, e escrever assim mesmo repetiria a S6.2
 >
@@ -686,7 +742,10 @@ existe para impedir.
 - [ ] ~~Usuário read-only comprovadamente sem permissão de escrita — pertence à S8.2~~ —
       **deixou de pertencer**: a S8.2 consome o `/v1/retention` e não abre conexão MySQL. A
       exigência continua válida para a exceção **2**, que segue de pé, e por isso não é
-      apagada daqui — só deixa de estar atrelada a esta história
+      apagada daqui — só deixa de estar atrelada a esta história.
+      **Confirmado ao entregar a S8.2 em 2026-09-01:** o módulo não tem MySQL nenhum, então
+      não há usuário novo a provar. A pendência é integralmente da exceção 2 e do
+      `PlanDatabase`, que já existia antes desta história
 
 ### Fechamento da S8 — 2026-08-28
 
@@ -694,7 +753,7 @@ existe para impedir.
 |---|---|
 | **S8.0** — Fonte de dados do tutorial | ✅ **entregue** (PRs #168, #169). Fecha também o 7º check da §6.1 e o critério 5 da S6.3 |
 | **S8.1** — Módulo `funnel` | ✅ **entregue** (PR #170). Corrigida em 2026-08-31: o degrau sem fonte é o **`rede`**, não o `survival` — os dois trocaram de lugar quando se mediu que `plan_users` é o Survival |
-| **S8.2** — Retenção por coorte | 🛑 **não iniciada** — três pré-requisitos abertos, ver o bloco dela |
+| **S8.2** — Retenção por coorte | ✅ **entregue em 2026-09-01**, dentro da Sprint 9, sem abrir a exceção 1 do ADR-002. Ver o bloco dela |
 
 **Recomendação: mover a S8.2 para a S9**, que é a válvula de escape que o próprio plano nomeia
 (`[CORTE]` da S8). Isso põe a S8 em 13 SP contra 13 de capacidade e resolve o estouro registrado no

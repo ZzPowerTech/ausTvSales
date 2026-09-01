@@ -107,11 +107,21 @@ usa** — a S8.2, única história que dependia dela, sai do endpoint. Fechá-la
 dono, porque foi ele quem a abriu; até lá ela fica registrada aqui como o que é: uma
 autorização de pé sem motivo de pé.
 
+**Confirmado em 2026-09-01, quando a S8.2 foi entregue:** o módulo `retention` não abre
+conexão MySQL nenhuma, não referencia nenhuma das três tabelas e não pede credencial nova.
+O que era previsão virou fato verificável — `grep` por `plan_sessions` e `plan_user_info`
+sobre `backend/src/retention/` retorna vazio. A exceção segue aberta e agora está aberta
+para **ninguém**.
+
 > **A ressalva que sobra, e não é sobre acesso:** `lastSeenDate` dá o **intervalo de
 > sobrevivência**, não o retorno no dia N. Entregar retenção por intervalo, rotulada como
 > tal, é melhor que abrir três tabelas para entregar a outra — mas é uma métrica
 > diferente, e chamar uma de outra seria o erro de denominador que já custou uma linha do
 > DoD da S8.
+>
+> **O rótulo foi entregue como parte do contrato, não como nota de rodapé:** toda resposta
+> de `/retention/cohorts` carrega o campo `semantics`, e ele diz por extenso que "D30" ali
+> significa *ainda visto 30 dias depois de registrar*, não *voltou no trigésimo dia*.
 
 #### Exceção 2 — inventário de instâncias (2026-08-23)
 
