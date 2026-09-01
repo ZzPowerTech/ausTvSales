@@ -304,6 +304,60 @@ describe('EconomyService.firstSpend (E2)', () => {
     });
   });
 
+  it('reads a timestamp the driver handed back as a string', async () => {
+    // `pg` parses a plain `timestamptz` column into a `Date` and handed back
+    // `min(purchased_at)` as a **string**. The unit tests stub the driver, so
+    // they could not see it; the e2e could, and did. This pins the shape so the
+    // regression cannot come back through a path the e2e does not cover.
+    const db = dbWith([
+      {
+        rows: [
+          {
+            uuid: PREMIUM(1),
+            cohort: '2026-01',
+            registered_at: '2026-01-10T15:00:00.000Z',
+            first_purchase_at: '2026-01-20T15:00:00.000Z',
+          },
+        ],
+      },
+    ]);
+
+    const report = await new EconomyService(
+      db,
+      dimensionStore(SYNCED),
+    ).firstSpend('2026-01', '2026-01');
+
+    expect(report.byCohort?.[0]).toMatchObject({
+      spenders: 1,
+      medianDaysToFirstSpend: 10,
+    });
+  });
+
+  it('drops a player whose registration date is unreadable', async () => {
+    // Counting them in `cohortSize` with no usable interval would deflate the
+    // "ever spent" share by a player nobody can account for.
+    const db = dbWith([
+      {
+        rows: [
+          {
+            uuid: PREMIUM(1),
+            cohort: '2026-01',
+            registered_at: 'nao e data',
+            first_purchase_at: null,
+          },
+          player(PREMIUM(2), null),
+        ],
+      },
+    ]);
+
+    const report = await new EconomyService(
+      db,
+      dimensionStore(SYNCED),
+    ).firstSpend('2026-01', '2026-01');
+
+    expect(report.byCohort?.[0].cohortSize).toBe(1);
+  });
+
   it('returns null percentiles — never zero — for a cohort where nobody spent', async () => {
     const db = dbWith([{ rows: [player(PREMIUM(1), null)] }]);
 

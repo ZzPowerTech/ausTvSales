@@ -94,3 +94,32 @@ export function percentile(
   const index = Math.min(Math.max(rank, 1), sorted.length) - 1;
   return sorted[index];
 }
+
+/**
+ * Coerce a timestamp coming back from Postgres into a `Date`.
+ *
+ * ## Why this exists, and it is not defensive programming for its own sake
+ *
+ * The `pg` driver parses a plain `timestamptz` **column** into a `Date`, and the
+ * TypeScript row types say so. It does not always do the same for the result of
+ * an **aggregate**: `min(purchased_at)` came back as a string, and
+ * `row.first_purchase_at.getTime()` threw `is not a function` — caught by the
+ * e2e suite, which is the only place that runs against a real server.
+ *
+ * The lesson is the one this repo keeps relearning about someone else's
+ * contract: the row type is what the code *believes*, not what the driver
+ * *does*. Every timestamp read through `db.execute` goes through here.
+ *
+ * @returns `null` for anything unusable — never `new Date()`, which would file a
+ *   row under today and produce a measurement nobody can audit.
+ */
+export function toDate(raw: unknown): Date | null {
+  if (raw instanceof Date) {
+    return Number.isNaN(raw.getTime()) ? null : raw;
+  }
+  if (typeof raw === 'string' || typeof raw === 'number') {
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  return null;
+}

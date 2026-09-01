@@ -3,7 +3,13 @@ import { and, sql, type SQL } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDB } from '../db/database.module';
 import { playerDimension, sales } from '../db/schema';
 import { platformOf, type Platform } from '../instrumentation/platform';
-import { formatCents, percentile, shareOf, toCents } from './economy-math';
+import {
+  formatCents,
+  percentile,
+  shareOf,
+  toCents,
+  toDate,
+} from './economy-math';
 import { PlayerDimensionStore } from './player-dimension.store';
 import {
   FUNNEL_POSITION_UNAVAILABLE,
@@ -32,8 +38,12 @@ type BuyerRow = {
 type FirstSpendRow = {
   uuid: string;
   cohort: string;
-  registered_at: Date;
-  first_purchase_at: Date | null;
+  /**
+   * Whatever `pg` hands back for a timestamp — a `Date` for a plain column, a
+   * **string** for an aggregate. Narrowed by `toDate`, never trusted as typed.
+   */
+  registered_at: unknown;
+  first_purchase_at: unknown;
 };
 
 type ExcludedRow = {
@@ -252,11 +262,19 @@ export class EconomyService {
         days: [],
         beforeRegistration: 0,
       };
+
+      const registeredAt = toDate(row.registered_at);
+      if (registeredAt === null) {
+        // A player whose registration date cannot be read belongs to no
+        // interval. Dropped from the cohort entirely rather than counted with a
+        // missing numerator, which would deflate the "ever spent" share.
+        continue;
+      }
       group.size += 1;
 
-      if (row.first_purchase_at !== null) {
-        const delta =
-          row.first_purchase_at.getTime() - row.registered_at.getTime();
+      const firstPurchaseAt = toDate(row.first_purchase_at);
+      if (firstPurchaseAt !== null) {
+        const delta = firstPurchaseAt.getTime() - registeredAt.getTime();
         if (delta < 0) {
           // The two sources disagree about when this player started — usually a
           // buyer whose purchase predates Plan's own history. Counted and left

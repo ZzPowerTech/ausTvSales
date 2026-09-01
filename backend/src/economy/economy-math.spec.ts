@@ -1,4 +1,10 @@
-import { formatCents, percentile, shareOf, toCents } from './economy-math';
+import {
+  formatCents,
+  percentile,
+  shareOf,
+  toCents,
+  toDate,
+} from './economy-math';
 
 describe('toCents', () => {
   it('reads the string a bigint column comes back as', () => {
@@ -80,5 +86,34 @@ describe('percentile', () => {
   it('clamps the rank inside the sample', () => {
     expect(percentile([7], 0)).toBe(7);
     expect(percentile([7], 1)).toBe(7);
+  });
+});
+
+describe('toDate', () => {
+  it('accepts the string an aggregate comes back as', () => {
+    // The bug this closes: `pg` parses a plain `timestamptz` column into a
+    // `Date` but handed back `min(purchased_at)` as a **string**, and
+    // `.getTime()` threw `is not a function` in production code that the unit
+    // tests could not see, because they stub the driver. Only the e2e caught it.
+    expect(toDate('2026-03-10T15:00:00.000Z')).toEqual(
+      new Date('2026-03-10T15:00:00.000Z'),
+    );
+  });
+
+  it('passes a Date through', () => {
+    const date = new Date('2026-03-10T15:00:00.000Z');
+    expect(toDate(date)).toBe(date);
+  });
+
+  it('accepts epoch milliseconds', () => {
+    expect(toDate(1_772_000_000_000)?.getTime()).toBe(1_772_000_000_000);
+  });
+
+  it('returns null — never "now" — for anything unusable', () => {
+    // Falling back to the current time would file a row under today and produce
+    // a measurement nobody can audit.
+    for (const raw of [null, undefined, {}, [], 'nao e data', new Date('x')]) {
+      expect(toDate(raw)).toBeNull();
+    }
   });
 });
