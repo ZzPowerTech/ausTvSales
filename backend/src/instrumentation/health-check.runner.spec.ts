@@ -110,6 +110,9 @@ function fakeCheck(
   return { name: name as HealthCheckName, run };
 }
 
+/** Scoped name of the one member of `ACCEPTED_BLIND_SPOTS`. */
+const BLIND_SPOT = `${HealthCheckName.NetworkToSurvival}:Survival`;
+
 /**
  * First argument of the first recorded call, through a declared tuple type.
  *
@@ -403,9 +406,40 @@ describe('HealthCheckRunner', () => {
       // `recovery_unconfirmed` que segurou — foi o orcamento.
       expect(summary.recoveryHeld).toBe(0);
       expect(summary.budgetHeld).toBe(1);
+      expect(summary.blindSpotHeld).toBe(0);
       expect(firstArg<AlertDecision>(publish).recovered).toEqual([]);
       expect(log).toHaveBeenCalledWith(
         expect.stringContaining('segurados_por_orcamento=1'),
+      );
+      log.mockRestore();
+    });
+
+    it('conta o ponto cego em `blindSpotHeld`, fora do total generico', async () => {
+      // Inside `suppressed` this number sits next to every routine
+      // `not_notifiable` from a healthy check, which on a normal cycle is
+      // nearly all of them. The one thing worth watching here — how much of the
+      // layer has been switched off — is unreadable unless it gets its own
+      // field, the same argument that earned `recoveryHeld` and `budgetHeld`
+      // theirs.
+      const store = buildStore();
+      const log = jest
+        .spyOn(Logger.prototype, 'log')
+        .mockImplementation(() => undefined);
+      const { alerter } = buildAlerter();
+      const check = fakeCheck(HealthCheckName.NetworkToSurvival, () =>
+        Promise.resolve([observation(BLIND_SPOT, 'no_data')]),
+      );
+
+      const summary = await new HealthCheckRunner(
+        store.store,
+        alerter,
+        config(),
+        [check],
+      ).runAll();
+
+      expect(summary.blindSpotHeld).toBe(1);
+      expect(log).toHaveBeenCalledWith(
+        expect.stringContaining('pontos_cegos=1'),
       );
       log.mockRestore();
     });

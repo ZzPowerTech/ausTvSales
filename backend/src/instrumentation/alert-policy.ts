@@ -1,3 +1,4 @@
+import { isAcceptedBlindSpot } from './health-check.types';
 import type {
   HealthCheckRecord,
   HealthCheckStatus,
@@ -10,6 +11,24 @@ export type SuppressionReason =
   | 'grouped'
   /** Nothing to say: healthy, and the channel is not holding an open problem. */
   | 'not_notifiable'
+  /**
+   * The check is an accepted blind spot and never notifies.
+   *
+   * Its own reason rather than `not_notifiable`, because the two answer
+   * different questions. `not_notifiable` means *this verdict* had nothing to
+   * say; this means *this check* has nothing to say and never will, by a
+   * decision on record. Folding them together would hide how much of the layer
+   * has been switched off, which is precisely the number worth watching before
+   * anyone adds a second name to {@link ACCEPTED_BLIND_SPOTS} — so the runner
+   * promotes it to `blindSpotHeld` in the cycle summary, beside `recoveryHeld`
+   * and `budgetHeld`, rather than leaving it inside a total that is dominated by
+   * routine `not_notifiable` on every healthy cycle.
+   *
+   * Carried **only** by the verdict the blind spot was accepted for. A member
+   * that emits anything else is announced normally; see the guard in
+   * `decideAlerts`.
+   */
+  | 'accepted_blind_spot'
   /**
    * Healthy again, but not for long enough to be believed.
    *
@@ -310,6 +329,47 @@ export function decideAlerts(input: AlertPolicyInput): AlertDecision {
   const suppressed: SuppressedObservation[] = [];
 
   for (const record of input.observations) {
+    if (isAcceptedBlindSpot(record.checkName) && record.status === 'no_data') {
+      // Before anything else — the transition rules below all assume a non-`ok`
+      // state eventually clears, and a permanent `no_data` cannot.
+      //
+      // Reached through `repeat`, a check that returns `no_data` on every cycle
+      // forever re-announces once per `reAlertAfterMs` for as long as the
+      // process runs, because the only exit is an `ok` record it can no longer
+      // produce. The budget does not contain it either: `no_data` is the single
+      // status such a check emits, so `heardThis` resets to zero with every
+      // window and takes the free pass.
+      //
+      // ## Why this is keyed on the status and not on the name alone
+      //
+      // The first version suppressed **every** verdict from a blind spot,
+      // reading membership before it read the status. That is safe only while
+      // every member can emit nothing but `no_data`, which is true of
+      // `funnel.network_to_survival` and is enforced by nothing at all. A future
+      // member that hit a real outage and began returning `error` would have had
+      // every one of those verdicts dropped, silently, for as long as it lasted:
+      // the mechanism built to stop one check paging daily would have been
+      // hiding an unbounded real failure instead. A channel going mute about
+      // something real is the outcome this layer exists to prevent.
+      //
+      // So a blind spot buys silence for exactly the verdict it was accepted
+      // for. Anything else falls through to the ordinary rules and is announced
+      // like any other failure — which is also how the contradiction surfaces:
+      // a member of the set that alerts is a member that no longer belongs in
+      // it. There is no loop to fear on that path, because the loop comes from
+      // permanence, and a status this check was not supposed to produce is by
+      // definition not the permanent one.
+      //
+      // Note what is NOT attempted: closing the open alert. Delivering one final
+      // message would leave the channel tidier, but "exactly once, then never"
+      // is another transition rule, and these have already been wrong twice by
+      // reasoning about shapes rather than about what the channel was told.
+      // Stamping an `ok` to clear it is worse still — see `mute()`. A standing
+      // failure misleads in the safe direction; this returns nothing at all.
+      suppressed.push({ record, reason: 'accepted_blind_spot' });
+      continue;
+    }
+
     const last = input.lastAlert.get(record.checkName) ?? null;
     /** The channel is holding an unresolved problem about this check. */
     const open: LastAlert | null =

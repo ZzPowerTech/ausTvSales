@@ -78,6 +78,121 @@ function build(
 }
 
 describe('InstrumentationHealthService', () => {
+  describe('ponto cego aceito', () => {
+    /**
+     * `funnel.network_to_survival` returns `no_data` every cycle and can never
+     * return `ok`: the source for its denominator does not exist anywhere this
+     * system reaches. Counted as an ordinary `no_data`, it pinned the aggregate
+     * at `degraded` permanently — and a status that cannot move has stopped
+     * carrying information, which is this epic's founding disaster wearing a
+     * yellow light instead of a green one.
+     */
+    const BLIND = `${HealthCheckName.NetworkToSurvival}:Survival`;
+
+    it('nao impede o agregado de voltar a `ok`', async () => {
+      const service = build([
+        record(BLIND, 'no_data'),
+        record(HealthCheckName.CollectionAlive, 'ok'),
+        record(HealthCheckName.OrphanInstance, 'ok'),
+      ]);
+
+      const summary = await service.summary(NOW);
+
+      expect(summary.status).toBe('ok');
+    });
+
+    it('nao entra em `counts` nem em `failing`', async () => {
+      const service = build([
+        record(BLIND, 'no_data'),
+        record(HealthCheckName.CollectionAlive, 'ok'),
+      ]);
+
+      const summary = await service.summary(NOW);
+
+      expect(summary.counts.no_data).toBe(0);
+      expect(summary.failing).toEqual([]);
+    });
+
+    it('e publicado por nome em `blindSpots`, nunca omitido', async () => {
+      // Dropping it from the payload would be the "absence reads as fine"
+      // mistake the whole layer exists to prevent: a reader would see a clean
+      // summary and conclude the network degrau is monitored.
+      const service = build([
+        record(BLIND, 'no_data'),
+        record(HealthCheckName.CollectionAlive, 'ok'),
+      ]);
+
+      const summary = await service.summary(NOW);
+
+      expect(summary.blindSpots).toEqual([BLIND]);
+    });
+
+    it('continua contado em `total` — esta registrado e escrevendo', async () => {
+      const service = build([
+        record(BLIND, 'no_data'),
+        record(HealthCheckName.CollectionAlive, 'ok'),
+      ]);
+
+      const summary = await service.summary(NOW);
+
+      expect(summary.total).toBe(2);
+    });
+
+    it('nao esconde a degradacao de OUTRO check', async () => {
+      // The property that matters most: excluding the blind spot must not turn
+      // the aggregate deaf. If it did, this change would have swapped a stuck
+      // yellow for a false green, which is strictly worse.
+      const service = build([
+        record(BLIND, 'no_data'),
+        record(HealthCheckName.CollectionAlive, 'no_data'),
+      ]);
+
+      const summary = await service.summary(NOW);
+
+      expect(summary.status).toBe('degraded');
+      expect(summary.counts.no_data).toBe(1);
+    });
+
+    it('e marcado em `checks()`, nao so no resumo', async () => {
+      // The two views must not disagree. Without the flag this row is
+      // byte-identical in shape to a check that came back `no_data` for one
+      // quiet window, and only 656 characters of prose inside `detail.summary`
+      // separate them — which a dashboard would have to substring-match.
+      const service = build([
+        record(BLIND, 'no_data'),
+        record(HealthCheckName.TutorialEntryRate, 'no_data'),
+      ]);
+
+      const listed = await service.checks(NOW);
+      const byName = new Map(listed.checks.map((view) => [view.name, view]));
+
+      expect(byName.get(BLIND)?.blindSpot).toBe(true);
+      // Same `status`, opposite meaning: this one is a quiet window and will
+      // clear on its own.
+      expect(byName.get(HealthCheckName.TutorialEntryRate)?.status).toBe(
+        'no_data',
+      );
+      expect(byName.get(HealthCheckName.TutorialEntryRate)?.blindSpot).toBe(
+        false,
+      );
+    });
+
+    it('ainda envelhece: se parar de escrever, entra em `staleChecks`', async () => {
+      // Excluded from the verdict, NOT from the freshness window. A blind spot
+      // that stops writing rows has stopped running, which is a different
+      // problem and still has to surface.
+      const service = build([
+        record(BLIND, 'no_data', minutesAgo(120)),
+        record(HealthCheckName.CollectionAlive, 'ok'),
+      ]);
+
+      const summary = await service.summary(NOW);
+
+      expect(summary.staleChecks).toEqual([BLIND]);
+      expect(summary.stale).toBe(true);
+    });
+  });
+
   describe('summary', () => {
     it('answers `unknown` when no check has ever run', async () => {
       // The whole point of the four-value status. `ok` here would be an
@@ -108,20 +223,28 @@ describe('InstrumentationHealthService', () => {
     });
 
     it('answers `degraded` for a breached check, naming it', async () => {
+      // Any check that is NOT an accepted blind spot: those are excluded from
+      // `counts` and `failing` on purpose, so one cannot stand in for a generic
+      // check here any more.
       const summary = await build([
         record('plan.collection_alive:Survival', 'ok'),
-        record('funnel.network_to_survival', 'breached'),
+        record('funnel.tutorial_entry_rate', 'breached'),
       ]).summary(NOW);
 
       expect(summary.status).toBe('degraded');
-      expect(summary.failing).toEqual(['funnel.network_to_survival']);
+      expect(summary.failing).toEqual(['funnel.tutorial_entry_rate']);
     });
 
     it('treats `no_data` as degraded, never as ok', async () => {
       // A collection gap is not a healthy reading. Folding it into `ok` is the
       // exact mistake that kept the tutorial collapse invisible for 8 months.
+      //
+      // This is the rule the blind-spot exclusion is carved out of, so it is
+      // pinned on a check that still obeys it — see the `ponto cego aceito`
+      // block for the carve-out, including the case proving it did not turn the
+      // aggregate deaf to a second check.
       const summary = await build([
-        record('funnel.network_to_survival', 'no_data'),
+        record('funnel.tutorial_entry_rate', 'no_data'),
       ]).summary(NOW);
 
       expect(summary.status).toBe('degraded');

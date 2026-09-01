@@ -9,7 +9,7 @@ const DEFAULT_MAX_SILENCE_HOURS = 24;
 const MS_PER_HOUR = 3_600_000;
 
 /**
- * Is the network still registering anyone? (spec §6.1)
+ * Is anyone still being registered in `plan_users`? (spec §6.1)
  *
  * ## The check the spec names by table
  *
@@ -17,17 +17,45 @@ const MS_PER_HOUR = 3_600_000;
  * names the table, not an endpoint. That is why ADR-002 exception 2 was extended
  * to `plan_users`: the spec already assumed database access here, and the API
  * genuinely cannot serve it. The proxy records **users** and the backends record
- * **sessions** (§2), so every session-derived endpoint is structurally empty for
- * the proxy — `graph?type=uniqueAndNew` returns empty arrays for it and
- * `serverOverview` returns `numbers: {}`. Verified against production on
- * 2026-08-23.
+ * **sessions** (§2), so every session-derived metric is structurally empty for
+ * the proxy.
  *
- * ## The disaster it exists for
+ * Re-measured against production on **2026-09-01**, and half the old wording had
+ * drifted. `graph?type=uniqueAndNew&server=AusTv` still returns empty arrays for
+ * `uniquePlayers` and `newPlayers` — unchanged since 2026-08-23. But
+ * `serverOverview?server=AusTv` **no longer returns `numbers: {}`**: it returns
+ * fourteen fields, with every session-derived one at **zero** (`sessions: 0`,
+ * `total_players: 0`, `playtime: 0`) beside proxy-native ones that are real
+ * (`online_players: 19`, `best_peak_players: "37"`).
  *
- * The proxy's Plan stopped collecting from **May to August 2026** and nobody
- * noticed for three months. Acquisition — the top of the funnel, the number every
- * campaign is judged by — was simply absent, and the dashboards that existed had
- * no way to say so.
+ * ⚠️ **The substance held and the form got more dangerous.** An absent field is
+ * self-evidently absent; a `0` is a number, and this project exists because a
+ * collection gap read as zero stayed invisible for months. Nothing here consumes
+ * it today — every check iterates `PlanServersConfig.backends()`, which excludes
+ * the proxy, and that class exists precisely so this mistake is not repeated —
+ * but `serverOverview?server=<proxy>` is now a live source of plausible zeros.
+ *
+ * ## ⚠️ It does not watch the proxy, and its name says it does
+ *
+ * The disaster on record is the proxy's Plan collecting nothing from **May to
+ * August 2026**, unnoticed for three months. This check was written for that.
+ * Measured on 2026-08-31, it cannot see it: `plan_users` holds the **Survival**
+ * in this installation — zero proxy players in `plan_user_info`, and eight
+ * months of monthly counts matching the `survival` column of `HANDOFF.md` to the
+ * row. Through the very outage it was built for, the verified table shows the
+ * proxy dead (`Plan morto`) while Survival kept registering 106 players in
+ * 2026-06. Registration silence here would have stayed at zero hours.
+ *
+ * What it *does* watch is real and worth watching: registration on this Plan
+ * installation going quiet, which is the Survival's acquisition and the same
+ * founding disaster one level down. So it keeps running, and the summaries below
+ * say Survival rather than "rede".
+ *
+ * `HealthCheckName.ProxyRegistrationAlive` is **not** renamed with them: the
+ * string is persisted and is the join key of this check's own history. Renaming
+ * it would split the series in two and silently reset the alert policy's memory
+ * of what the channel was last told. Whether the identifier should change is a
+ * decision for the owner, alongside finding an actual proxy-side source.
  *
  * ## Why silence, not a count
  *
@@ -55,7 +83,7 @@ export class ProxyRegistrationAliveCheck implements HealthCheck {
   async run(): Promise<HealthCheckObservation[]> {
     let arrivals;
     try {
-      arrivals = await this.db.networkArrivals();
+      arrivals = await this.db.registeredPlayers();
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       return [
@@ -148,7 +176,8 @@ export class ProxyRegistrationAliveCheck implements HealthCheck {
       observed: silenceHours,
       threshold: thresholdHours,
       // The population behind the verdict. The rule is that no number is
-      // published without its base, and the base here is the whole network.
+      // published without its base, and the base here is every row of
+      // `plan_users` — the Survival's players, not the network's.
       n: arrivals.total,
       context: {
         ultimo_registro: new Date(arrivals.lastRegisteredAt).toISOString(),
@@ -163,8 +192,10 @@ export class ProxyRegistrationAliveCheck implements HealthCheck {
           detail: {
             ...common,
             summary:
-              `Nenhum jogador novo registrado na rede ha ${silenceHours}h ` +
-              `(limite ${thresholdHours}h) — a coleta do proxy pode ter parado`,
+              `Nenhum jogador novo registrado em plan_users ha ${silenceHours}h ` +
+              `(limite ${thresholdHours}h) — a coleta do Survival pode ter ` +
+              'parado. NAO cobre o proxy: esta tabela guarda o Survival nesta ' +
+              'instalacao (medido em 2026-08-31).',
           },
         },
       ];
@@ -176,7 +207,7 @@ export class ProxyRegistrationAliveCheck implements HealthCheck {
         status: 'ok',
         detail: {
           ...common,
-          summary: `Ultimo registro de rede ha ${silenceHours}h`,
+          summary: `Ultimo registro em plan_users (Survival) ha ${silenceHours}h`,
         },
       },
     ];

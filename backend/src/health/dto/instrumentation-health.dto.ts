@@ -138,6 +138,21 @@ export class InstrumentationSummaryDto {
   @ApiProperty({
     type: [String],
     description:
+      'Checks que NAO CONSEGUEM medir, por decisao registrada — a fonte que ' +
+      'responderia a pergunta nao existe em lugar nenhum que este sistema ' +
+      'alcance. Ficam de fora de `counts`, de `failing` e do `status` ' +
+      'agregado, porque um check que devolve `no_data` para sempre fixaria o ' +
+      'agregado em `degraded` e o status pararia de carregar informacao. ' +
+      'Continuam em `total` e no calculo de frescor: estao registrados e ' +
+      'escrevendo linha por ciclo. Sao publicados aqui, e nao omitidos, ' +
+      'porque ponto cego que some do payload se le como tudo bem. O motivo de ' +
+      'cada um esta no `detail.summary` do proprio check.',
+  })
+  blindSpots!: string[];
+
+  @ApiProperty({
+    type: [String],
+    description:
       'Checks registrados que nunca gravaram veredito nenhum. Nao aparecem em ' +
       '`total` nem em `counts` porque nao existe linha deles — e ausencia se le ' +
       'como tudo bem. Mesma forma do proprio check `plan.orphan_instance`: ' +
@@ -215,6 +230,17 @@ export class HealthCheckViewDto {
       'linha alem da primeira e velha por definicao.',
   })
   stale!: boolean;
+
+  @ApiProperty({
+    description:
+      'True quando este check NAO CONSEGUE medir, por decisao registrada — a ' +
+      'fonte que responderia a pergunta nao existe em lugar nenhum que este ' +
+      'sistema alcance. E um `no_data` permanente, nao a janela vazia de um ' +
+      'ciclo: as duas coisas tem a mesma cara em `status`, e so esta flag as ' +
+      'separa sem ler a prosa do `detail.summary`. Os mesmos checks aparecem ' +
+      'em `blindSpots`, no resumo.',
+  })
+  blindSpot!: boolean;
 
   @ApiProperty({
     description: 'ISO-8601. Carimbado pelo banco, nunca pelo container da API.',

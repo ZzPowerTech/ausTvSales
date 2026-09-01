@@ -5,7 +5,7 @@ import type {
 import { decideAlerts } from './alert-policy';
 import { ConfigService } from '@nestjs/config';
 
-import type { NetworkArrivals, PlanDatabase } from './plan-database';
+import type { RegisteredPlayers, PlanDatabase } from './plan-database';
 import { ProxyRegistrationAliveCheck } from './proxy-registration-alive.check';
 
 const NOW = 1_787_500_000_000;
@@ -17,9 +17,9 @@ function config(values: Record<string, unknown> = {}): ConfigService {
   } as unknown as ConfigService;
 }
 
-function dbReturning(arrivals: NetworkArrivals): PlanDatabase {
+function dbReturning(arrivals: RegisteredPlayers): PlanDatabase {
   return {
-    networkArrivals: jest.fn(() => Promise.resolve(arrivals)),
+    registeredPlayers: jest.fn(() => Promise.resolve(arrivals)),
   } as unknown as PlanDatabase;
 }
 
@@ -102,7 +102,7 @@ describe('ProxyRegistrationAliveCheck', () => {
     });
   });
 
-  describe('rede muda', () => {
+  describe('registro mudo', () => {
     it('breaches after the configured silence', async () => {
       const [result] = await new ProxyRegistrationAliveCheck(
         dbReturning({ total: 5566, lastRegisteredAt: NOW - 30 * HOUR }),
@@ -112,11 +112,19 @@ describe('ProxyRegistrationAliveCheck', () => {
       expect(result.status).toBe('breached');
       expect(result.detail.observed).toBe(30);
       expect(result.detail.threshold).toBe(24);
-      expect(result.detail.summary).toContain('coleta do proxy');
+      expect(result.detail.summary).toContain('coleta do Survival');
+      // And says what it is NOT covering. `plan_users` holds the Survival in
+      // this installation (measured 2026-08-31), so a summary that blamed the
+      // proxy would send whoever is on call to the wrong system.
+      expect(result.detail.summary).toContain('NAO cobre o proxy');
     });
 
-    it('catches the three-month outage this check exists for', async () => {
-      // May to August 2026: the proxy stopped collecting and nobody noticed.
+    it('catches a three-month silence, though not the one it was built for', async () => {
+      // The outage on record is the *proxy* collecting nothing from May to
+      // August 2026. This check cannot see that one: `plan_users` is the
+      // Survival, which kept registering 106 players in 2026-06 while the
+      // verified table shows the proxy dead. What it does catch is the same
+      // shape of silence on the Survival — real, and worth catching.
       const [result] = await new ProxyRegistrationAliveCheck(
         dbReturning({ total: 5566, lastRegisteredAt: NOW - 90 * 24 * HOUR }),
         config(),
@@ -218,7 +226,7 @@ describe('ProxyRegistrationAliveCheck', () => {
   describe('falha de banco', () => {
     it('turns an unreachable database into an error verdict', async () => {
       const db = {
-        networkArrivals: jest.fn(() =>
+        registeredPlayers: jest.fn(() =>
           Promise.reject(new Error('ECONNREFUSED')),
         ),
       } as unknown as PlanDatabase;
@@ -234,7 +242,7 @@ describe('ProxyRegistrationAliveCheck', () => {
 
     it('never degrades a failure into a passing verdict', async () => {
       const db = {
-        networkArrivals: jest.fn(() => Promise.reject(new Error('negado'))),
+        registeredPlayers: jest.fn(() => Promise.reject(new Error('negado'))),
       } as unknown as PlanDatabase;
 
       const [result] = await new ProxyRegistrationAliveCheck(

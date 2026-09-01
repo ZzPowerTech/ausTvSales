@@ -30,15 +30,29 @@ interface RawServerRow extends RowDataPacket {
 }
 
 /**
- * Network-wide arrivals, from `plan_users`.
+ * Rows of `plan_users`, counted.
  *
- * `plan_users` is the network identity table: one row per player who ever
- * touched the network, created by whichever instance saw them first — in
- * practice the proxy. It is the only place the top of the funnel exists, because
- * the proxy records **users** while the backends record **sessions** (spec §2),
- * so every session-derived endpoint is structurally empty for the proxy.
+ * `plan_users` is Plan's identity table: one row per player the installation
+ * ever registered, created by whichever instance saw them first. The proxy
+ * records **users** while the backends record **sessions** (spec §2), so every
+ * session-derived endpoint is structurally empty for the proxy and this table is
+ * the only path to a registration count at all.
+ *
+ * ## ⚠️ In this installation these are **Survival** players, not the network
+ *
+ * Measured 2026-08-31, and it inverts what this file used to claim. The proxy
+ * (`AusTv`, `is_proxy = 1`) sits in the `plan_servers` catalogue with **zero**
+ * players in `plan_user_info`; `Survival` is the only server that appears there,
+ * with 5575 of the 5638 rows; and the monthly counts of this table are, to the
+ * row, the `survival` column of the verified table in `HANDOFF.md` — 682, 641,
+ * 727, 374, 258, 192, 1, 106 — while its `rede` column is roughly double. The
+ * network's population is in the **old** database.
+ *
+ * The type is named for the table rather than for either population, so a caller
+ * has to decide what it is measuring instead of inheriting the answer from a
+ * field name. Callers that need the distinction say so in their own docs.
  */
-export interface NetworkArrivals {
+export interface RegisteredPlayers {
   /**
    * Rows counted, scoped to the window when one was given. **Null means the
    * count could not be read**, which is not the same as zero.
@@ -65,13 +79,16 @@ interface RawArrivalsRow extends RowDataPacket {
 }
 
 /**
- * One network arrival, as the funnel needs it.
+ * One row of `plan_users`, as the funnel needs it.
  *
  * The uuid exists only to be handed to `platformOf` (ADR-003) and dropped. It is
  * never persisted and never leaves the aggregation — spec §8 keeps player
  * identity out of this database.
+ *
+ * Which population these rows are is {@link RegisteredPlayers}' problem, and it
+ * is not the one the name used to claim.
  */
-export interface NetworkArrival {
+export interface RegisteredPlayer {
   uuid: string;
   /** `plan_users.registered`, epoch ms. */
   registeredAt: number;
@@ -162,8 +179,7 @@ export class PlanDatabase implements OnModuleInit, OnModuleDestroy {
     if (!this.configured) {
       this.logger.warn(
         'PLAN_DB_HOST nao configurado — os checks que dependem do banco do Plan ' +
-          '(orphan_instance, version_divergence, proxy_registration_alive e o ' +
-          'denominador de network_to_survival) vao ' +
+          '(orphan_instance, version_divergence e proxy_registration_alive) vao ' +
           'reportar `error`, nunca `ok`.',
       );
       return;
@@ -236,7 +252,10 @@ export class PlanDatabase implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Arrivals on the network, optionally windowed by registration time.
+   * Registrations in `plan_users`, optionally windowed by registration time.
+   *
+   * Renamed from `networkArrivals` on 2026-08-31: these are Survival players in
+   * this installation, not the network's. See {@link RegisteredPlayers}.
    *
    * @param since epoch ms; when given, only rows registered at or after it are
    *   counted. `lastRegisteredAt` is always the **overall** maximum, unwindowed,
@@ -246,7 +265,7 @@ export class PlanDatabase implements OnModuleInit, OnModuleDestroy {
    * @throws when the database is unreachable. Never smoothed into a zero — a
    *   count of zero and a failed query mean opposite things to every caller.
    */
-  async networkArrivals(since?: number): Promise<NetworkArrivals> {
+  async registeredPlayers(since?: number): Promise<RegisteredPlayers> {
     if (!this.pool) {
       throw new Error(
         'PLAN_DB_HOST nao configurado — sem conexao com o banco do Plan',
@@ -272,7 +291,12 @@ export class PlanDatabase implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Every network arrival in a window, as `(uuid, registered)` pairs.
+   * Every `plan_users` row in a window, as `(uuid, registered)` pairs.
+   *
+   * Renamed from `networkArrivalsBetween` on 2026-08-31, with the population it
+   * describes. The funnel fed these rows to its **network** step for two
+   * sprints; they are the Survival, and the conversion derived from them was
+   * Survival ÷ Survival. See {@link RegisteredPlayers}.
    *
    * ## ⚠️ This reads a third column, and that is an extension of exception 2
    *
@@ -285,8 +309,13 @@ export class PlanDatabase implements OnModuleInit, OnModuleDestroy {
    *   design, because deriving it any other way would need a plugin.
    *
    * So a funnel that honours §6.2 has to read the uuid. The alternative is
-   * shipping the network step without platform segmentation, which fails
+   * shipping the step this feeds without platform segmentation, which fails
    * criterion 2 of story S8.1.
+   *
+   * Which step that is changed on 2026-08-31 and the widening did not: these
+   * rows fed **`rede`** when the exception was extended and feed **`survival`**
+   * now, because `plan_users` was measured to hold the Survival. Same table,
+   * same three columns, same read-only grant.
    *
    * **What this is not:** a new table. `plan_users` was already opened by the
    * same approval, the access stays `SELECT`-only on the same read-only user,
@@ -318,22 +347,25 @@ export class PlanDatabase implements OnModuleInit, OnModuleDestroy {
    *
    * ## The number this exists to stop being invented
    *
-   * `plan_users` may not hold the network's whole history. The belief on
-   * record is that the proxy's rows did not come across in the 2026-08-20
-   * unification, leaving the network metric shallow — but that belief was
-   * **inferred, never measured**, and this very method is what measures it.
-   * Whatever it returns is the answer; the paragraph above is only why the
-   * question matters.
+   * ✅ **Measured on 2026-08-31, and the answer was not the one on record.** The
+   * belief was that the proxy's rows did not come across in the 2026-08-20
+   * unification, leaving the metric shallow. This method says **2024-06-02** —
+   * 26 months. The table is not shallow; what it does not hold is the proxy's
+   * population **at all**, which is a different problem and the one the funnel's
+   * `rede` step now reports as `null`.
    *
-   * A query for March 2026 therefore **succeeds and returns nothing**, and a
-   * caller that reads "the source answered, so an empty bucket is a measured
-   * zero" would publish `rede: 0` for a month when thousands of people
-   * connected. Beside a tutorial step whose ETL reads plugin files going back to
-   * 2025, that renders a funnel where more people enter the tutorial than reach
-   * the network.
+   * **The guard stays, and depth is not why.** A window can still start before
+   * the first row, and the monthly grain still has to refuse a month it covers
+   * only part of. A caller that reads "the source answered, so an empty bucket
+   * is a measured zero" would publish `survival: 0` for a month when hundreds of
+   * people arrived. Beside a tutorial step whose ETL reads plugin files going
+   * back to 2025, that renders a funnel where more people enter the tutorial
+   * than reach the server.
    *
    * This is the exact defect the epic exists to prevent, so the coverage floor
-   * is a first-class question the funnel must ask before trusting a zero.
+   * is a first-class question the funnel must ask before trusting a zero — at
+   * any depth, which is the part the old wording tied to a belief that has since
+   * been falsified.
    */
   async earliestArrivalAt(): Promise<number | null> {
     if (!this.pool) {
@@ -349,10 +381,10 @@ export class PlanDatabase implements OnModuleInit, OnModuleDestroy {
     return toNumber(rows[0]?.earliest);
   }
 
-  async networkArrivalsBetween(
+  async registeredPlayersBetween(
     from: number,
     to: number,
-  ): Promise<NetworkArrival[]> {
+  ): Promise<RegisteredPlayer[]> {
     if (!this.pool) {
       throw new Error(
         'PLAN_DB_HOST nao configurado — sem conexao com o banco do Plan',
@@ -370,7 +402,7 @@ export class PlanDatabase implements OnModuleInit, OnModuleDestroy {
         uuid: row.uuid,
         registeredAt: toNumber(row.registered),
       }))
-      .filter((row): row is NetworkArrival => row.registeredAt !== null);
+      .filter((row): row is RegisteredPlayer => row.registeredAt !== null);
   }
 }
 

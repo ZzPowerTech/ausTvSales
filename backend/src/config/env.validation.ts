@@ -371,21 +371,34 @@ export class EnvironmentVariables {
   @Max(720)
   PROXY_REGISTRATION_MAX_SILENCE_HOURS?: number;
 
-  // Piso da conversao rede -> servidor, de 0 a 1. Historicamente ~0,46 (54% de
-  // quem conecta na rede nunca chega ao survival). PRECISA de calibracao: 0.3 e
-  // margem conservadora abaixo do historico, nao uma medida.
+  // ⚠️ INERTE desde 2026-08-31, e mantida de proposito.
   //
-  // A janela e fixa em 7 dias e NAO e configuravel: o Plan so oferece
-  // `last_7_days` neste endpoint, e uma janela ajustavel deixaria alguem
-  // comparar numerador de 30 dias com denominador de 7.
+  // `funnel.network_to_survival` nao calcula mais razao nenhuma: o denominador
+  // (`plan_users`) e a mesma populacao do numerador (`serverOverview` do
+  // Survival), medido no dia. Nenhum codigo le esta variavel hoje.
+  //
+  // Ela fica aqui para documentar o caminho de volta: quando existir fonte de
+  // chegadas no proxy, o check volta e este limiar volta a valer com ele — e
+  // continua PRECISANDO de calibracao, porque 0.3 e margem conservadora abaixo
+  // do historico (~0,46) e nunca foi medida. Apagar a chave agora significaria
+  // reescrever essa decisao do zero depois, sem o registro de que 0.3 era chute.
+  //
+  // ⚠️ O que NAO e motivo, e chegou a estar escrito aqui: "remover quebraria um
+  // deploy existente". Nao quebraria. O `validateEnv`, no fim deste arquivo,
+  // chama `validateSync` sem `whitelist` e sem `forbidNonWhitelisted`, entao
+  // variavel de ambiente sem campo declarado e simplesmente ignorada, nunca
+  // erro de boot. Fica registrado porque a afirmacao era checavel em trinta
+  // segundos, doze linhas abaixo, e mesmo assim passou.
   @IsOptional()
   @IsNumber()
   @Min(0)
   @Max(1)
   FUNNEL_MIN_NETWORK_TO_SERVER?: number;
 
-  // Abaixo desta quantidade de chegadas de rede na janela, nenhuma conversao e
-  // publicada — razao sobre amostra pequena e ruido lido como tendencia.
+  // Abaixo desta quantidade de chegadas na janela, nenhuma razao e publicada —
+  // razao sobre amostra pequena e ruido lido como tendencia. Lida hoje pelo
+  // `funnel.tutorial_entry_rate`; era compartilhada com o
+  // `funnel.network_to_survival` ate ele parar de publicar razao.
   @IsOptional()
   @IsInt()
   @Min(1)

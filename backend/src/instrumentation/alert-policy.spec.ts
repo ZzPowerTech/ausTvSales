@@ -324,7 +324,9 @@ describe('decideAlerts', () => {
     });
 
     it('separa recuperacao real de sinal perdido no mesmo ciclo', () => {
-      const back = observation(HealthCheckName.NetworkToSurvival, 'ok');
+      // Any check that is NOT an accepted blind spot: those are suppressed
+      // before the routing rules this test is about ever run.
+      const back = observation(HealthCheckName.ProxyRegistrationAlive, 'ok');
       const gone = observation(HealthCheckName.OrphanInstance, 'no_data');
 
       const decision = decide({
@@ -857,6 +859,120 @@ describe('decideAlerts', () => {
     });
   });
 
+  describe('ponto cego aceito', () => {
+    /**
+     * The scoped name of the one check in `ACCEPTED_BLIND_SPOTS`.
+     *
+     * `funnel.network_to_survival` returns `no_data` on every cycle and can
+     * never return `ok`, because the source for its denominator does not exist.
+     * Every rule below this line assumes a non-`ok` state eventually clears.
+     */
+    const BLIND = `${HealthCheckName.NetworkToSurvival}:Survival`;
+
+    it('nao alerta com o canal limpo', () => {
+      const decision = decide({
+        observations: [observation(BLIND, 'no_data')],
+      });
+
+      expect(decision.announce).toEqual([]);
+      expect(decision.lostSignal).toEqual([]);
+      expect(decision.suppressed[0].reason).toBe('accepted_blind_spot');
+    });
+
+    it('nao alerta com um `breached` aberto — piora nao fura a janela', () => {
+      // Without the guard: SEVERITY['no_data'] (2) > SEVERITY['breached'] (1),
+      // so this took the "the problem got worse, never waits" path and was
+      // delivered immediately.
+      const decision = decide({
+        observations: [observation(BLIND, 'no_data')],
+        lastAlert: told(BLIND, 'breached', 1),
+      });
+
+      expect(decision.lostSignal).toEqual([]);
+      expect(decision.announce).toEqual([]);
+      expect(decision.suppressed[0].reason).toBe('accepted_blind_spot');
+    });
+
+    it('nao alerta com um `error` aberto e a janela de re-alerta vencida', () => {
+      // The forever-loop this guard exists for. With an open `error`, equal or
+      // lesser severity fell through to `repeat`, which delivers as soon as
+      // `reAlertAfterMs` has passed — and then again every window, for as long
+      // as the process runs, because the exit is an `ok` record that this check
+      // can no longer produce.
+      const decision = decide({
+        observations: [observation(BLIND, 'no_data')],
+        lastAlert: told(BLIND, 'error', 48),
+      });
+
+      expect(decision.lostSignal).toEqual([]);
+      expect(decision.suppressed[0].reason).toBe('accepted_blind_spot');
+    });
+
+    it('nao gasta orcamento nem emite o aviso cinza de mute', () => {
+      // A muted check still emits the grey "vai ficar quieto" notice once per
+      // window, which for a permanent blind spot would be the same daily
+      // message wearing a different colour.
+      const decision = decide({
+        observations: [observation(BLIND, 'no_data')],
+        lastAlert: told(BLIND, 'error', 48),
+        alertsInWindow: heard(BLIND, { no_data: MAX_PER_WINDOW }),
+      });
+
+      expect(decision.flapping).toEqual([]);
+      expect(decision.suppressed[0].reason).toBe('accepted_blind_spot');
+    });
+
+    it('ANUNCIA um `breached` vindo de um ponto cego', () => {
+      // The guard buys silence for the verdict the check was accepted for, and
+      // for nothing else. A member of the set that starts failing for real is a
+      // member that no longer belongs in it, and the alert is how that surfaces.
+      // Suppressing by name alone would have turned this mechanism into a way
+      // to hide an unbounded outage — a channel going mute about something
+      // real, which is the outcome this layer exists to prevent.
+      const decision = decide({
+        observations: [observation(BLIND, 'breached')],
+      });
+
+      expect(decision.announce.map((r) => r.checkName)).toEqual([BLIND]);
+      expect(decision.suppressed).toEqual([]);
+    });
+
+    it('ANUNCIA um `error` vindo de um ponto cego', () => {
+      const decision = decide({
+        observations: [observation(BLIND, 'error')],
+      });
+
+      expect(decision.announce.map((r) => r.checkName)).toEqual([BLIND]);
+    });
+
+    it('deixa um `ok` de ponto cego seguir as regras de recuperacao', () => {
+      // An `ok` here means the check started measuring again — the set's
+      // membership is stale and the channel should hear the all-clear it is
+      // owed, not be told to keep believing a failure that ended.
+      const decision = decide({
+        observations: [observation(BLIND, 'ok')],
+        lastAlert: told(BLIND, 'breached', 3),
+        healthyStreak: confirmed(BLIND),
+      });
+
+      expect(decision.recovered.map((r) => r.checkName)).toEqual([BLIND]);
+    });
+
+    it('nao silencia os outros checks do mesmo lote', () => {
+      // The guard is per record. A blind spot must not become a way to lose a
+      // real failure that happened to be evaluated in the same cycle.
+      const outro = `${HealthCheckName.CollectionAlive}:Survival`;
+      const decision = decide({
+        observations: [
+          observation(BLIND, 'no_data'),
+          observation(outro, 'breached'),
+        ],
+      });
+
+      expect(decision.announce.map((r) => r.checkName)).toEqual([outro]);
+    });
+  });
+
   describe('lote misto', () => {
     it('separa anuncio, recuperacao e supressao numa unica decisao', () => {
       const failing = observation(HealthCheckName.CollectionAlive, 'breached');
@@ -865,7 +981,8 @@ describe('decideAlerts', () => {
         HealthCheckName.VersionDivergence,
         'breached',
       );
-      const healthy = observation(HealthCheckName.NetworkToSurvival, 'ok');
+      // Not an accepted blind spot — see the note in the recovery test above.
+      const healthy = observation(HealthCheckName.OfflineAccountShare, 'ok');
 
       const decision = decide({
         observations: [failing, recovering, grouped, healthy],

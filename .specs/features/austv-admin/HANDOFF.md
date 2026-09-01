@@ -480,21 +480,62 @@ as duas contagens acima não distinguem essas leituras. Ver o bloco abaixo.
 > mês cai de um lado ou do outro. É o comportamento correto, e confirma que o funil lê
 > exatamente esta tabela e nada mais.
 >
-> #### O que isso quebra
+> #### O que isso quebra — ✅ os dois primeiros corrigidos em 2026-08-31
 >
-> **1. O degrau `rede` do funil não mede rede.** Mede o Survival, com outro nome. A
-> conversão rede→survival calculada dele é Survival ÷ Survival.
+> **1. ~~O degrau `rede` do funil não mede rede.~~ Corrigido.** Media o Survival, com outro
+> nome. O degrau `rede` passou a sair `null` com o motivo por escrito, e **a mesma contagem
+> passou a alimentar o degrau `survival`** — que até então saía `null` por falta de fonte. Os
+> dois trocaram de lugar; nenhuma contagem mudou. A conversão `rede → survival`, que era
+> Survival ÷ Survival, agora sai `null` com motivo em vez de perto de 100%.
 >
-> **2. O check `funnel.network_to_survival` está estruturalmente cego.** Ele divide os
-> novatos do Survival (via `/v1/serverOverview`) pelas chegadas de `plan_users` — que são
-> a mesma população. O check foi construído para ver a conversão de rede cair, e não pode:
-> numerador e denominador se movem juntos. Ele vem reportando `ok`, e reportaria `ok` com a
-> rede inteira desaparecida.
+> A ressalva viaja no payload (`sources[].provenance`), não só em docblock: a tabela é
+> `plan_users`, e a identidade Survival dela é **coincidência medida, não garantia de schema**.
+> Se o proxy algum dia registrar nela, a série volta a ser de rede e o rótulo `survival`
+> passaria a **superestimar** — em silêncio. É o custo assumido de publicar os 26 meses em vez
+> de descartá-los, e é a mesma escolha já feita para as coortes da S8.2.
+>
+> A ponte `rede → tutorial_entrou` saiu junto: ela existia para pular por cima de um `survival`
+> sem fonte, e `survival` agora é adjacente a `tutorial_entrou`.
+>
+> **2. ~~O check `funnel.network_to_survival` está estruturalmente cego.~~ Corrigido — no
+> sentido de parar de mentir, não de voltar a medir.** Ele dividia os novatos do Survival (via
+> `/v1/serverOverview`) pelas chegadas de `plan_users`, a mesma população; numerador e
+> denominador se moviam juntos, então o `ok` que reportava era propriedade da aritmética e não
+> medição. Passou a devolver **`no_data` por backend, todo ciclo, com o motivo por escrito** —
+> sem tocar no banco e sem chamar o Plan, porque não há o que perguntar.
+>
+> `no_data` e não `error` pela regra da §6.1 (*de quem* é o vazio): nada falhou, falta fonte
+> para o denominador — a mesma categoria de `PLAN_SERVERS` em branco. E **não** foi aposentado:
+> tirá-lo do registro deixaria as linhas antigas envelhecerem em `staleChecks` e fixaria o
+> resumo em `down` para sempre.
+>
+> **O que isso custa, dito sem maquiagem:** os ~54% deixaram de ser vigiados. Não é rebaixamento
+> de um sinal — é o reconhecimento de que nunca houve sinal. Restaurar exige contagem de
+> chegadas **no proxy**, que nem a API nem o banco autorizado hoje têm.
+>
+> **3b. Um terceiro rótulo herda o mesmo erro, e continua em aberto.**
+> `plan.proxy_registration_alive` lê `plan_users` e por isso **não vigia o proxy**: no apagão de
+> maio a agosto/2026 que lhe deu origem, a tabela acima mostra o proxy morto e o Survival
+> registrando 106 jogadores em jun/2026 — o silêncio teria ficado em zero hora. O que ele vigia
+> é real (registro parando no Survival), então continua rodando, e os sumários passaram a dizer
+> Survival e a dizer que não cobrem o proxy. **O identificador não foi renomeado:** a string é
+> persistida e é a chave do histórico do check, e renomear partiria a série e zeraria a memória
+> da política de alerta. Renomear ou não é decisão do dono.
+>
+> O `platform.offline_account_share` foi auditado no mesmo dia e **está correto** — consulta
+> `/v1/playersTable?server=<backend>`, escopado por servidor, e já diz o servidor no `context`.
 >
 > **3. Os ~54% rede→survival do DoD da S8 não saem desta base.** Não por falta de
 > profundidade — isso foi medido e é falso, são 26 meses — mas porque **a população da
 > rede não está neste banco**. Está no antigo, que é de onde a coluna `rede` desta tabela
 > veio. Isso agora é medição, não suposição.
+>
+> **3c. E um ganho que ninguém esperava desta correção.** A segunda metade do DoD da S8 —
+> *"~100% de entrada no tutorial antes de dez/2025"* — é `tutorial ÷ survival`, não
+> `tutorial ÷ rede`. Com `plan_users` alimentando o degrau `survival`, esse é agora um **par
+> consecutivo** publicado pelo endpoint: nov/2025 dá `694 / 682 = 101,8%`. Estava marcado como
+> bloqueado por um payload que ninguém observou, e o bloqueio não existia. **Calculável;
+> ainda não rodado contra produção** — é o mesmo passo em aberto da S6.2b e da S6.3.
 >
 > **4. A S8.2 continua viável, com o rótulo corrigido.** O `/v1/retention` serve a mesma
 > população, então as coortes que ela vai calcular são **coortes de jogadores do
@@ -512,6 +553,74 @@ as duas contagens acima não distinguem essas leituras. Ver o bloco abaixo.
 > O que faltava não era mais rigor na verificação: era a frase dizer **qual** era o
 > problema. "Falta a população do proxy" teria sido checável em uma consulta desde o
 > primeiro dia.
+
+---
+
+## ✅ Validação contra produção em 2026-09-01 — o que ela confirmou, e o que ela **não** pôde tocar
+
+Quatro endpoints do Plan de produção (`198.89.99.70:25504`), lidos direto, sem autenticação
+(`authRequired: false` segue valendo). É a **segunda fonte independente** que a lição de método
+deste documento exige: a medição de 2026-08-31 foi feita por SQL em `plan_user_info`; esta foi
+feita pela API HTTP, que é outro caminho para a mesma pergunta.
+
+### ✅ A premissa central do PR #180 está confirmada
+
+| consulta | resultado |
+|---|---|
+| `/v1/playersTable?server=AusTv` (proxy) | **`players: 0`** |
+| `/v1/playersTable?server=Survival` | `players: 2500` — número redondo, quase certamente o teto do endpoint, **não** uma contagem; o SQL de 31/08 deu 5575 |
+| `/v1/graph?type=uniqueAndNew&server=AusTv` | `uniquePlayers: []`, `newPlayers: []` |
+| `/v1/graph?type=uniqueAndNew&server=Survival` | `newPlayers`: lista de **181** pontos |
+| `/v1/networkMetadata` | dois servidores: `AusTv` (`proxy: true`), `Survival` (`proxy: false`) — e **sem `plan_version`**, confirmando que a exceção 2 fica de pé para o `version_divergence` |
+| `/v1/serverOverview?server=Survival` | `last_7_days.new_players: 28` |
+
+**O proxy não tem jogador nenhum nesta instalação do Plan, por duas fontes independentes.** É a
+base de tudo que o PR #180 decidiu, e agora está cruzada.
+
+### ✅ O caminho de volta ficou mais estreito, e isso é resultado
+
+O `network_to_survival` só volta a medir com uma contagem de chegadas **no proxy**. Os três
+candidatos nomeados eram o banco antigo, o `/v1/networkMetadata` e o `/v1/playersTable`. **Os dois
+últimos foram lidos e não têm essa população.** Sobra o banco antigo — que passa a ser o único
+candidato, não mais "um dos três".
+
+### ⚠️ Um fato registrado em 2026-08-23 derivou, e a forma nova é a pior
+
+Estava escrito que `serverOverview` do proxy vem com **`numbers: {}`**. Hoje vem com **14 campos**,
+com todo o que é derivado de sessão em **zero** — `sessions: 0`, `total_players: 0`, `playtime: 0`,
+`player_kills: 0` — ao lado dos que são nativos do proxy e são reais (`online_players: 19`,
+`best_peak_players: "37"`, `current_uptime`). E `last_7_days.new_players` do proxy é **`0`**.
+
+A substância segue: métrica de sessão é estruturalmente vazia num proxy. **A forma piorou.** Campo
+ausente é obviamente ausente; `0` é um número, e este épico existe porque lacuna de coleta lida
+como zero ficou invisível por meses. Hoje **nada consome isso** — todo check itera
+`PlanServersConfig.backends()`, que exclui o proxy, e essa classe existe exatamente para isso —,
+mas `serverOverview?server=<proxy>` é uma fonte viva de zeros plausíveis.
+
+### ⚠️ E o bloqueio do `/v1/graph` caiu: o payload **foi observado**
+
+O spec, o plano de sprints e o código diziam que *"ninguém observou o payload de
+`/v1/graph?type=uniqueAndNew`"*, e isso sustentava a alegação de que o degrau `survival` não tinha
+série diária. Foi observado agora: `{timestamp, timestamp_f, uniquePlayers, newPlayers, colors}`,
+com `newPlayers` em 181 pontos para o Survival. Não muda o que o funil publica — desde 2026-08-31 o
+degrau `survival` sai de `plan_users` —, mas **o bloqueio citado deixou de existir** e não deve
+seguir sendo repetido como se existisse.
+
+### ❌ O que esta validação NÃO conseguiu tocar, e é a maior parte
+
+**As cinco commits do PR #180 não estão em produção.** O `origin/main` está em `dc4dfaa`, anterior a
+todas elas. A API admin implantada roda o código **antigo**, então:
+
+- `/api/funnel/monthly` de produção ainda publica o degrau `rede` com números (o defeito), e
+  `survival: null`. Consultá-la valida o bug, não a correção;
+- o par `survival → tutorial_entrou` de nov/2025 — os **`694 / 682 = 101,8%`** — **não existe** no
+  código implantado. Segue calculável e **não calculado**;
+- `blindSpots`, a flag `blindSpot` e o `pontos_cegos=` no log de ciclo não existem em produção;
+- o caminho **`error`** do critério 4 da S6.3 — derrubar uma fonte de propósito — continua sem teste.
+
+**Validar o comportamento novo exige implantar a branch**, o que é outra ação e depende de merge.
+Enquanto isso não acontece, o estado honesto é: **premissas confirmadas contra produção,
+comportamento não.**
 
 ---
 

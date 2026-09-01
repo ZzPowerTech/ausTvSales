@@ -1,227 +1,128 @@
 import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import type { HealthCheck } from './health-check.contract';
 import type { HealthCheckObservation } from './health-check.store';
 import { HealthCheckName, scopedCheckName } from './health-check.types';
-import { PlanApiClient } from './plan-api.client';
-import { PlanApiError } from './plan-api.errors';
-import { PlanDatabase } from './plan-database';
-import { parseServerOverview } from './plan-server-overview';
-import { PlanServersConfig, type PlanServer } from './plan-servers.config';
+import { PlanServersConfig } from './plan-servers.config';
 
 /**
- * Pinned to 7 days, not configurable, and that is a constraint rather than a
- * shortcut — see the class doc.
+ * Why this check publishes no ratio, and has not been able to since it shipped.
+ *
+ * Long, and deliberately so: it is the only thing this check emits, it lands in
+ * `/health/instrumentation` where somebody has to act on it, and the shortest
+ * honest version of it is still a paragraph.
  */
-const WINDOW_DAYS = 7;
-const MS_PER_DAY = 86_400_000;
-
-const DEFAULT_MIN_CONVERSION = 0.3;
-/** Below this many network arrivals the ratio is noise, not a measurement. */
-const DEFAULT_MIN_SAMPLE = 20;
+export const RATIO_STRUCTURALLY_BLIND =
+  'Conversao rede->survival sem fonte para o denominador. O numerador ' +
+  '(`serverOverview.last_7_days.new_players`) e do Survival e o denominador ' +
+  'usado ate 2026-08-31 (`plan_users`) e a MESMA populacao: o proxy tem zero ' +
+  'jogadores em `plan_user_info`, e as contagens mensais de `plan_users` batem ' +
+  'linha a linha com a coluna `survival` dos numeros verificados. A razao era ' +
+  'Survival dividido por Survival — numerador e denominador se movendo juntos, ' +
+  'perto de 100%, e incapaz de cair com a rede inteira fora do ar. Este check ' +
+  'reportava `ok` por construcao, e nao por medicao. Enquanto nao existir uma ' +
+  'fonte de chegadas no proxy, `no_data` e a unica resposta honesta.';
 
 /**
  * How many of the people who reach the network reach a backend? (spec §6.2)
  *
- * ## The step nobody was measuring
+ * ## ⚠️ It has never been able to answer that, and now says so
  *
- * The 2026-08-21 investigation found that **54% of everyone who connects to the
- * network never reaches survival** — a funnel step that had never been measured
- * because nothing compared the two sides. Historically the conversion sat around
- * **46%**. This check turns that one-off finding into a continuous signal.
+ * The check was built in story S6.3 to turn the 2026-08-21 finding — **54% of
+ * everyone who connects to the network never reaches survival** — into a
+ * continuous signal. It divided `serverOverview.last_7_days.new_players` by the
+ * `plan_users` count over the same window.
  *
- * ## Two sources, and why
+ * Measured on 2026-08-31: those are the same population. `plan_users` holds the
+ * Survival, not the network. Three facts, one conclusion — the proxy (`AusTv`,
+ * `is_proxy = 1`) is in the `plan_servers` catalogue with **zero** players in
+ * `plan_user_info`; `Survival` is the only server that appears there, with 5575
+ * of the 5638 rows; and the monthly counts of `plan_users` are the `survival`
+ * column of `HANDOFF.md` to the row, while its `rede` column is roughly double.
  *
- * The numerator and denominator live in different places, and neither side can
- * produce both:
+ * So the ratio's two sides moved together. It could not fall, which means the
+ * `ok` it kept reporting was a property of its own arithmetic. **It would have
+ * reported `ok` with the entire network gone** — which is ADR-006's blindness,
+ * inside the layer that exists to detect blindness.
  *
- * - **Network arrivals** come from `plan_users` (ADR-002 exception 2). The proxy
- *   records users, not sessions, so no session-derived endpoint can supply it.
- * - **Backend arrivals** come from `serverOverview.last_7_days.new_players` over
- *   the API, which is the ADR-002 default path.
+ * ## Why `no_data` and not `error`, and not retirement
  *
- * ## Why the window is 7 days and not configurable
+ * `no_data`, because §6.1's rule is *whose* emptiness it is: `error` is for a
+ * source that failed, `no_data` for a window that genuinely came back empty or a
+ * comparison missing a side. Nothing here failed — we do not have a source for
+ * the denominator, the same category as `PLAN_SERVERS` being unconfigured.
  *
- * Plan only offers `last_7_days` on this endpoint. Making the window a setting
- * would let someone configure 30 days and silently compare a 30-day numerator
- * against a 7-day denominator — a ratio that looks fine and means nothing. The
- * constraint belongs to the data source, so it is encoded, not exposed.
+ * **Not retired**, though retiring it was the alternative. Deregistering it
+ * would drop it out of the registry that `InstrumentationHealthService` compares
+ * against, leaving its old rows in the store to age into `staleChecks` and pin
+ * the summary at `down` forever — the opposite of quiet. Kept registered, it
+ * writes a fresh verdict every cycle whose entire content is the reason it
+ * cannot measure. A check saying "não sei" out loud is the point of the layer.
  *
- * **Known imprecision, stated rather than hidden:** Plan's `last_7_days` and this
- * check's `now - 7d` may not align exactly at the boundary. The effect is small
- * on a weekly window and constant across cycles, so trend movement stays
- * meaningful — but the absolute number should not be quoted to the decimal.
+ * ## ⚠️ `no_data` alone was not enough, and this shipped believing it was
+ *
+ * That version said here that "`no_data` never notifies, so the channel is not
+ * paged". **That is true only from a clean slate**, and review caught it before
+ * it ran. Both consumers of a verdict assume a non-`ok` state eventually clears,
+ * and this one never does:
+ *
+ * - `decideAlerts` suppresses a `no_data` as `not_notifiable` only while the
+ *   channel is holding nothing about the check. With any open non-`ok` alert —
+ *   a past `error` from a MySQL blip that never got a confirmed recovery — it
+ *   fell through to `repeat` and delivered once per `reAlertAfterMs`, **forever**,
+ *   because the exit is an `ok` record this check can no longer produce. The
+ *   per-window budget did not contain it either: `no_data` is the only status it
+ *   emits, so every fresh window handed it the free pass.
+ * - `resolveStatus` returns `degraded` while any check is `no_data`, so
+ *   `/health/instrumentation` could never read `ok` again — and, worse, a second
+ *   check going bad no longer moved it.
+ *
+ * The fix is not in this file: this check is a member of
+ * {@link ACCEPTED_BLIND_SPOTS}, which both consumers now consult. That set is
+ * where the reasoning lives, and adding a name to it is a decision with a bar.
+ *
+ * ## What it costs, and what it will take to restore
+ *
+ * The 54% is no longer watched by anything. That is a real loss and not a
+ * downgrade of an existing signal: it was never watched, because this check
+ * could not see it. Restoring it needs a count of arrivals **at the proxy**.
+ *
+ * ✅ **Two of the three candidates were checked against production on
+ * 2026-09-01, and neither has it.** `/v1/networkMetadata` lists the proxy but
+ * carries no player data at all; `/v1/playersTable?server=AusTv` answers with
+ * **zero** players against 2500 for `Survival`. `graph?type=uniqueAndNew` on the
+ * proxy is empty arrays. So the API cannot supply this denominator — measured,
+ * not assumed — and **the old database is the only remaining candidate**.
+ *
+ * When a source exists, the arithmetic below comes back unchanged from git
+ * history: only the denominator was ever wrong.
  */
 @Injectable()
 export class NetworkToSurvivalCheck implements HealthCheck {
   readonly name = HealthCheckName.NetworkToSurvival;
 
-  private readonly minConversion: number;
-  private readonly minSample: number;
+  constructor(private readonly servers: PlanServersConfig) {}
 
-  constructor(
-    private readonly plan: PlanApiClient,
-    private readonly db: PlanDatabase,
-    private readonly servers: PlanServersConfig,
-    config: ConfigService,
-  ) {
-    this.minConversion =
-      config.get<number>('FUNNEL_MIN_NETWORK_TO_SERVER') ??
-      DEFAULT_MIN_CONVERSION;
-    this.minSample =
-      config.get<number>('FUNNEL_MIN_SAMPLE') ?? DEFAULT_MIN_SAMPLE;
-  }
-
-  async run(): Promise<HealthCheckObservation[]> {
-    const backends = this.servers.backends();
-    if (backends.length === 0) {
-      return [];
-    }
-
-    // The denominator is shared, so it is fetched once rather than once per
-    // backend — one query instead of N against the game's database.
-    let networkArrivals: number | null;
-    try {
-      const since = Date.now() - WINDOW_DAYS * MS_PER_DAY;
-      networkArrivals = (await this.db.networkArrivals(since)).total;
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      return backends.map((server) => ({
+  run(): Promise<HealthCheckObservation[]> {
+    // One observation per backend, exactly as when a ratio was published: the
+    // persisted names stay stable, so the history of this check reads as one
+    // series that stopped claiming a number rather than as a check that vanished
+    // and a different one that appeared.
+    //
+    // No database read and no HTTP call. There is nothing to ask — the answer
+    // does not depend on the game machine's state — and asking anyway would make
+    // the Plan pay a request per cycle to produce a constant.
+    return Promise.resolve(
+      this.servers.backends().map((server) => ({
         checkName: scopedCheckName(this.name, server.name),
-        status: 'error' as const,
+        status: 'no_data' as const,
         detail: {
-          summary: `Nao foi possivel ler as chegadas de rede: ${reason}`,
+          summary: RATIO_STRUCTURALLY_BLIND,
+          // No `n`, and that is the rule rather than an omission: the project
+          // forbids a percentage without its base, and this is the same rule at
+          // the limit — with no denominator there is no base to publish either.
           context: { server: server.name },
         },
-      }));
-    }
-
-    if (networkArrivals === null) {
-      // The query answered and the count came back in a shape `toNumber` does
-      // not read. `error`, not a small sample: a denominator that could not be
-      // read is not a denominator of zero, and letting it fall through to the
-      // `< minSample` branch below would file a failed read as "quiet week".
-      return backends.map((server) => ({
-        checkName: scopedCheckName(this.name, server.name),
-        status: 'error' as const,
-        detail: {
-          summary:
-            'A contagem de chegadas de rede veio num formato ilegivel — sem ' +
-            'denominador, nenhuma conversao pode ser calculada',
-          context: { server: server.name },
-        },
-      }));
-    }
-
-    return Promise.all(
-      backends.map((server) => this.evaluate(server, networkArrivals)),
+      })),
     );
-  }
-
-  private async evaluate(
-    server: PlanServer,
-    networkArrivals: number,
-  ): Promise<HealthCheckObservation> {
-    const checkName = scopedCheckName(this.name, server.name);
-    const context = { server: server.name, janela_dias: WINDOW_DAYS };
-
-    if (networkArrivals < this.minSample) {
-      return {
-        checkName,
-        status: 'no_data',
-        detail: {
-          summary:
-            `Apenas ${networkArrivals} chegada(s) de rede em ${WINDOW_DAYS} dias — ` +
-            `abaixo do minimo de ${this.minSample} para publicar uma conversao`,
-          n: networkArrivals,
-          context,
-        },
-      };
-    }
-
-    let body: unknown;
-    try {
-      body = await this.plan.getJson('v1/serverOverview', {
-        server: server.name,
-      });
-    } catch (error) {
-      const reason =
-        error instanceof PlanApiError ? error.message : String(error);
-      return {
-        checkName,
-        status: 'error',
-        detail: {
-          summary: `Nao foi possivel consultar o Plan: ${reason}`,
-          context,
-        },
-      };
-    }
-
-    const parsed = parseServerOverview(body);
-    if (!parsed.ok) {
-      return {
-        checkName,
-        status: 'error',
-        detail: {
-          summary: `Resposta do Plan em formato inesperado: ${parsed.reason}`,
-          context,
-        },
-      };
-    }
-
-    const serverArrivals = parsed.value.last7Days.newPlayers;
-    if (serverArrivals === null) {
-      // Plan reported no measurement for the numerator. Treating that as zero
-      // would publish a 0% conversion — an alarming number invented out of a
-      // gap, which is the failure this epic exists to prevent.
-      return {
-        checkName,
-        status: 'no_data',
-        detail: {
-          summary:
-            'O Plan nao reportou chegadas novas neste servidor — sem numerador ' +
-            'para a conversao',
-          n: networkArrivals,
-          context,
-        },
-      };
-    }
-
-    const conversion = serverArrivals / networkArrivals;
-    const percent = Math.round(conversion * 1000) / 10;
-    const thresholdPercent = Math.round(this.minConversion * 1000) / 10;
-
-    const common = {
-      observed: percent,
-      threshold: thresholdPercent,
-      // The denominator travels with the ratio, always.
-      n: networkArrivals,
-      context: { ...context, chegadas_no_servidor: serverArrivals },
-    };
-
-    if (conversion < this.minConversion) {
-      return {
-        checkName,
-        status: 'breached',
-        detail: {
-          ...common,
-          summary:
-            `${percent}% das ${networkArrivals} chegadas de rede alcancaram ` +
-            `${server.name} em ${WINDOW_DAYS} dias (minimo ${thresholdPercent}%) — ` +
-            'o degrau entre a rede e o servidor piorou',
-        },
-      };
-    }
-
-    return {
-      checkName,
-      status: 'ok',
-      detail: {
-        ...common,
-        summary:
-          `${percent}% das ${networkArrivals} chegadas de rede alcancaram ` +
-          `${server.name} em ${WINDOW_DAYS} dias`,
-      },
-    };
   }
 }

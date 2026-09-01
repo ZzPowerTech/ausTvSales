@@ -62,6 +62,19 @@ export interface HealthCheckRunSummary {
    * value that keeps the channel believing fixed things are broken.
    */
   budgetHeld: number;
+  /**
+   * Verdicts dropped because the check is an accepted blind spot.
+   *
+   * Its own field for the same reason as the two above: inside `suppressed` it
+   * would sit next to every routine `not_notifiable` from a healthy check, which
+   * on a normal cycle is nearly all of them, and the one number worth watching
+   * here — how much of the layer has been switched off — would be unreadable.
+   *
+   * A value that climbs is a value to be suspicious of: `ACCEPTED_BLIND_SPOTS`
+   * is meant to hold checks whose source does not exist, not checks somebody
+   * found noisy.
+   */
+  blindSpotHeld: number;
   /** Checks that hit the message budget and were told the channel went quiet. */
   flapping: number;
   /** Rows whose notification actually reached Discord and were stamped. */
@@ -235,6 +248,9 @@ export class HealthCheckRunner {
       budgetHeld: decision.suppressed.filter(
         (item) => item.reason === 'flapping',
       ).length,
+      blindSpotHeld: decision.suppressed.filter(
+        (item) => item.reason === 'accepted_blind_spot',
+      ).length,
       alerted,
     };
 
@@ -315,6 +331,7 @@ export class HealthCheckRunner {
       `entregues=${summary.alerted}`,
       `recuperacoes_seguradas=${summary.recoveryHeld}`,
       `segurados_por_orcamento=${summary.budgetHeld}`,
+      `pontos_cegos=${summary.blindSpotHeld}`,
       `oscilando=${summary.flapping}`,
     ];
 
@@ -355,6 +372,7 @@ function emptySummary(startedAt: Date, ran: boolean): HealthCheckRunSummary {
     recovered: 0,
     lostSignal: 0,
     flapping: 0,
+    blindSpotHeld: 0,
     suppressed: 0,
     recoveryHeld: 0,
     budgetHeld: 0,

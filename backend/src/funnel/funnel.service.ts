@@ -6,6 +6,7 @@ import { toSaoPauloDay } from '../tutorial/tutorial-day';
 import { buildBucket, toMonth, type RawCounts } from './funnel-math';
 import {
   FunnelGranularity,
+  SURVIVAL_STEP_PROVENANCE,
   type FunnelBucket,
   type PlatformFilter,
 } from './funnel.types';
@@ -79,6 +80,15 @@ export interface FunnelSourceState {
   /** Closed label. Set exactly when `ok` is false. Never an upstream message. */
   failure?: FunnelSourceFailure;
   /**
+   * What this source is actually counting, when that differs from its name.
+   *
+   * Set for `plan_users`, which is the network's identity table but holds only
+   * the Survival in this installation — see `SURVIVAL_STEP_PROVENANCE`. A
+   * consumer rendering the `survival` step has the caveat in the payload rather
+   * than in a docblock it will never open.
+   */
+  provenance?: string;
+  /**
    * First day this source can speak for, `YYYY-MM-DD`.
    *
    * **`null` means it covers nothing**, not that it covers everything — the
@@ -102,14 +112,24 @@ export interface FunnelSourceState {
  *
  * ## Two sources, read independently, failing independently
  *
- * The network step comes from `plan_users` over the game's MySQL (ADR-002
+ * The survival step comes from `plan_users` over the game's MySQL (ADR-002
  * exception 2); both tutorial steps come from `tutorial_daily`, which the S8.0
  * ETL rebuilds nightly. They are read in parallel and **one failing does not
  * take the other down** — a funnel that goes blank because one of two databases
  * blinked would be less useful than one that says which half it still has.
  *
- * The `survival` step has no daily source yet; the reason travels in the
- * payload. See `SURVIVAL_STEP_UNAVAILABLE`.
+ * The `rede` step has no source at all; the reason travels in the payload. See
+ * `NETWORK_STEP_UNAVAILABLE`.
+ *
+ * ## ⚠️ `plan_users` fed the wrong step until 2026-08-31
+ *
+ * It was read as *network* arrivals from story S8.1 onwards. It is the Survival:
+ * the proxy has zero rows in `plan_user_info`, and eight months of monthly
+ * counts match the `survival` column of `HANDOFF.md` to the row. The read is
+ * unchanged — the same query, the same coverage floor, the same platform
+ * derivation — and only the step it feeds moved. What that fixes is not a count
+ * but a **conversion**: `rede → survival` was Survival ÷ Survival, a figure near
+ * 100% that could not have fallen if the entire network had gone dark.
  *
  * ## Bucketing happens here, in America/Sao_Paulo
  *
@@ -171,25 +191,29 @@ export class FunnelService {
 
     const bucketKeys = this.bucketKeys(granularity, fromDay, toDay);
 
-    const [network, tutorial] = await Promise.all([
-      this.networkByBucket(granularity, fromDay, toDay, platform),
+    const [survival, tutorial] = await Promise.all([
+      this.survivalByBucket(granularity, fromDay, toDay, platform),
       this.tutorialByBucket(granularity, fromDay, toDay, platform),
     ]);
 
-    const buckets = bucketKeys.map(
-      (key) =>
-        buildBucket(key, {
-          network: network.countFor(key),
-          // No daily source; the reason is attached by `buildBucket`.
-          survival: null,
-          tutorialEntered:
-            tutorial.enteredByBucket.get(key) ?? tutorial.missing,
-          tutorialCompleted:
-            tutorial.completedByBucket.get(key) ?? tutorial.missing,
-        } satisfies RawCounts),
-      // `network.countFor` decides per bucket, because coverage is per bucket:
+    const buckets = bucketKeys.map((key) => {
+      return buildBucket(key, {
+        // No source for the proxy's population; the reason is attached by
+        // `buildBucket` from `NETWORK_STEP_UNAVAILABLE`.
+        network: null,
+        survival: survival.countFor(key),
+        // No `arrivals === null` guard here any more, and its absence is the
+        // fix: `reasonFor` is a string exactly when `countFor` is null, so the
+        // two cannot disagree and the caller cannot ask in an order that
+        // produces a wrong sentence.
+        survivalUnavailableReason: survival.reasonFor(key) ?? undefined,
+        tutorialEntered: tutorial.enteredByBucket.get(key) ?? tutorial.missing,
+        tutorialCompleted:
+          tutorial.completedByBucket.get(key) ?? tutorial.missing,
+      } satisfies RawCounts);
+      // `survival.countFor` decides per bucket, because coverage is per bucket:
       // the source can answer for this week and know nothing about March.
-    );
+    });
 
     return {
       granularity,
@@ -198,7 +222,7 @@ export class FunnelService {
       to: toDay,
       truncated,
       buckets,
-      sources: [network.state, tutorial.state],
+      sources: [survival.state, tutorial.state],
     };
   }
 
@@ -224,29 +248,36 @@ export class FunnelService {
   }
 
   /**
-   * Network arrivals per bucket, from `plan_users`.
+   * Survival arrivals per bucket, from `plan_users`.
    *
    * `missing` is what an *absent* bucket maps to, and it is the load-bearing
    * detail: when the source answered, a bucket with no arrivals is a measured
    * **0**; when the source failed, it is **null**. Collapsing the two would
    * publish "nobody connected all month" for a database outage.
+   *
+   * Named for the step it feeds, not for the table's own name. `plan_users` is
+   * Plan's *network* identity table — in this installation it holds only the
+   * Survival, measured on 2026-08-31 — and a method called `networkByBucket` is
+   * how this shipped feeding the wrong step for two sprints.
    */
-  private async networkByBucket(
+  private async survivalByBucket(
     granularity: FunnelGranularity,
     fromDay: string,
     toDay: string,
     platform: PlatformFilter,
-  ): Promise<NetworkCounts> {
+  ): Promise<SurvivalCounts> {
     const byBucket = new Map<string, number>();
 
     if (!this.planDb.configured) {
       return {
         countFor: () => null,
+        reasonFor: () => SOURCE_NOT_CONFIGURED,
         state: {
           name: 'plan_users',
           ok: false,
           asOf: null,
           failure: 'not_configured',
+          provenance: SURVIVAL_STEP_PROVENANCE,
         },
       };
     }
@@ -257,7 +288,7 @@ export class FunnelService {
       // measured zero. See the method's own doc.
       const [earliest, arrivals] = await Promise.all([
         this.planDb.earliestArrivalAt(),
-        this.planDb.networkArrivalsBetween(
+        this.planDb.registeredPlayersBetween(
           Date.parse(startOfDay(fromDay)),
           Date.parse(endOfDay(toDay)),
         ),
@@ -291,6 +322,9 @@ export class FunnelService {
             ? firstFullyCoveredMonth(coversFrom)
             : coversFrom;
 
+      const covers = (key: string): boolean =>
+        coversFromKey !== null && key >= coversFromKey;
+
       return {
         countFor: (key) => {
           // Coverage is checked FIRST, before any count is returned — and the
@@ -300,20 +334,40 @@ export class FunnelService {
           // whole-month numerator: the 4500% conversion, on the one bucket in
           // `/funnel/monthly`'s default window that has a number at all.
           //
-          // The proxy's history stayed in the old database at the 2026-08-20
-          // unification, so `plan_users` is only days deep and this is the
-          // common case, not the edge.
-          if (coversFromKey === null || key < coversFromKey) {
+          // Measured on 2026-08-31, `coversFrom` is **2024-06-02** — 26 months,
+          // not the few days an earlier note here asserted. So the uncovered
+          // case is the window's leading edge, not the common case; the guard
+          // stays because a partial bucket is wrong at any depth.
+          if (!covers(key)) {
             return null;
           }
           // Covered. An absent bucket is now a genuine measured zero.
           return byBucket.get(key) ?? 0;
         },
+        reasonFor: (key) =>
+          coversFromKey === null
+            ? SOURCE_COVERS_NOTHING
+            : covers(key)
+              ? // Covered, and the query answered: this bucket HAS a number, so
+                // there is no reason to give. `null` rather than a sentence,
+                // because every sentence available here would be false — the
+                // first version returned "a consulta falhou" and was safe only
+                // because `series()` happened to ask in the right order.
+                // `proxy-registration-alive.check.ts` records what that costs
+                // when the guard is one careless call away: the channel was told
+                // every fifteen minutes that the read had "probably found the
+                // wrong database", about a perfectly healthy Plan.
+                null
+              : `${SOURCE_BEFORE_COVERAGE} O primeiro balde integralmente ` +
+                `coberto e ${coversFromKey}; \`sources[].coversFrom\` traz o dia ` +
+                'em que a fonte de fato comeca, que pode cair dentro de um balde ' +
+                'anterior a este.',
         state: {
           name: 'plan_users',
           ok: true,
           asOf: new Date().toISOString(),
           coversFrom,
+          provenance: SURVIVAL_STEP_PROVENANCE,
         },
       };
     } catch (error) {
@@ -321,17 +375,19 @@ export class FunnelService {
       // to the log; the body gets a closed label (CWE-209, and the decision
       // story S7.2 already made for `MetricsFailureReason`).
       this.logger.warn(
-        `Degrau de rede indisponivel: ${
+        `Degrau de survival indisponivel: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
       return {
         countFor: () => null,
+        reasonFor: () => SOURCE_QUERY_FAILED,
         state: {
           name: 'plan_users',
           ok: false,
           asOf: null,
           failure: 'query_failed',
+          provenance: SURVIVAL_STEP_PROVENANCE,
         },
       };
     }
@@ -477,7 +533,7 @@ export class FunnelService {
   }
 }
 
-interface NetworkCounts {
+interface SurvivalCounts {
   /**
    * The count for one bucket, or null when the source cannot speak for it.
    *
@@ -486,8 +542,52 @@ interface NetworkCounts {
    * knows this week and knows nothing about March.
    */
   countFor(bucketKey: string): number | null;
+  /**
+   * Why that bucket is null, or `null` when it is not.
+   *
+   * Per bucket, and it is not decoration: inside one successful read, "the
+   * source does not reach back this far" and "the query failed" are opposite
+   * diagnoses, and a response-level label would print the wrong one for every
+   * bucket it does not describe.
+   *
+   * **The invariant, and it is the point of returning `null` here:**
+   * `reasonFor(k)` is a string exactly when `countFor(k)` is `null`. The two
+   * are derived from the same `covers` decision, so they cannot disagree, and a
+   * caller that asks in the wrong order gets nothing rather than a wrong
+   * sentence. The previous shape returned "a consulta falhou" for a bucket the
+   * query had answered — unreachable, but only because the one caller checked
+   * the count first.
+   */
+  reasonFor(bucketKey: string): string | null;
   state: FunnelSourceState;
 }
+
+/** Bucket-level reasons. Prose rather than a code, because a person reads it. */
+const SOURCE_NOT_CONFIGURED =
+  'A fonte do Survival (`plan_users`) nao esta configurada nesta instalacao.';
+const SOURCE_QUERY_FAILED =
+  'A consulta a fonte do Survival (`plan_users`) falhou — o detalhe fica no ' +
+  'log, fora do corpo da resposta (CWE-209).';
+const SOURCE_COVERS_NOTHING =
+  '`plan_users` nao tem nenhuma linha, entao a fonte nao cobre periodo nenhum ' +
+  '— o que nao e o mesmo que ninguem ter chegado.';
+/**
+ * ⚠️ The second sentence is appended by the caller, and it exists because the
+ * first version of it said "a cobertura comeca em 2024-07" while
+ * `sources[].coversFrom` in the same response said "2024-06-02".
+ *
+ * Both were true of different grains — first whole *month* against first whole
+ * *day* — and the payload published them side by side under the same word. A
+ * reader debugging "why is June empty?" took the prose at face value, concluded
+ * the data did not exist for June, and stopped, when 28 days of it were there
+ * and only the month **total** was being refused. That is the partial-versus-
+ * complete conflation that produced the 4500% reading twice, surfacing in the
+ * explanation instead of in the arithmetic.
+ */
+const SOURCE_BEFORE_COVERAGE =
+  'Balde anterior ao primeiro que `plan_users` cobre por inteiro: publicar o ' +
+  'total parcial como total do balde e um denominador menor contra um ' +
+  'numerador inteiro.';
 
 /**
  * First **whole** day the source can speak for, given the instant it starts.
