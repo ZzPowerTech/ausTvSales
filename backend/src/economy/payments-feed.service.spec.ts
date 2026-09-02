@@ -130,11 +130,14 @@ describe('PaymentsFeedService', () => {
       // one lived only in a source comment while the feed printed it as fact.
       const report = await service([payment()]).feed();
 
-      // Confirmed on 2026-09-02, and what the check found is worth carrying: the
-      // two ledger rows of one payment swap `source` and `receiver`, so the
-      // column names are only true once the row type is pinned.
-      expect(report.directionCaveat).toContain('CONFIRMADA');
-      expect(report.directionCaveat).toContain('TROCAM as colunas');
+      // Two separate facts, and the payload has to carry both. MEASURED: the two
+      // ledger rows of one payment swap `source` and `receiver`, so the column
+      // names mean nothing until the row type is pinned. STILL INFERRED: which
+      // of the two columns is the payer — the observed pair is a mirror and
+      // survives either reading intact.
+      expect(report.directionCaveat).toContain('MEDIDO');
+      expect(report.directionCaveat).toContain('TROCAM');
+      expect(report.directionCaveat).toContain('CONTINUA INFERIDA');
       expect(report.directionCaveat).toContain('funding_many');
     });
 
@@ -142,7 +145,7 @@ describe('PaymentsFeedService', () => {
       const report = await service([], { last: null }).feed();
 
       expect(report.payments).toBeNull();
-      expect(report.directionCaveat).toContain('TROCAM as colunas');
+      expect(report.directionCaveat).toContain('CONTINUA INFERIDA');
     });
   });
 

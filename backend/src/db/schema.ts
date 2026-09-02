@@ -591,15 +591,22 @@ export const playerDimensionSyncs = pgTable(
  * would silently delete a payment; inventing a surrogate key per run would
  * duplicate every row every night.
  *
- * ## The direction is inferred from the type name and the sign, not observed
+ * ## The columns swap between the two rows — measured. The direction — not.
  *
- * `PAY_RECEIVER` rows carry a positive amount and `PAY_SENDER` rows a negative
- * one, and both have `source` filled — that much is measured. That `receiver`
- * holds the credited account and `source` the counterparty is the natural
- * reading of the schema and **has not been confirmed against a known payment**.
- * Both types are therefore copied verbatim, so a correction later costs a query
- * and not a re-ETL, and the sync record counts each type separately: if the two
- * counts ever diverge, the pairing assumption is wrong and the number says so.
+ * Read against a real payment on 2026-09-02: one transfer produces two rows that
+ * **trade** `source` and `receiver` and negate the amount. So no reading of
+ * those two columns is true for both rows, and `transaction_type` has to be
+ * pinned before either column means anything.
+ *
+ * That pair is a perfect mirror, which is why it settles the layout and **not**
+ * the direction: it is equally consistent with `receiver` being the row's
+ * subject (the reading this system assumes) and with `source` being it, which
+ * would invert every `from`/`to`. A row type with a single real party (`SET`,
+ * `OFFSET`) is what breaks the symmetry, and has not been read yet.
+ *
+ * Both types are copied verbatim, so a correction later costs a query and not a
+ * re-ETL, and the sync record counts each type separately: if the two counts
+ * ever diverge, the pairing assumption is wrong and the number says so.
  */
 export const playerPayments = pgTable(
   'player_payments',
@@ -608,15 +615,18 @@ export const playerPayments = pgTable(
      * `PAY_SENDER` or `PAY_RECEIVER`, verbatim from the source.
      *
      * ⚠️ **Filter on this before reading `source` or `receiver`.** Each transfer
-     * is logged twice and the two rows SWAP those columns — confirmed against a
+     * is logged twice and the two rows SWAP those columns — measured against a
      * real payment on 2026-09-02. A query that ignores the type reads every
      * payment twice, with the two columns meaning opposite things in the two
      * halves of its own result.
      */
     transactionType: text('transaction_type').notNull(),
-    /** Payer on a `PAY_RECEIVER` row; credited account on a `PAY_SENDER` row. */
+    /**
+     * One of the two parties. **Which one flips with `transaction_type`**, and
+     * which way round is the still-unconfirmed direction — see the docblock.
+     */
     source: text('source').notNull(),
-    /** Credited account on a `PAY_RECEIVER` row; payer on a `PAY_SENDER` row. */
+    /** The other party. Same flip, same open question. */
     receiver: text('receiver').notNull(),
     /**
      * Signed amount, in the game's cash unit. Integer in the source.

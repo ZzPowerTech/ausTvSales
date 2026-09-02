@@ -202,9 +202,24 @@ export class SocialService {
    * doubling preserves zero. No published number was wrong. What it was is a
    * loaded gun — the day either count is published as a count, it is 2×.
    *
-   * The filter costs nothing: on the canonical row `source` is the payer and
-   * `receiver` the credited account, so `receiver = P OR source = P` still finds
-   * the newcomer at either end of the payment, from one row instead of two.
+   * The `OR` still reaches both ends from one row, and — usefully — it does so
+   * **without depending on the direction**: it is symmetric in the two columns,
+   * so this metric is correct whichever of the two readings of `source` and
+   * `receiver` turns out to be right.
+   *
+   * ## What the filter does cost
+   *
+   * A payment whose `PAY_RECEIVER` half is missing now disappears from this
+   * metric entirely, and the player is filed under `none` with no warning. The
+   * unfiltered version got that case right, by accident — it counted the
+   * surviving half.
+   *
+   * Not hypothetical by decree: the ETL counts `senderRows` against
+   * `receiverRows` precisely because a broken pairing is the observation that
+   * would falsify the assumption this rests on. Production is 666/666 today, so
+   * the cost is zero today — but it is a real trade, and the honest version is
+   * that it converts a logged condition into a silent one rather than that it is
+   * free.
    */
   private async contactRows(
     fromMonth: string,
