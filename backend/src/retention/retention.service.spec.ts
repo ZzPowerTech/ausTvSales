@@ -168,6 +168,92 @@ describe('RetentionService', () => {
     });
   });
 
+  describe('the artefact is a property of the dataset, not of the window', () => {
+    /**
+     * The production shape of 2026-09-02, minimised.
+     *
+     * 2024-08 and 2024-10 carry cohorts large enough for the implausibility
+     * guard to judge; 2024-09 does not, and every one of its eleven players
+     * survives — the artefact's exact signature over a base too small to accuse.
+     */
+    const payload = [
+      ...Array.from({ length: 25 }, (_, i) =>
+        row(UUID_PREMIUM(i), '2024-08-01', '2026-07-01'),
+      ),
+      ...Array.from({ length: 11 }, (_, i) =>
+        row(UUID_BEDROCK(i), '2024-09-01', '2026-07-01'),
+      ),
+      ...Array.from({ length: 25 }, (_, i) =>
+        row(UUID_PREMIUM(500 + i), '2024-10-01', '2026-07-01'),
+      ),
+    ];
+
+    it('suppresses a small cohort whose evidence lies outside the requested window', async () => {
+      // The regression this pins: cohorts used to be built from the players the
+      // window had already filtered, so a request for the gap month contained no
+      // judgeable cohort at all and published `D30: 100%` over eleven people.
+      const service = new RetentionService(
+        planStub({ getJson: () => Promise.resolve(payload) }),
+        cache(),
+        config(),
+      );
+
+      const report = await service.report('2024-09', '2024-09');
+
+      expect(report.cohorts).toHaveLength(1);
+      expect(report.cohorts[0]).toMatchObject({ size: 11 });
+      expect(
+        report.cohorts[0].measures.map((m) =>
+          m.percent === null ? m.reason : m.percent,
+        ),
+      ).toEqual([
+        'contaminated_span',
+        'contaminated_span',
+        'contaminated_span',
+      ]);
+    });
+
+    it('publishes the span so the evidence is checkable from inside the window', async () => {
+      // A detector that blanks the only cohort in a report has to say what it
+      // decided on, and the months it decided on are not in the response.
+      const service = new RetentionService(
+        planStub({ getJson: () => Promise.resolve(payload) }),
+        cache(),
+        config(),
+      );
+
+      const report = await service.report('2024-09', '2024-09');
+
+      expect(report.contaminatedSpan).toMatchObject({
+        from: '2024-08',
+        to: '2024-10',
+        confirmedMonths: ['2024-08', '2024-10'],
+        confirmedCohorts: 2,
+        inheritedCohorts: 1,
+        inheritedPlayers: 11,
+      });
+    });
+
+    it('omits the span entirely when nothing was proven', async () => {
+      const service = new RetentionService(
+        planStub({
+          getJson: () =>
+            Promise.resolve([
+              ...Array.from({ length: 25 }, (_, i) =>
+                row(UUID_PREMIUM(i), '2024-08-01', '2024-08-02'),
+              ),
+            ]),
+        }),
+        cache(),
+        config(),
+      );
+
+      const report = await service.report('2024-08', '2024-08');
+
+      expect(report.contaminatedSpan).toBeUndefined();
+    });
+  });
+
   describe('the label travels with the number', () => {
     it('publishes the survival-interval semantics on every report', async () => {
       const service = new RetentionService(

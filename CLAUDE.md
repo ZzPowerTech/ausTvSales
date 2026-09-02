@@ -152,13 +152,17 @@ Suíte: **70 suítes, 863 testes** unitários, mais 5 arquivos de e2e novos cont
   nova e justificada por escrito.
 - **A retenção publica INTERVALO DE SOBREVIVÊNCIA, não retorno no dia N**, e o rótulo viaja no
   campo `semantics` de toda resposta. As duas leituras são perguntas diferentes.
-- **A metade de E2 que cruza gasto com posição no funil não foi entregue.** Ela exige posição
-  no tutorial **por jogador**, e o `tutorial_daily` é agregado em `(dia, plataforma)` por decisão
-  registrada da S8.0 — tomada para não trazer identidade de jogador para este banco. Essa decisão
-  está certa para o funil **e é exatamente o que bloqueia esta métrica**. Entregar alarga a
-  superfície de dado pessoal da §8, e o custo de errar é assimétrico: métrica se adiciona na
-  sprint seguinte, dado pessoal gravado não se desgrava. O endpoint publica
-  `byFunnelPosition: null` com o motivo por extenso.
+- **✅ A metade de E2 que cruza gasto com posição no funil foi entregue em 2026-09-02**
+  (PR [#190](https://github.com/ZzPowerTech/ausTvSales/pull/190)), depois de o dono autorizar a
+  expansão de dado pessoal que ela exige. O `tutorial_daily` continua agregado em
+  `(dia, plataforma)` — a decisão da S8.0 não foi revertida; o que entrou foi uma **segunda**
+  tabela, `tutorial_player_position`, atrás de `TUTORIAL_POSITION_ENABLED` e escrita por um
+  caminho separado no ETL (`readPosition`, não `readContribution`), justamente para que a
+  ampliação de pegada fique visível no ponto de chamada. `/economy/first-spend` publica
+  `byFunnelPosition` (três grupos) e `byFurthestStep` (um por passo — é este que responde "quem
+  trava no passo 03"), com denominador igual a **todo mundo naquela posição**, não a quem
+  comprou. **Enquanto a variável não for ligada na VPS o bloco sai `null` com o motivo**, nunca
+  uma lista de zeros.
 - **A direção do pagamento é inferida, não confirmada.** Que `receiver` seja a conta creditada é
   a leitura natural do schema do PlayerPoints e nunca foi conferida contra um pagamento
   conhecido. Se estiver invertida, a marca `funding_many` aponta para quem **recebeu** de muitos.
@@ -169,6 +173,31 @@ não depende mais de nada da S6.
 
 **Em aberto, e vale mais que sprint:**
 
+- **🔴 A primeira calibração de produção da retenção, em 2026-09-02, achou um defeito de
+  mecanismo — não um limiar a ajustar.** A leitura de `2024-06..2025-08` (a região que a janela
+  padrão de 12 meses nunca alcançava, e por isso a leitura anterior **não** tinha exercitado o
+  detector) devolveu **45 coortes**, `5580/5580` linhas lidas sem descarte. O detector de
+  carimbo achou **zero** dias e o artefato está lá assim mesmo: 21 coortes suprimidas por
+  implausibilidade, e das 24 publicadas **23 publicaram 100% em D1, D7 e D30 ao mesmo tempo**.
+  **O que separava os dois grupos não era o dado:** toda suprimida tinha ≥20 jogadores, toda
+  publicada tinha ≤19 — a divisão cai exatamente sobre o piso de tamanho do guarda, que portanto
+  decidiu os 45 casos sozinho.
+  **Corrigido:** veredito herdado por vizinhança (`contaminated_span`). Uma coorte pequena demais
+  para julgar é suprimida quando mostra a mesma forma de ~100% **e** registra dentro do intervalo
+  entre o primeiro e o último mês com evidência própria — lacunas incluídas, porque 2024-09 a
+  2025-01 são cinco meses sem uma única coorte de 20 e quinze coortes a 100%. Só o requisito de
+  **tamanho** é relaxado: curva real dentro do intervalo continua publicando. A inferência tem
+  motivo próprio (separado do `implausible_survival`, que julga por evidência direta) e o
+  intervalo sai em `contaminatedSpan` para ser conferido; a detecção roda sobre o payload
+  inteiro e a janela é aplicada depois, senão pedir só a lacuna faria a evidência sumir.
+  **O buraco deixado de propósito:** coorte pequena a 100% **fora** de intervalo provado
+  continua publicando — onze jogadores que ficam não provam nada sozinhos, que é a razão de o
+  piso existir.
+  **E o que sobra para o dono:** `belowMinimum` olha o tamanho da **coorte**, não a base do
+  **horizonte**. `2026-08 / bedrock` tem 43 jogadores e publica `D30: 0%` sobre `n: 5` sem marca
+  nenhuma de amostra pequena. Marcar por medida (muda o formato do payload) ou suprimir abaixo do
+  mínimo (perde número às vezes legítimo) — *marcar, nunca esconder* é a regra da própria
+  história, mas a escolha do formato é dele.
 - **✅ As duas leituras foram feitas em 2026-08-29, e destravaram a S8.2.** O `/v1/retention`
   devolve 5565 linhas com `playerUUID`, `registerDate`, `lastSeenDate`, `playtime` e
   `timeDifference` — coorte e plataforma saem daí, então **a premissa da exceção 1 do ADR-002

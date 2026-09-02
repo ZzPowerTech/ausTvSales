@@ -847,6 +847,60 @@ linha de SQL.
    neste mês teve 30 dias para voltar. Isso é *sem dados*, e sai `null`, nunca zero — é a
    regra dura do projeto aplicada ao caso mais fácil de errar.
 
+> **✅ Medido em produção em 2026-09-02 — a armadilha 1 é real, e maior do que este documento
+> descrevia.**
+>
+> A primeira leitura de `2024-06..2025-08` (a região que a janela padrão de 12 meses nunca
+> alcançava, motivo pelo qual a leitura anterior **não** havia exercitado o detector) devolveu
+> **45 coortes**, com `rows: 5580, parsed: 5580, dropped: 0`.
+>
+> O detector de carimbo achou **zero dias** — `stampDays: []` — e o artefato está lá assim
+> mesmo: das 45 coortes, **21 saíram suprimidas** por `implausible_survival`, e das 24 que
+> publicaram, **23 publicaram 100% em D1, D7 e D30 ao mesmo tempo**.
+>
+> **O que separava os dois grupos não era o dado.** Toda coorte suprimida tinha **20 ou mais**
+> jogadores; toda coorte publicada tinha **19 ou menos**. A maior publicada tem 19, a menor
+> suprimida tem 20 — a divisão cai exatamente em cima de `IMPLAUSIBLE_MIN_COHORT`. O piso de
+> tamanho decidiu **todos os 45 casos sozinho**; nada sobre os dados decidiu nenhum.
+>
+> Isso confirma a armadilha 1 e corrige o diagnóstico dela: a fronteira de 2025-08 não era um
+> ajuste empírico *errado* — a contaminação existe e cobre a faixa inteira —, mas o mecanismo
+> que a pega **não é o carimbo por dia**. É a forma do resultado, e o teste que lê a forma
+> estava cego por tamanho.
+>
+> **Corrigido:** o veredito passou a ser herdado por vizinhança (`contaminated_span`). Uma
+> coorte pequena demais para ser julgada sozinha é suprimida quando (a) mostra a mesma forma
+> de ~100% em todos os horizontes **e** (b) registra dentro do intervalo entre o primeiro e o
+> último mês onde alguma coorte grande o bastante foi reprovada por evidência própria. Os
+> meses *sem* evidência dentro do intervalo entram — em produção, 2024-09 a 2025-01 são cinco
+> meses seguidos sem uma única coorte de 20, quinze coortes, todas a 100%. Lacuna significa
+> "ninguém aqui era grande o bastante para testar", não "este mês está limpo".
+>
+> Só o requisito de **tamanho** é relaxado: uma coorte com curva real dentro do intervalo
+> continua publicando. E a inferência é rotulada como inferência — motivo próprio, separado do
+> `implausible_survival` que julga por evidência direta —, com o intervalo publicado em
+> `contaminatedSpan` para poder ser conferido. A detecção roda sobre o **payload inteiro** e a
+> janela é aplicada depois: pedir só `2024-09..2025-01` não pode fazer a evidência sumir.
+>
+> **O buraco que fica de propósito:** uma coorte pequena a 100% **fora** de qualquer intervalo
+> provado continua publicando. Onze jogadores que ficam não provam nada sozinhos, que é a
+> razão de o piso existir. O que a correção remove é julgar em isolamento aquilo que é uma
+> propriedade de uma *escrita* em massa.
+>
+> **🔴 Achado secundário da mesma leitura, ainda em aberto:** `belowMinimum` olha o tamanho da
+> **coorte** e não a base do **horizonte**. A coorte `2026-08 / bedrock` tem 43 jogadores
+> (acima do mínimo de 30, logo `belowMinimum: false`) e publica `D30: 0%` sobre `n: 5`, sem
+> nenhuma marca de amostra pequena. É a mesma família de erro que este épico combate, num
+> lugar que nenhum teste alcançava porque nenhuma fixture tinha bases divergentes por
+> horizonte. Duas saídas — marcar por medida (muda o formato do payload) ou suprimir o
+> percentual quando a base do horizonte fica abaixo do mínimo (perde número às vezes
+> legítimo). **Marcar, nunca esconder** é a regra da própria história; a escolha é do dono.
+>
+> **Anomalia que vale investigação, não correção:** em 2026-07 o `java_offline` dá D30 = 38,4%
+> (n=151) contra 1,6% (n=62) do bedrock. Vinte e quatro vezes a retenção do bedrock é
+> consistente com a suspeita já registrada aqui de que parte do tráfego `java_offline` seja
+> bot.
+
 ### `serverOverview` e `onlineOverview` não estão no documento
 
 Nenhum dos dois aparece no OpenAPI. **Funcionavam** em 23/08 e 25/08 — os payloads são reais —, mas
@@ -1216,13 +1270,33 @@ restaurar**.
    2026-09-01.
 3. **Conferir a direção do pagamento** contra um pagamento conhecido. Um comando no jogo
    responde, e dela dependem `from`/`to` do feed e a marca `funding_many`.
-4. **Decidir sobre a posição no tutorial por jogador**, que destrava a metade de E2 que não
-   foi entregue. É expansão de dado pessoal sob a §8; o caminho está descrito no
-   `economy.types.ts` e custa uma tabela alimentada pelo ETL que já lê esse dado e o descarta.
-5. **Fechar (ou rejustificar) a exceção 1 do ADR-002.** Ela não tem mais nenhum consumidor.
-6. **Calibrar os limiares novos** contra a primeira leitura de produção: os dois do detector
-   de carimbo (retenção) e os quatro do feed de moderação. Todos saem no payload de propósito,
-   e todos estão marcados como chute no `.env.example`.
+4. ✅ **Feito em 2026-09-02.** A posição no tutorial por jogador foi autorizada pelo dono e
+   entregue: `tutorial_player_position`, escrita pelo mesmo ETL, atrás de
+   `TUTORIAL_POSITION_ENABLED`. `/economy/first-spend` publica `byFunnelPosition` (três
+   grupos) e `byFurthestStep` (um por passo, que é o que responde "quem trava no passo 03").
+   **Falta ligar a variável na VPS** — enquanto estiver desligada o bloco sai `null` com o
+   motivo, nunca uma lista de zeros.
+   Um defeito latente apareceu no caminho e foi corrigido junto: `TutorialCatalogue.ids`
+   estava em ordem de `readdir`, então `2tutorial` viria depois de `10tutorial` e todo índice
+   derivado sairia errado. A ordem resolvida viaja no payload (`stepOrder`) para poder ser
+   conferida contra o jogo.
+5. ✅ **Fechada em 2026-09-02 por decisão do dono.** A exceção 1 do ADR-002 não tem mais
+   consumidor e foi encerrada.
+6. **Calibrar os limiares novos** contra a leitura de produção. Estado em 2026-09-02:
+   - os **dois do detector de carimbo** não podem ser calibrados por esta leitura: em 5.580
+     linhas eles não disparam **nenhuma** vez, e o artefato que existiriam para pegar foi
+     pego pelo outro caminho. Mexer neles com base num detector que nunca falou seria chute
+     com aparência de medida;
+   - os **quatro do feed de moderação** continuam sem base: `windowSize: 0`,
+     `never_synced` — o ETL do PlayerPoints nunca rodou, e depende do acesso MySQL abaixo;
+   - o que a leitura **de fato** produziu foi um defeito de mecanismo, não um número a
+     ajustar. Ver o bloco de 2026-09-02 acima.
+7. **Conceder o acesso do PlayerPoints.** O grant medido em 2026-09-02 é
+   `austv_admin_ro`@`<host-da-VPS>` com `SELECT` em `plan_servers` e `plan_users` apenas — o
+   `ERROR 1045` visto da máquina do jogo era autenticação (host errado), não permissão, e o
+   grant certo simplesmente não cobre a tabela do PlayerPoints. Falta uma linha:
+   `GRANT SELECT ON <db>.playerpoints_transaction_log TO 'austv_admin_ro'@'<host-da-VPS>'`.
+   É a única tabela que este sistema lê ali, e o `SET` dela é a série de chegadas do R1.
 
 ### Os dois itens do DoD da S9 que não podem ser fechados daqui
 

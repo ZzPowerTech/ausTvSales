@@ -6,6 +6,8 @@ import {
   RETENTION_HORIZON_DAYS,
   type CohortContamination,
   type CohortRetention,
+  type ConfirmedSpan,
+  type ContaminatedSpan,
   type RetentionMeasure,
   type StampDay,
 } from './retention.types';
@@ -277,6 +279,150 @@ function suppressImplausible(
       'de carimbo justamente porque uma importacao espalhada o suficiente passa ' +
       'por baixo dele. A base fica publicada; o percentual, nao.',
   }));
+}
+
+/**
+ * Find the run of registration months where the import artefact is proven.
+ *
+ * ## The defect this closes, measured
+ *
+ * The first production read of `2024-06..2025-08`, on 2026-09-02, returned 45
+ * cohorts. {@link suppressImplausible} caught 21. The remaining 24 published,
+ * and **23 of them published 100% at D1, D7 and D30 alike** — the artefact's
+ * exact signature, unmarked, over bases of 10 to 19 players.
+ *
+ * What separated the two groups was not the data. Every suppressed cohort had
+ * 20 members or more; every published one had 19 or fewer. The largest
+ * published cohort was 19 and the smallest suppressed one was 20 — the split
+ * lands exactly on {@link IMPLAUSIBLE_MIN_COHORT}, which means the size floor
+ * decided every case by itself.
+ *
+ * The floor is not wrong. Eleven players all sticking around proves nothing on
+ * its own, and a guard without a floor would suppress every genuinely small
+ * cohort — the opposite of the story's rule that small samples are marked, not
+ * hidden. What is wrong is judging each cohort *in isolation* when the thing
+ * being detected is a bulk **write**: a write covers a contiguous range of
+ * registrations, so the months around a proven month are the same event.
+ *
+ * ## The gaps are inside the span, and that is the point
+ *
+ * In that same read, 2024-09 through 2025-01 contain no cohort of 20 or more at
+ * all — five consecutive months, fifteen cohorts, every one at 100%, and not one
+ * of them judgeable on its own. They sit between 2024-08 and 2025-02, both
+ * proven. Treating the gap as clean is what published them.
+ *
+ * @param all cohorts over the WHOLE payload, never a request window. A window
+ *   narrow enough to exclude every judgeable cohort would find no span and
+ *   publish the artefact in full, which is the failure this exists to prevent.
+ */
+export function detectContaminatedSpan(
+  all: readonly CohortRetention[],
+): ConfirmedSpan | null {
+  const confirmed = all.filter(judgedImplausible);
+  if (confirmed.length === 0) {
+    return null;
+  }
+
+  const confirmedMonths = [
+    ...new Set(confirmed.map((cohort) => cohort.cohort)),
+  ].sort();
+
+  return {
+    from: confirmedMonths[0],
+    to: confirmedMonths[confirmedMonths.length - 1],
+    confirmedMonths,
+    confirmedCohorts: confirmed.length,
+  };
+}
+
+/**
+ * Suppress the cohorts that inherit a proven span.
+ *
+ * Deliberately narrow: a cohort is only touched when it is inside the span
+ * **and** already reads at or above {@link IMPLAUSIBLE_SURVIVAL} on every
+ * horizon. The size requirement is the only thing relaxed. A clean cohort inside
+ * a contaminated span keeps its numbers, because the span is evidence about a
+ * write and not a blanket verdict on a period.
+ *
+ * @param span `null` disables the pass entirely and returns the input untouched.
+ */
+export function applyContaminatedSpan(
+  cohorts: readonly CohortRetention[],
+  span: ConfirmedSpan | null,
+): { cohorts: CohortRetention[]; span: ContaminatedSpan | null } {
+  if (span === null) {
+    return { cohorts: [...cohorts], span: null };
+  }
+
+  let inheritedCohorts = 0;
+  let inheritedPlayers = 0;
+
+  const out = cohorts.map((cohort) => {
+    if (
+      cohort.cohort < span.from ||
+      cohort.cohort > span.to ||
+      judgedImplausible(cohort) ||
+      !readsImplausible(cohort.measures)
+    ) {
+      return cohort;
+    }
+
+    inheritedCohorts += 1;
+    inheritedPlayers += cohort.size;
+
+    return {
+      ...cohort,
+      measures: cohort.measures.map((m): RetentionMeasure => ({
+        horizon: m.horizon,
+        percent: null,
+        // The base survives suppression, here as everywhere: the payload still
+        // says how large the cohort whose percentage vanished was.
+        n: m.n,
+        survived: null,
+        reason: 'contaminated_span',
+        unavailableReason: spanReason(span),
+      })),
+    };
+  });
+
+  return {
+    cohorts: out,
+    span: { ...span, inheritedCohorts, inheritedPlayers },
+  };
+}
+
+/** True when {@link suppressImplausible} judged this cohort on its own evidence. */
+function judgedImplausible(cohort: CohortRetention): boolean {
+  return cohort.measures.some(
+    (m) => m.percent === null && m.reason === 'implausible_survival',
+  );
+}
+
+/** True when every horizon is measured and at or above the implausible line. */
+function readsImplausible(measures: readonly RetentionMeasure[]): boolean {
+  return (
+    measures.length > 0 &&
+    measures.every(
+      (m) => m.percent !== null && m.percent >= IMPLAUSIBLE_SURVIVAL * 100,
+    )
+  );
+}
+
+function spanReason(span: ConfirmedSpan): string {
+  return (
+    `Esta coorte tem menos de ${IMPLAUSIBLE_MIN_COHORT} jogadores, entao o ` +
+    'teste de implausibilidade se abstem dela sozinha — sobre onze jogadores ' +
+    'nenhum resultado prova nada. Mas ela sobrevive a ' +
+    `${IMPLAUSIBLE_SURVIVAL * 100}% ou mais em TODOS os horizontes E registra ` +
+    `dentro de ${span.from}..${span.to}, um intervalo em que ` +
+    `${span.confirmedCohorts} coorte(s) grande(s) o bastante para serem ` +
+    'julgadas foram TODAS reprovadas pelo mesmo teste. O artefato vem de uma ' +
+    'escrita em massa, e escrita em massa cobre uma faixa continua de ' +
+    'registros: a vizinhanca e a mesma importacao, nao sorte. Julgar so pelo ' +
+    'tamanho e o que fazia este modulo publicar 100% de retencao em D30 sobre ' +
+    'bases de dez a dezenove jogadores, cercadas por coortes suprimidas. ' +
+    'A base fica publicada; o percentual, nao. Ver `contaminatedSpan`.'
+  );
 }
 
 function contaminationOf(

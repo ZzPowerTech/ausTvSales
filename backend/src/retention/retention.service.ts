@@ -10,9 +10,10 @@ import {
   type RetentionPlayer,
 } from './plan-retention';
 import {
+  applyContaminatedSpan,
   buildCohorts,
+  detectContaminatedSpan,
   detectStampDays,
-  toSaoPauloMonth,
 } from './retention-math';
 import {
   RETENTION_HORIZON_DAYS,
@@ -20,6 +21,7 @@ import {
   horizonLabel,
   type CohortPlatformFilter,
   type CohortRetention,
+  type ContaminatedSpan,
   type RetentionReport,
   type RetentionSourceFailure,
   type RetentionSourceState,
@@ -154,20 +156,30 @@ export class RetentionService {
       this.stampDayMinPopulation,
     );
 
-    const inWindow = players.filter((player) => {
-      const month = toSaoPauloMonth(player.registeredAt);
-      return month !== null && month >= fromMonth && month <= toMonth;
-    });
-
-    const cohorts = buildCohorts(inWindow, {
+    // Cohorts are built over the WHOLE payload and the window is applied to the
+    // result, not to the players. Filtering first is equivalent for every number
+    // in a cohort — the grouping is by month and nothing crosses cohorts — but
+    // it is NOT equivalent for the artefact detectors, which reason about the
+    // dataset. `2024-09..2025-01` contains no cohort large enough to judge, and
+    // judging that window in isolation publishes fifteen cohorts at 100%.
+    const all = buildCohorts(players, {
       evaluatedAt,
       dataThrough: latestEpoch(players),
       stampDays,
       minimumCohortSize: this.minimumCohortSize,
       contaminationMax: this.contaminationMax,
-    }).filter((cohort) => platform === 'all' || cohort.platform === platform);
+    });
 
-    this.warnOnSuppression(cohorts, stampDays);
+    const spanned = applyContaminatedSpan(all, detectContaminatedSpan(all));
+
+    const cohorts = spanned.cohorts.filter(
+      (cohort) =>
+        cohort.cohort >= fromMonth &&
+        cohort.cohort <= toMonth &&
+        (platform === 'all' || cohort.platform === platform),
+    );
+
+    this.warnOnSuppression(cohorts, stampDays, spanned.span);
 
     return {
       semantics: RETENTION_SEMANTICS,
@@ -176,6 +188,7 @@ export class RetentionService {
       evaluatedAt: new Date(evaluatedAt).toISOString(),
       minimumCohortSize: this.minimumCohortSize,
       stampDays,
+      ...(spanned.span === null ? {} : { contaminatedSpan: spanned.span }),
       cohorts,
       ...this.coverageWarning(loaded.state, fromMonth, toMonth, cohorts.length),
       source: loaded.state,
@@ -354,7 +367,19 @@ export class RetentionService {
   private warnOnSuppression(
     cohorts: readonly CohortRetention[],
     stampDays: readonly StampDay[],
+    span: ContaminatedSpan | null,
   ): void {
+    if (span !== null && span.inheritedCohorts > 0) {
+      this.logger.warn(
+        `Faixa contaminada ${span.from}..${span.to}: ${span.confirmedCohorts} ` +
+          `coorte(s) reprovadas por evidencia propria em ` +
+          `${span.confirmedMonths.length} mes(es), e mais ` +
+          `${span.inheritedCohorts} coorte(s) (${span.inheritedPlayers} ` +
+          'jogadores) suprimidas por heranca — pequenas demais para julgar ' +
+          'sozinhas, mesma forma de ~100%, dentro da faixa.',
+      );
+    }
+
     const suppressed = cohorts.filter((cohort) => cohort.contamination.suspect);
     if (suppressed.length === 0) {
       return;

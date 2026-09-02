@@ -116,7 +116,8 @@ function funnelLines(report: WeeklyReport): string[] {
 }
 
 function retentionLines(report: WeeklyReport): string[] {
-  const { cohorts, source, from, to, stampDays } = report.retention;
+  const { cohorts, source, from, to, stampDays, contaminatedSpan } =
+    report.retention;
 
   const lines = [
     `__Retencao por coorte — ${from} a ${to}__`,
@@ -152,6 +153,21 @@ function retentionLines(report: WeeklyReport): string[] {
       `⚠️ Carimbo de importacao detectado em ${stampDays
         .map((stamp) => `${stamp.day} (n=${stamp.n}/${stamp.population})`)
         .join(', ')} — coortes contaminadas saem sem numero, com o motivo.`,
+    );
+  }
+
+  // Printed even when `stampDays` is empty, which is the case that matters: in
+  // this population the artefact is real and leaves no single stamp day, so
+  // without this line a reader sees a column of blanks and no reason for them.
+  if (contaminatedSpan !== undefined) {
+    lines.push(
+      '',
+      `⚠️ Faixa de importacao \`${contaminatedSpan.from}..${contaminatedSpan.to}\`: ` +
+        `${contaminatedSpan.confirmedCohorts} coorte(s) reprovadas por ` +
+        `evidencia propria e mais ${contaminatedSpan.inheritedCohorts} ` +
+        `(${contaminatedSpan.inheritedPlayers} jogadores) pequenas demais para ` +
+        'julgar sozinhas mas com a mesma forma de ~100%. Todas saem sem numero, ' +
+        'com o motivo — a base fica.',
     );
   }
 

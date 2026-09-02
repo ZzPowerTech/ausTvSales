@@ -98,6 +98,32 @@ describe('renderWeeklyReport', () => {
     expect(text).toContain('D7 33,3% (n=42)');
   });
 
+  it('says WHY a cohort came back blank when no stamp day explains it', () => {
+    // The production case: `stampDays` is empty and 21 of 45 cohorts are
+    // suppressed anyway. Without this line the weekly report is a column of
+    // blanks with the only available explanation not applying.
+    const text = renderWeeklyReport(
+      report({
+        retention: {
+          ...report().retention,
+          stampDays: [],
+          contaminatedSpan: {
+            from: '2024-06',
+            to: '2025-08',
+            confirmedMonths: ['2024-06', '2025-08'],
+            confirmedCohorts: 21,
+            inheritedCohorts: 23,
+            inheritedPlayers: 331,
+          },
+        },
+      }),
+    );
+
+    expect(text).toContain('2024-06..2025-08');
+    expect(text).toContain('23');
+    expect(text).toContain('331 jogadores');
+  });
+
   it('prints the retention label every week, not once in a docblock', () => {
     // A Discord message is where a number gets quoted out of context, so the
     // caveat has to be inside the quote.
