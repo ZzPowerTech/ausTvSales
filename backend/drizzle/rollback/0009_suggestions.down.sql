@@ -33,7 +33,7 @@ BEGIN
 
   IF head_hash IS DISTINCT FROM '8339d0f30cf5d89bf2ca61410c79ef1dab53744132464f24511963c7400bc629' THEN
     RAISE EXCEPTION
-      'Migration 0009 is not the head (head hash is %%). Rolling it back here would drop the table and leave db:migrate reporting success. Roll back from the head, one at a time.',
+      'Migration 0009 is not the head (head hash is %). Rolling it back here would drop the table and leave db:migrate reporting success. Roll back from the head, one at a time.',
       coalesce(head_hash, '<no migrations applied>');
   END IF;
 END $$;
@@ -56,7 +56,7 @@ BEGIN
 
   IF removed <> 1 THEN
     RAISE EXCEPTION
-      'Expected to remove exactly 1 bookkeeping row for migration 0009, removed %%.',
+      'Expected to remove exactly 1 bookkeeping row for migration 0009, removed %.',
       removed;
   END IF;
 END $$;

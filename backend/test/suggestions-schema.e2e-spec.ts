@@ -410,9 +410,12 @@ describe('Suggestions schema (e2e)', () => {
           `SELECT to_regclass('public.suggestions') AS table_ref`,
         );
         expect(recreated.rows[0].table_ref).not.toBeNull();
-
-        await client.query('ROLLBACK');
       } finally {
+        // In the `finally`, not after the assertions: a failed expectation
+        // throws, and a connection returned to the pool mid-transaction poisons
+        // whatever picks it up next — which is how one broken assertion here
+        // turned into `current transaction is aborted` in an unrelated hook.
+        await client.query('ROLLBACK');
         client.release();
       }
 
