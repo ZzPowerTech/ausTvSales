@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.16.0...backend-v0.17.0) (2026-09-02)
+
+
+### Features
+
+* **admin:** posição no tutorial por jogador, fechando a metade de E2 que faltava ([#190](https://github.com/ZzPowerTech/ausTvSales/issues/190)) ([9fe34f8](https://github.com/ZzPowerTech/ausTvSales/commit/9fe34f8a4b09ff5680e8d92eafd680a0e635e214))
+
 ## [0.16.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.15.2...backend-v0.16.0) (2026-09-02)
 
 
