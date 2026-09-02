@@ -298,9 +298,13 @@ describe('EconomyService.firstSpend (E2)', () => {
     ).firstSpend('2026-01', '2026-01');
 
     expect(report.byCohort?.[0]).toMatchObject({
-      spenders: 1,
+      // BOTH bought. The one whose purchase predates registration stays out of
+      // the percentile sample and stays IN the numerator: dropping them would
+      // publish a share whose numerator silently loses real buyers.
+      spenders: 2,
       beforeRegistration: 1,
       medianDaysToFirstSpend: 10,
+      everSpent: { percent: 100, n: 2 },
     });
   });
 

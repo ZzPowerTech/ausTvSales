@@ -204,7 +204,7 @@ export class EconomyService {
       byPlatform,
       byCohort,
       ...(byCohort === null
-        ? { cohortUnavailableReason: DIMENSION_NEVER_SYNCED }
+        ? { cohortUnavailableReason: dimensionReason(dimensionState) }
         : {}),
       cohortCoverage: dimensionState.ok
         ? {
@@ -237,7 +237,7 @@ export class EconomyService {
         from: fromMonth,
         to: toMonth,
         byCohort: null,
-        unavailableReason: DIMENSION_NEVER_SYNCED,
+        unavailableReason: dimensionReason(dimensionState),
         byFunnelPosition: null,
         funnelPositionUnavailableReason: FUNNEL_POSITION_UNAVAILABLE,
         sources: [{ name: 'sales', ok: true, asOf: null }, dimensionState],
@@ -295,16 +295,32 @@ export class EconomyService {
     }
 
     const byCohort: CohortFirstSpend[] = [...groups.values()]
-      .map((group) => ({
-        cohort: group.cohort,
-        platform: group.platform,
-        cohortSize: group.size,
-        spenders: group.days.length,
-        everSpent: this.countShare(group.days.length, group.size),
-        medianDaysToFirstSpend: percentile(group.days, 0.5),
-        p90DaysToFirstSpend: percentile(group.days, 0.9),
-        beforeRegistration: group.beforeRegistration,
-      }))
+      .map((group) => {
+        // A player whose first purchase predates their registration date DID
+        // buy. They are excluded from the percentile sample because the interval
+        // is unusable — and counting them out of `spenders` too would publish a
+        // share whose numerator silently drops real buyers.
+        //
+        // Not hypothetical here: `registerDate` is when Plan first saw the
+        // player, Plan's history starts 2024-06-02, and `sales` reaches further
+        // back. An early cohort could report `everSpent: 5%` while
+        // `/economy/revenue` shows that same cohort producing real money — two
+        // endpoints of one module contradicting each other, with the wrong one
+        // looking like a finding about onboarding.
+        const spenders = group.days.length + group.beforeRegistration;
+        return {
+          cohort: group.cohort,
+          platform: group.platform,
+          cohortSize: group.size,
+          spenders,
+          everSpent: this.countShare(spenders, group.size),
+          // The percentiles keep the clean sample: an unusable interval cannot
+          // be averaged in as "bought on day 0" without biasing the median.
+          medianDaysToFirstSpend: percentile(group.days, 0.5),
+          p90DaysToFirstSpend: percentile(group.days, 0.9),
+          beforeRegistration: group.beforeRegistration,
+        };
+      })
       .sort(
         (a, b) =>
           a.cohort.localeCompare(b.cohort) ||
@@ -489,6 +505,29 @@ export class EconomyService {
     return { percent: Math.round((part / whole) * 1000) / 10, n: whole };
   }
 }
+
+/**
+ * The sentence that matches the label.
+ *
+ * `dimensionState` already distinguishes `never_synced` from `query_failed`, and
+ * both call sites used to emit the same three sentences telling the reader to
+ * check two environment variables. On a night when the ETL ran fine and the
+ * provenance read timed out, that sends the operator to the one place that is
+ * not the problem — the same defect the alert layer paid for when a healthy Plan
+ * was announced every fifteen minutes as "probably the wrong database".
+ */
+function dimensionReason(state: EconomySourceState): string {
+  return state.failure === 'query_failed'
+    ? DIMENSION_UNREADABLE
+    : DIMENSION_NEVER_SYNCED;
+}
+
+const DIMENSION_UNREADABLE =
+  'Nao foi possivel ler a procedencia da dimensao de jogador: a consulta a ' +
+  '`player_dimension_syncs` falhou. Isto NAO diz que o ETL nao rodou — diz que ' +
+  'nao deu para saber se rodou, e sem essa resposta uma coorte publicada ' +
+  'poderia estar em cima de dado congelado sem que nada indicasse. A receita ' +
+  'por plataforma continua valendo: ela sai do proprio uuid da venda (ADR-003).';
 
 const DIMENSION_NEVER_SYNCED =
   'A dimensao de jogador nunca foi preenchida: o ETL do `/v1/retention` nao ' +

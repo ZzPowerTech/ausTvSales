@@ -42,6 +42,19 @@ describe('toEpochMs', () => {
     expect(toEpochMs('2026-09-02T01:00:00')).toBeNull();
   });
 
+  it('does not mistake the day of a date-only string for an offset', () => {
+    // The first version of this guard only looked at the tail, and `2026-09-01`
+    // ends in `-01` — which reads as an offset of minus one hour. V8 then parses
+    // the date-only form as UTC midnight, 21:00 BRT of the PREVIOUS day: the
+    // exact shift the guard exists to refuse, let through by the guard itself.
+    // The pattern now requires a time of day before the offset.
+    expect(toEpochMs('2026-09-01')).toBeNull();
+    expect(toEpochMs('2026-12-31')).toBeNull();
+    // And the forms Postgres and Plan actually emit still pass.
+    expect(toEpochMs('2026-09-01T00:00:00-03:00')).not.toBeNull();
+    expect(toEpochMs('2026-09-01 03:00:00+00')).not.toBeNull();
+  });
+
   it('returns null — never zero — for anything unreadable', () => {
     for (const raw of [null, undefined, '', 'nao e data', {}, [], -5, 0]) {
       expect(toEpochMs(raw)).toBeNull();

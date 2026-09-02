@@ -376,11 +376,12 @@ describe('Economy (e2e)', () => {
         spenders: 2,
         everSpent: { percent: 66.7, n: 3 },
       });
-      // PREMIUM waited 64 days (2026-01-05 → 2026-03-10) and PREMIUM_2 waited
-      // 51 (2026-01-20 → 2026-03-12). Nearest-rank p50 over two observations is
-      // the lower one — a day count somebody actually waited, which is the
-      // whole reason the percentile is not interpolated.
-      expect(january?.medianDaysToFirstSpend).toBe(51);
+      // PREMIUM waited 64 days (2026-01-05 15:00Z → 2026-03-10 15:00Z) and
+      // PREMIUM_2 waited 49 (2026-01-20 15:00Z → the late-night sale at
+      // 2026-03-11 02:00Z, which is 49 days and 11 hours, floored). Nearest-rank
+      // p50 over two observations is the lower one — a day count somebody
+      // actually waited, which is the whole reason it is not interpolated.
+      expect(january?.medianDaysToFirstSpend).toBe(49);
       expect(january?.p90DaysToFirstSpend).toBe(64);
     });
 

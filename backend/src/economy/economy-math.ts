@@ -66,7 +66,14 @@ export function shareOf(part: bigint, whole: bigint): number | null {
   // converting two large cent totals to Number first could lose precision above
   // 2^53, which this server will never reach but the reader of this code cannot
   // tell at a glance.
-  const scaled = (part * 1000n) / whole;
+  //
+  // `+ whole / 2n` is round-half-up rather than bigint truncation. Without it
+  // `shareOf(2n, 3n)` publishes 66.6 where the true value is 66.67 — every slice
+  // biased low by up to 0.1pp, so a platform breakdown sums to 99.9% and reads
+  // as a rounding bug in the caller. It also makes this agree with `countShare`,
+  // which uses `Math.round`: two share paths in one report must not use
+  // different rules.
+  const scaled = (part * 1000n + whole / 2n) / whole;
   return Number(scaled) / 10;
 }
 
@@ -117,9 +124,38 @@ export function toDate(raw: unknown): Date | null {
   if (raw instanceof Date) {
     return Number.isNaN(raw.getTime()) ? null : raw;
   }
-  if (typeof raw === 'string' || typeof raw === 'number') {
+  if (typeof raw === 'number') {
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  if (typeof raw === 'string') {
+    // An offset is REQUIRED, and refusing the string without one is the point.
+    // V8 parses a bare `2026-03-10 15:00:00` as **process-local** time, while a
+    // plain column arrives as a correct `Date` — and the two get subtracted
+    // three lines later in the first-spend interval. A container an hour off
+    // would shift `Math.floor(delta / MS_PER_DAY)` by a whole day for a slice of
+    // players, silently and always in one direction.
+    //
+    // Every timestamp read here is a `timestamptz`, whose text form always
+    // carries an offset, so this costs nothing on the path that exists today. If
+    // a driver change ever produced an offset-less string, the rows drop and the
+    // caller reports it — visible, rather than skewed by hours.
+    if (!HAS_TIMEZONE.test(raw.trim())) {
+      return null;
+    }
     const parsed = new Date(raw);
     return Number.isNaN(parsed.getTime()) ? null : parsed;
   }
   return null;
 }
+
+/**
+ * A time of day followed by an explicit UTC offset.
+ *
+ * The time half is not decoration, and leaving it out was a bug: `2026-09-01`
+ * ends in `-01`, which reads as an offset of minus one hour to a pattern that
+ * only looks at the tail. V8 then parses the date-only form as **UTC midnight**,
+ * which is 21:00 BRT of the previous day — the exact silent shift this guard
+ * exists to refuse, let through by the guard itself.
+ */
+const HAS_TIMEZONE = /\d{2}:\d{2}(:\d{2})?(\.\d+)?\s*(Z|[+-]\d{2}(:?\d{2})?)$/i;

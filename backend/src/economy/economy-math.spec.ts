@@ -52,6 +52,15 @@ describe('shareOf', () => {
     expect(shareOf(4540n, 10_000n)).toBe(45.4);
   });
 
+  it('rounds instead of truncating, so the slices still sum to 100', () => {
+    // Bigint division truncates: 2/3 published 66.6 where the value is 66.67,
+    // and every slice biased low by up to 0.1pp makes a breakdown sum to 99.9%
+    // and read as a bug in the caller. `countShare` already used Math.round;
+    // two share paths in one report must not use different rules.
+    expect(shareOf(2n, 3n)).toBe(66.7);
+    expect(shareOf(2000n, 10_700n)).toBe(18.7);
+  });
+
   it('returns null — never zero — for an empty base', () => {
     // Publishing 0% over an empty base would invent a catastrophic-looking
     // reading out of a period where nothing happened.
@@ -107,6 +116,26 @@ describe('toDate', () => {
 
   it('accepts epoch milliseconds', () => {
     expect(toDate(1_772_000_000_000)?.getTime()).toBe(1_772_000_000_000);
+  });
+
+  it('refuses a string with no offset instead of guessing a zone', () => {
+    // V8 reads a bare `2026-03-10 15:00:00` as process-local time while a plain
+    // column arrives as a correct `Date`, and the two are subtracted three lines
+    // later. An hour of container skew shifts the day count for a slice of
+    // players, silently and always in one direction.
+    expect(toDate('2026-03-10 15:00:00')).toBeNull();
+    expect(toDate('2026-03-10T15:00:00')).toBeNull();
+    expect(toDate('2026-03-10T15:00:00Z')).not.toBeNull();
+    expect(toDate('2026-03-10 15:00:00+00')).not.toBeNull();
+  });
+
+  it('does not mistake the day of a date-only string for an offset', () => {
+    // `2026-09-01` ends in `-01`, which a tail-only pattern reads as an offset.
+    // V8 parses the date-only form as UTC midnight — 21:00 BRT of the previous
+    // day — so the guard would have let through exactly the shift it exists to
+    // refuse. The pattern now requires a time of day before the offset.
+    expect(toDate('2026-09-01')).toBeNull();
+    expect(toDate('2026-12-31')).toBeNull();
   });
 
   it('returns null — never "now" — for anything unusable', () => {
