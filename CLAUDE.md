@@ -124,8 +124,44 @@ precisa da exceção 1, não precisa de SQL e não precisa do `DESCRIBE plan_ses
 destravada; o que ela carrega agora é uma ressalva de rótulo, não um bloqueio. Detalhe no plano de
 sprints.
 
-**Próxima: Sprint 9** — módulo `economy` (S9.1), relatório periódico no Discord (S9.2) e a
-**S8.2**, agora sem pré-requisito pendente.
+**AusTV Admin S9 — entregue em 2026-09-02.** As três histórias em `main`: retenção por coorte
+(S8.2, PR #183), relatório semanal no Discord (S9.2, PR #184) e a camada de economia (S9.1, PRs
+#185 e #186). 18 SP contra 13 de capacidade, sem exercer o `[CORTE]` — mas **isso não é
+velocidade**: a S8.2 chegou destravada e o que ela pedia era código, não investigação, e a S9.1
+encolheu no caminho (ver abaixo).
+
+Suíte: **70 suítes, 863 testes** unitários, mais 5 arquivos de e2e novos contra Postgres real.
+
+**O que a Sprint 9 mede agora, e o que cada número exige do ambiente:**
+
+| leitura | rota | precisa de |
+|---|---|---|
+| Retenção D1/D7/D30 por coorte × plataforma | `GET /retention/cohorts` | só o `PLAN_BASE_URL` que já existe |
+| Receita por plataforma | `GET /economy/revenue` | **nada** — a plataforma sai do uuid da venda (ADR-003) |
+| Receita por coorte, tempo até o 1º gasto | as mesmas duas rotas | `PLAYER_DIMENSION_SYNC_ENABLED` |
+| Contato social (E3), feed de moderação (E4), série de chegadas (R1) | `/economy/social-contact`, `/economy/payments/feed`, `/economy/account-creations` | conta **read-only nova** no MySQL do PlayerPoints + `PAYMENTS_SYNC_ENABLED` |
+| Relatório semanal no Discord | cron + `POST /reports/weekly/run` | `WEEKLY_REPORT_ENABLED` + `DISCORD_REPORT_WEBHOOK_URL` |
+
+**Decisões da S9 que não se reabre sem o dono:**
+
+- **A exceção 1 do ADR-002 continua aberta para ninguém.** A S8.2 saiu do `/v1/retention`: sem
+  SQL, sem MySQL, sem credencial nova. Fechá-la é decisão do dono, porque foi ele quem a abriu.
+- **A retenção publica INTERVALO DE SOBREVIVÊNCIA, não retorno no dia N**, e o rótulo viaja no
+  campo `semantics` de toda resposta. As duas leituras são perguntas diferentes.
+- **A metade de E2 que cruza gasto com posição no funil não foi entregue.** Ela exige posição
+  no tutorial **por jogador**, e o `tutorial_daily` é agregado em `(dia, plataforma)` por decisão
+  registrada da S8.0 — tomada para não trazer identidade de jogador para este banco. Essa decisão
+  está certa para o funil **e é exatamente o que bloqueia esta métrica**. Entregar alarga a
+  superfície de dado pessoal da §8, e o custo de errar é assimétrico: métrica se adiciona na
+  sprint seguinte, dado pessoal gravado não se desgrava. O endpoint publica
+  `byFunnelPosition: null` com o motivo por extenso.
+- **A direção do pagamento é inferida, não confirmada.** Que `receiver` seja a conta creditada é
+  a leitura natural do schema do PlayerPoints e nunca foi conferida contra um pagamento
+  conhecido. Se estiver invertida, a marca `funding_many` aponta para quem **recebeu** de muitos.
+  O caveat viaja no payload do feed; confirmar custa um comando no jogo.
+
+**Próxima: Sprint 10** — sugestões (modelo, corpus e bot). Sem gate: a S6.1 foi cancelada e a S10
+não depende mais de nada da S6.
 
 **Em aberto, e vale mais que sprint:**
 
