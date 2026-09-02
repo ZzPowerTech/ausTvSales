@@ -74,6 +74,13 @@ function tutorialStore(
   } as unknown as TutorialStore;
 }
 
+/** A `TutorialStore` whose ETL has never completed a successful run. */
+function tutorialNeverSynced(): TutorialStore {
+  return {
+    lastSuccessfulSync: jest.fn().mockResolvedValue(null),
+  } as unknown as TutorialStore;
+}
+
 function buyer(
   uuid: string,
   cents: string,
@@ -435,6 +442,51 @@ describe('EconomyService.firstSpend (E2)', () => {
     // must read as "cannot measure" rather than as a list of zeroes.
     expect(report.funnelPositionUnavailableReason).toContain(
       'TUTORIAL_POSITION_ENABLED',
+    );
+  });
+
+  it('sends the reader to the PARENT switch when the ETL never ran', async () => {
+    // Measured against a real instance on 2026-09-02: the tutorial ETL was
+    // unconfigured and the owner had just turned `TUTORIAL_POSITION_ENABLED` on.
+    // One message for both absences named the child switch — the one variable
+    // that was already correct — and sent them looking in the wrong place.
+    //
+    // `TUTORIAL_POSITION_ENABLED` is evaluated INSIDE the scan, so with no scan
+    // it changes nothing at all.
+    const db = dbWith([{ rows: [] }]);
+
+    const report = await new EconomyService(
+      db,
+      dimensionStore(SYNCED),
+      tutorialNeverSynced(),
+    ).firstSpend('2026-01', '2026-01');
+
+    expect(report.byFunnelPosition).toBeNull();
+    const reason = report.funnelPositionUnavailableReason ?? '';
+    expect(reason).toContain('TUTORIAL_SYNC_ENABLED');
+    expect(reason).toContain('TUTORIAL_PLAYERDATA_DIR');
+    // It must say so out loud, not merely omit the child switch: the reader
+    // arrives here having just set it.
+    expect(reason).toContain('NAO E O QUE FALTA');
+  });
+
+  it('does not blame the parent switch when the ETL did run', async () => {
+    // The other half of the same distinction. A run that happened with the
+    // position switch off is a different fix, and pointing at the directories
+    // here would send the reader to configuration that is already right.
+    const db = dbWith([{ rows: [] }]);
+
+    const report = await new EconomyService(
+      db,
+      dimensionStore(SYNCED),
+      tutorialStore(),
+    ).firstSpend('2026-01', '2026-01');
+
+    expect(report.funnelPositionUnavailableReason).not.toContain(
+      'TUTORIAL_SYNC_ENABLED',
+    );
+    expect(report.funnelPositionUnavailableReason).not.toContain(
+      'TUTORIAL_PLAYERDATA_DIR',
     );
   });
 
