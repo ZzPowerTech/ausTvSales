@@ -725,6 +725,23 @@ export class EnvironmentVariables {
   @Min(1)
   ECONOMY_FEED_MIN_WINDOW_FOR_OUTLIER?: number;
 
+  // --- Posicao no tutorial por jogador (AusTV Admin S9.3, secao 6.4 E2) ---
+  //
+  // ⚠️ SWITCH PROPRIO, separado do TUTORIAL_SYNC_ENABLED, e a separacao e o
+  // ponto. A serie diaria e agregada em `(dia, plataforma)` e nao carrega
+  // identidade de jogador; isto grava UMA LINHA POR JOGADOR, com uuid.
+  //
+  // E o alargamento da superficie de dado pessoal que a secao 8 do spec governa.
+  // O dono autorizou a capacidade em 2026-09-02 — o switch e o que faz ligar
+  // virar ato deliberado, em vez de um deploy comecar a gravar linha de jogador
+  // porque a versao mudou.
+  //
+  // Desligado, o `/economy/first-spend` publica `byFunnelPosition: null` com o
+  // motivo. A outra metade de E2 (tempo ate o primeiro gasto) nao depende disto.
+  @IsOptional()
+  @IsBoolean()
+  TUTORIAL_POSITION_ENABLED?: boolean;
+
   // Express `trust proxy` setting, applied in main.ts so `req.ip` reflects the
   // real client from the Nginx-supplied X-Forwarded-For (and a header forged by a
   // direct client is ignored). A number = trust that many hops; otherwise a

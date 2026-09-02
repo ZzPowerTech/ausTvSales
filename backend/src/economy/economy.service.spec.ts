@@ -4,6 +4,7 @@ import type {
   DimensionSyncRecord,
   PlayerDimensionStore,
 } from './player-dimension.store';
+import type { TutorialStore } from '../tutorial/tutorial.store';
 
 const PREMIUM = (i: number) =>
   `11111111-1111-4111-8111-${String(i).padStart(12, '0')}`;
@@ -45,6 +46,34 @@ function dimensionStore(
   } as unknown as PlayerDimensionStore;
 }
 
+/**
+ * A `TutorialStore` whose last sync did **not** write positions.
+ *
+ * The default is the switch being off, because that is the state every
+ * environment starts in and the one where `byFunnelPosition` must stay `null`
+ * rather than becoming a list of zeroes.
+ */
+function tutorialStore(
+  over: { positionsWritten?: number | null; stepOrder?: string | null } = {},
+): TutorialStore {
+  return {
+    lastSuccessfulSync: jest.fn().mockResolvedValue({
+      id: 1,
+      ranAt: new Date('2026-09-02T06:00:00.000Z'),
+      status: 'ok',
+      filesScanned: 19_700,
+      filesFailed: 0,
+      playersInTutorial: 10_834,
+      daysWritten: 300,
+      questsInCatalogue: 33,
+      finalQuestId: '33tutorial',
+      stepOrder: over.stepOrder ?? null,
+      positionsWritten: over.positionsWritten ?? null,
+      detail: null,
+    }),
+  } as unknown as TutorialStore;
+}
+
 function buyer(
   uuid: string,
   cents: string,
@@ -67,10 +96,11 @@ describe('EconomyService.revenue (E1)', () => {
       { rows: [{ sales: 0, revenue_cents: '0' }] },
     ]);
 
-    const report = await new EconomyService(db, dimensionStore(SYNCED)).revenue(
-      null,
-      null,
-    );
+    const report = await new EconomyService(
+      db,
+      dimensionStore(SYNCED),
+      tutorialStore(),
+    ).revenue(null, null);
 
     expect(report.totals).toEqual({
       revenue: '100.00',
@@ -101,10 +131,11 @@ describe('EconomyService.revenue (E1)', () => {
       { rows: [{ sales: 0, revenue_cents: '0' }] },
     ]);
 
-    const report = await new EconomyService(db, dimensionStore(SYNCED)).revenue(
-      null,
-      null,
-    );
+    const report = await new EconomyService(
+      db,
+      dimensionStore(SYNCED),
+      tutorialStore(),
+    ).revenue(null, null);
 
     for (const platform of report.byPlatform) {
       if (platform.share.percent !== null) {
@@ -119,10 +150,11 @@ describe('EconomyService.revenue (E1)', () => {
       { rows: [{ sales: 0, revenue_cents: '0' }] },
     ]);
 
-    const report = await new EconomyService(db, dimensionStore(SYNCED)).revenue(
-      null,
-      null,
-    );
+    const report = await new EconomyService(
+      db,
+      dimensionStore(SYNCED),
+      tutorialStore(),
+    ).revenue(null, null);
 
     expect(report.byPlatform[0].share.percent).toBeNull();
     expect(report.byPlatform[0].share.n).toBe(1);
@@ -137,10 +169,11 @@ describe('EconomyService.revenue (E1)', () => {
         { rows: [{ sales: 0, revenue_cents: '0' }] },
       ]);
 
-      const report = await new EconomyService(db, dimensionStore(null)).revenue(
-        null,
-        null,
-      );
+      const report = await new EconomyService(
+        db,
+        dimensionStore(null),
+        tutorialStore(),
+      ).revenue(null, null);
 
       expect(report.byCohort).toBeNull();
       expect(report.cohortUnavailableReason).toContain('nunca foi preenchida');
@@ -161,10 +194,11 @@ describe('EconomyService.revenue (E1)', () => {
         { rows: [{ sales: 0, revenue_cents: '0' }] },
       ]);
 
-      const report = await new EconomyService(db, dimensionStore(null)).revenue(
-        null,
-        null,
-      );
+      const report = await new EconomyService(
+        db,
+        dimensionStore(null),
+        tutorialStore(),
+      ).revenue(null, null);
 
       expect(report.byPlatform).toHaveLength(1);
       expect(report.byPlatform[0]).toMatchObject({
@@ -187,6 +221,7 @@ describe('EconomyService.revenue (E1)', () => {
       const report = await new EconomyService(
         db,
         dimensionStore(SYNCED),
+        tutorialStore(),
       ).revenue(null, null);
 
       expect(report.cohortCoverage).toEqual({
@@ -208,10 +243,11 @@ describe('EconomyService.revenue (E1)', () => {
       { rows: [{ sales: 812, revenue_cents: '4500000' }] },
     ]);
 
-    const report = await new EconomyService(db, dimensionStore(SYNCED)).revenue(
-      null,
-      null,
-    );
+    const report = await new EconomyService(
+      db,
+      dimensionStore(SYNCED),
+      tutorialStore(),
+    ).revenue(null, null);
 
     // Silent exclusion would make these numbers disagree with the analytics
     // endpoints for a reason nobody could see.
@@ -227,10 +263,11 @@ describe('EconomyService.revenue (E1)', () => {
       { rows: [{ sales: 0, revenue_cents: '0' }] },
     ]);
 
-    const report = await new EconomyService(db, dimensionStore(SYNCED)).revenue(
-      null,
-      null,
-    );
+    const report = await new EconomyService(
+      db,
+      dimensionStore(SYNCED),
+      tutorialStore(),
+    ).revenue(null, null);
 
     expect(JSON.stringify(report)).not.toContain(PREMIUM(7));
   });
@@ -265,6 +302,7 @@ describe('EconomyService.firstSpend (E2)', () => {
     const report = await new EconomyService(
       db,
       dimensionStore(SYNCED),
+      tutorialStore(),
     ).firstSpend('2026-01', '2026-01');
 
     expect(report.byCohort).toEqual([
@@ -295,6 +333,7 @@ describe('EconomyService.firstSpend (E2)', () => {
     const report = await new EconomyService(
       db,
       dimensionStore(SYNCED),
+      tutorialStore(),
     ).firstSpend('2026-01', '2026-01');
 
     expect(report.byCohort?.[0]).toMatchObject({
@@ -329,6 +368,7 @@ describe('EconomyService.firstSpend (E2)', () => {
     const report = await new EconomyService(
       db,
       dimensionStore(SYNCED),
+      tutorialStore(),
     ).firstSpend('2026-01', '2026-01');
 
     expect(report.byCohort?.[0]).toMatchObject({
@@ -357,6 +397,7 @@ describe('EconomyService.firstSpend (E2)', () => {
     const report = await new EconomyService(
       db,
       dimensionStore(SYNCED),
+      tutorialStore(),
     ).firstSpend('2026-01', '2026-01');
 
     expect(report.byCohort?.[0].cohortSize).toBe(1);
@@ -368,6 +409,7 @@ describe('EconomyService.firstSpend (E2)', () => {
     const report = await new EconomyService(
       db,
       dimensionStore(SYNCED),
+      tutorialStore(),
     ).firstSpend('2026-01', '2026-01');
 
     expect(report.byCohort?.[0]).toMatchObject({
@@ -384,13 +426,125 @@ describe('EconomyService.firstSpend (E2)', () => {
     const report = await new EconomyService(
       db,
       dimensionStore(SYNCED),
+      tutorialStore(),
     ).firstSpend('2026-01', '2026-01');
 
     expect(report.byFunnelPosition).toBeNull();
+    expect(report.byFurthestStep).toBeNull();
+    // The switch being off is the default state of every environment, and it
+    // must read as "cannot measure" rather than as a list of zeroes.
     expect(report.funnelPositionUnavailableReason).toContain(
-      'posicao do jogador no tutorial',
+      'TUTORIAL_POSITION_ENABLED',
     );
-    expect(report.funnelPositionUnavailableReason).toContain('decisao do dono');
+  });
+
+  it('publishes spend by position once the ETL has written one', async () => {
+    // Started from the position table and LEFT JOINed to sales, so the base of
+    // each group is everyone in that position — not everyone in it who bought.
+    // Joining the other way makes every group spend 100% by construction.
+    const db = dbWith([
+      {
+        rows: [
+          {
+            entered: true,
+            completed_tutorial: true,
+            furthest_quest_id: '33tutorial',
+            furthest_index: 32,
+            sales: 2,
+            revenue_cents: '6000',
+          },
+          {
+            entered: true,
+            completed_tutorial: false,
+            furthest_quest_id: '03tutorial',
+            furthest_index: 2,
+            sales: 0,
+            revenue_cents: '0',
+          },
+          {
+            entered: true,
+            completed_tutorial: false,
+            furthest_quest_id: '03tutorial',
+            furthest_index: 2,
+            sales: 1,
+            revenue_cents: '1000',
+          },
+          {
+            entered: false,
+            completed_tutorial: false,
+            furthest_quest_id: null,
+            furthest_index: null,
+            sales: 0,
+            revenue_cents: '0',
+          },
+        ],
+      },
+      { rows: [] },
+    ]);
+
+    const report = await new EconomyService(
+      db,
+      dimensionStore(null),
+      tutorialStore({
+        positionsWritten: 10_834,
+        stepOrder: '01tutorial,02tutorial,03tutorial',
+      }),
+    ).firstSpend('2026-01', '2026-01');
+
+    const byPosition = new Map(
+      (report.byFunnelPosition ?? []).map((p) => [p.position, p]),
+    );
+
+    expect(byPosition.get('concluiu')).toMatchObject({
+      players: 1,
+      spenders: 1,
+      everSpent: { percent: 100, n: 1 },
+      revenue: '60.00',
+      medianFurthestStep: 32,
+    });
+    // Two players stopped at step 3; one of them bought. The base is both.
+    expect(byPosition.get('entrou_nao_concluiu')).toMatchObject({
+      players: 2,
+      spenders: 1,
+      everSpent: { percent: 50, n: 2 },
+      revenue: '10.00',
+    });
+    // The group that never touched the tutorial has a real base of its own,
+    // rather than being the silence between the other two.
+    expect(byPosition.get('nao_entrou')).toMatchObject({
+      players: 1,
+      spenders: 0,
+      everSpent: { percent: 0, n: 1 },
+      medianFurthestStep: null,
+    });
+
+    // The per-step half answers "quem trava no passo 03 gasta alguma coisa?",
+    // which no grouping can.
+    expect(report.byFurthestStep).toEqual([
+      {
+        step: '03tutorial',
+        index: 2,
+        players: 2,
+        spenders: 1,
+        everSpent: { percent: 50, n: 2 },
+        revenue: '10.00',
+      },
+      {
+        step: '33tutorial',
+        index: 32,
+        players: 1,
+        spenders: 1,
+        everSpent: { percent: 100, n: 1 },
+        revenue: '60.00',
+      },
+    ]);
+
+    // The inferred step order travels, so the inference can be checked.
+    expect(report.stepOrder).toEqual([
+      '01tutorial',
+      '02tutorial',
+      '03tutorial',
+    ]);
   });
 
   it('does not query at all when the dimension never synced', async () => {
@@ -400,6 +554,7 @@ describe('EconomyService.firstSpend (E2)', () => {
     const report = await new EconomyService(
       db,
       dimensionStore(null),
+      tutorialStore(),
     ).firstSpend('2026-01', '2026-01');
 
     expect(execute).not.toHaveBeenCalled();

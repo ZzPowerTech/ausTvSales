@@ -57,6 +57,13 @@
       "when": 1788304573345,
       "tag": "0007_player_payments",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788357477325,
+      "tag": "0008_tutorial_player_position",
+      "breakpoints": true
     }
   ]
 }

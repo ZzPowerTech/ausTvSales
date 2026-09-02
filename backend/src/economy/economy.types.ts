@@ -153,14 +153,34 @@ export interface FirstSpendReport {
   /** Set exactly when `byCohort` is null. */
   unavailableReason?: string;
   /**
-   * Always `null` today. See {@link FUNNEL_POSITION_UNAVAILABLE}.
+   * Spend by tutorial position — the second half of E2.
    *
-   * Present in the shape rather than omitted, for the same reason the funnel
-   * keeps publishing its `rede` step: a requirement that quietly disappears from
-   * a contract is a requirement nobody will remember was asked for.
+   * `null` when the per-player position table has never been filled, with the
+   * reason in {@link FirstSpendReport.funnelPositionUnavailableReason}. It stayed
+   * permanently null from story S9.1 until the owner authorised the footprint on
+   * 2026-09-02; the field was in the shape the whole time, because a requirement
+   * that quietly disappears from a contract is one nobody remembers was asked
+   * for.
    */
-  byFunnelPosition: null;
-  funnelPositionUnavailableReason: string;
+  byFunnelPosition: FunnelPositionSpend[] | null;
+  /** Set exactly when `byFunnelPosition` is null. */
+  funnelPositionUnavailableReason?: string;
+  /**
+   * Spend per furthest tutorial step, for players who entered.
+   *
+   * This is the half of the spec's question that groups cannot answer:
+   * *"quem trava no passo 03 gasta alguma coisa?"* needs the step, not the
+   * bucket. Null under the same condition as `byFunnelPosition`.
+   */
+  byFurthestStep: FurthestStepSpend[] | null;
+  /**
+   * The step order the positions were computed against, in order.
+   *
+   * Carried because `furthestIndex` is a position in it and that order is
+   * **inferred from quest file names**, not read from the quests themselves. A
+   * consumer that wants to check the inference has the list in hand.
+   */
+  stepOrder: string[] | null;
   sources: EconomySourceState[];
 }
 
@@ -189,8 +209,51 @@ export interface CohortFirstSpend {
   beforeRegistration: number;
 }
 
+/** Where a player stopped in the tutorial, as three coarse groups. */
+export const FUNNEL_POSITIONS = [
+  /** No tutorial progress at all — absent from the position table. */
+  'nao_entrou',
+  /** Touched the tutorial, did not complete the configured final quest. */
+  'entrou_nao_concluiu',
+  /** Completed the final quest. */
+  'concluiu',
+] as const;
+
+export type FunnelPosition = (typeof FUNNEL_POSITIONS)[number];
+
+/** Spend of one funnel position. */
+export interface FunnelPositionSpend {
+  position: FunnelPosition;
+  /** Buyers in this position. The base for `share`. */
+  players: number;
+  /** Of those, how many ever bought anything. */
+  spenders: number;
+  /** Share of the position that ever spent. */
+  everSpent: Share;
+  /** Total revenue from this position, in the window. */
+  revenue: Money;
+  /**
+   * Median furthest step index, for the players who entered.
+   *
+   * Null for `nao_entrou`, which has no step by definition.
+   */
+  medianFurthestStep: number | null;
+}
+
+/** Spend of the players whose furthest step is exactly this one. */
+export interface FurthestStepSpend {
+  /** Quest id, e.g. `03tutorial`. */
+  step: string;
+  /** Position of the step in `stepOrder`. */
+  index: number;
+  players: number;
+  spenders: number;
+  everSpent: Share;
+  revenue: Money;
+}
+
 /**
- * Why "spend by funnel position" is not published.
+ * Why "spend by funnel position" was not published until 2026-09-02.
  *
  * This is half of E2 as the spec writes it: *"quem conclui o tutorial gasta
  * mais? Quem trava no passo 03 gasta alguma coisa?"* Both need the tutorial
@@ -214,12 +277,10 @@ export interface CohortFirstSpend {
  * it away.
  */
 export const FUNNEL_POSITION_UNAVAILABLE =
-  'Nenhuma fonte deste sistema guarda a posicao do jogador no tutorial. O ' +
-  '`tutorial_daily` e agregado em `(dia, plataforma)` por decisao registrada da ' +
-  'S8.0 — tomada para nao trazer identidade de jogador do jogo para este banco ' +
-  'numa pergunta que se responde contando —, e essa decisao e exatamente o que ' +
-  'bloqueia esta metrica. Publicar "gasto por posicao no funil" exige persistir ' +
-  'a posicao POR JOGADOR, o que alarga a superficie de dado pessoal que a secao ' +
-  '8 do spec governa, e portanto e decisao do dono. O caminho e barato: uma ' +
-  'tabela por `player_uuid` com a quest mais avancada alcancada, escrita pelo ' +
-  'proprio ETL da S8.0, que ja le esse dado e o descarta.';
+  'A posicao por jogador no tutorial nunca foi gravada: o ETL do tutorial roda ' +
+  'com `TUTORIAL_POSITION_ENABLED` desligado, ou ainda nao completou uma ' +
+  'execucao com ele ligado. Sem ela nao ha como cruzar onde o jogador parou com ' +
+  'o que ele gastou — e uma lista vazia aqui se leria como "ninguem em posicao ' +
+  'nenhuma gastou", que e a confusao que este epico existe para remover. O ' +
+  'restante de E2 (tempo ate o primeiro gasto) nao depende disto e continua ' +
+  'valendo.';

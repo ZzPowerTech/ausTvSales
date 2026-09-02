@@ -289,6 +289,18 @@ export const tutorialSyncs = pgTable(
     /** Which quest was counted as completion on this run. */
     finalQuestId: text('final_quest_id'),
     /**
+     * The step order this run resolved, as a comma-separated list of quest ids.
+     *
+     * Stored because `tutorial_player_position.furthest_index` is a position in
+     * it, and that order is **inferred from the quest file names** rather than
+     * read from the quests' own requirements. Writing it down is what lets
+     * somebody check the inference against the game instead of trusting it — and
+     * what makes a reordering visible as a diff between two runs.
+     */
+    stepOrder: text('step_order'),
+    /** Rows written to `tutorial_player_position`, or null when disabled. */
+    positionsWritten: integer('positions_written'),
+    /**
      * Why an `error` run failed, in Portuguese. Never a stack trace.
      *
      * ⚠️ **Contains server-side absolute paths** — the failure messages name the
@@ -717,6 +729,90 @@ export const playerPaymentSyncs = pgTable(
     check(
       'player_payment_syncs_status_valid',
       sql`${table.status} IN ('ok', 'error')`,
+    ),
+  ],
+);
+
+/**
+ * How far each player got in the tutorial (story S9.3, spec §6.4 E2).
+ *
+ * ## This table is a deliberate widening of the personal-data footprint
+ *
+ * `tutorial_daily` is aggregated at `(day, platform)` precisely so that player
+ * identities from the game never land in this database, and that decision is
+ * right for the funnel — the funnel question is answered by counting.
+ *
+ * The second half of E2 is not. *"Quem conclui o tutorial gasta mais? Quem trava
+ * no passo 03 gasta alguma coisa?"* is a **join** between a player's tutorial
+ * position and that same player's purchases, and no aggregate of either side can
+ * answer it. So the metric was left unbuilt in story S9.1 and published as
+ * `null` with the reason, because widening what §8 governs is the owner's call.
+ *
+ * **The owner made it on 2026-09-02.** This table is that decision, and it is
+ * bounded by it:
+ *
+ * - **uuid and progress only.** No nickname, no IP, no session, no timestamps
+ *   beyond the day of entry — spec §6.4's *"nenhum dado pessoal além de UUID e
+ *   valor"*.
+ * - **Opt-in on its own switch** (`TUTORIAL_POSITION_ENABLED`), separate from
+ *   the tutorial ETL's. A footprint decision deserves a switch of its own; a new
+ *   deploy must not start writing player rows because a version changed.
+ * - **Replaced on every sync**, like `tutorial_daily`, because the source is
+ *   current state rather than an event log.
+ *
+ * ## Step order is inferred, and the inference is stored
+ *
+ * `furthest_index` is a position in the catalogue's natural order, which comes
+ * from the quest **file names** (`01tutorial` … `33tutorial`) and not from the
+ * quests' own requirements. That convention is strong and documented, and it is
+ * still a convention — so the resolved order is written into
+ * `tutorial_syncs.step_order` on every run, where a human can check it against
+ * the game instead of trusting it.
+ */
+export const tutorialPlayerPosition = pgTable(
+  'tutorial_player_position',
+  {
+    playerUuid: uuid('player_uuid').primaryKey(),
+    /** `bedrock` | `java_offline` | `java_premium` | `unknown` (ADR-003). */
+    platform: text('platform').notNull(),
+    /** Tutorial quests the player has any progress on. */
+    questsTouched: integer('quests_touched').notNull(),
+    /** Of those, how many are marked completed. */
+    questsCompleted: integer('quests_completed').notNull(),
+    /**
+     * Id of the furthest tutorial quest the player reached, by step order.
+     *
+     * The id and not only the index, because the index is meaningless without
+     * the catalogue that produced it — and the catalogue changes when the
+     * tutorial does.
+     */
+    furthestQuestId: text('furthest_quest_id'),
+    /** Position of {@link furthestQuestId} in the catalogue's step order. */
+    furthestIndex: integer('furthest_index'),
+    /** Whether the configured final quest is completed. */
+    completedTutorial: boolean('completed_tutorial').notNull(),
+    /** Day the player first touched any tutorial quest. */
+    enteredOn: date('entered_on'),
+    syncedAt: timestamp('synced_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    // The economy read groups by position and by platform.
+    index('tutorial_player_position_index_idx').on(
+      table.furthestIndex,
+      table.platform,
+    ),
+    check(
+      'tutorial_player_position_counts_non_negative',
+      sql`${table.questsTouched} >= 0 AND ${table.questsCompleted} >= 0`,
+    ),
+    // A player in this table touched the tutorial. Zero would mean the row
+    // should not exist, and a row that should not exist is a denominator nobody
+    // can explain.
+    check(
+      'tutorial_player_position_touched_positive',
+      sql`${table.questsTouched} > 0`,
     ),
   ],
 );

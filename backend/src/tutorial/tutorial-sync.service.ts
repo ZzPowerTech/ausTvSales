@@ -2,6 +2,7 @@ import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { opendir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { readPosition, type TutorialPosition } from './tutorial-position';
 import {
   aggregate,
   readContribution,
@@ -79,6 +80,8 @@ export class TutorialSyncService implements OnModuleInit {
   private readonly playerdataDir: string | null;
   private readonly catalogueDir: string | null;
   private readonly finalQuestId: string;
+  /** Whether to write one row per player. See the constructor. */
+  private readonly positionEnabled: boolean;
   /**
    * Guards against a second run starting while one is still walking the disk.
    *
@@ -101,6 +104,14 @@ export class TutorialSyncService implements OnModuleInit {
     this.finalQuestId =
       config.get<string>('TUTORIAL_FINAL_QUEST_ID')?.trim() ||
       DEFAULT_FINAL_QUEST_ID;
+    // Its own switch, separate from `TUTORIAL_SYNC_ENABLED`, because it is a
+    // different decision: the daily series is aggregated and carries no player
+    // identity, while this writes one row per player. A deploy must not start
+    // widening the footprint that spec section 8 governs because a version
+    // changed — the owner authorised the capability on 2026-09-02, and the
+    // switch is what makes turning it on a deliberate act.
+    this.positionEnabled =
+      config.get<boolean>('TUTORIAL_POSITION_ENABLED') === true;
   }
 
   onModuleInit(): void {
@@ -348,6 +359,10 @@ export class TutorialSyncService implements OnModuleInit {
     }
 
     const contributions: PlayerContribution[] = [];
+    // Only populated when the footprint switch is on. Kept as its own list, not
+    // folded into `contributions`, so the widening path is visible at every
+    // point it exists — see `tutorial-position.ts`.
+    const positions: TutorialPosition[] = [];
     let filesScanned = 0;
     let filesFailed = 0;
     let playersInTutorial = 0;
@@ -402,6 +417,13 @@ export class TutorialSyncService implements OnModuleInit {
           playersUndated += 1;
         }
         contributions.push(contribution);
+
+        if (this.positionEnabled) {
+          const position = readPosition(uuid, parsed.value, catalogue);
+          if (position !== null) {
+            positions.push(position);
+          }
+        }
       }
     } catch (error) {
       const detail = `Falha ao ler "${playerdataDir}": ${
@@ -454,6 +476,13 @@ export class TutorialSyncService implements OnModuleInit {
       };
     }
 
+    // Written BEFORE the provenance row, so a failure here cannot be recorded as
+    // a successful sync. The daily series and the positions come from the same
+    // scan and must not disagree about which run produced them.
+    const positionsWritten = this.positionEnabled
+      ? await this.store.replacePositions(positions)
+      : null;
+
     await this.store.replaceAll(rows, {
       filesScanned,
       filesFailed,
@@ -461,6 +490,10 @@ export class TutorialSyncService implements OnModuleInit {
       daysWritten: rows.length,
       questsInCatalogue: catalogue.ids.length,
       finalQuestId: catalogue.finalQuestId,
+      // The resolved step order, so the inference behind `furthest_index` can be
+      // checked against the game rather than trusted.
+      stepOrder: catalogue.ids.join(','),
+      positionsWritten,
     });
 
     const elapsed = Date.now() - started;
@@ -470,7 +503,10 @@ export class TutorialSyncService implements OnModuleInit {
     this.logger.log(
       `Funil do tutorial reconstruido em ${elapsed}ms: ${filesScanned} arquivos ` +
         `(${filesFailed} ilegiveis), ${playersInTutorial} jogadores no tutorial ` +
-        `(${playersUndated} sem data), ${rows.length} linhas dia x plataforma`,
+        `(${playersUndated} sem data), ${rows.length} linhas dia x plataforma` +
+        (positionsWritten === null
+          ? ' · posicao por jogador DESLIGADA (TUTORIAL_POSITION_ENABLED)'
+          : ` · ${positionsWritten} posicoes por jogador`),
     );
 
     return {

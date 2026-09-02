@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { InstrumentationModule } from '../instrumentation/instrumentation.module';
+import { TutorialModule } from '../tutorial/tutorial.module';
 import { AccountCreationsService } from './account-creations.service';
 import { EconomyController } from './economy.controller';
 import { EconomyService } from './economy.service';
@@ -42,7 +43,10 @@ import { SocialService } from './social.service';
  * here would make every scheduled job in the app fire twice.
  */
 @Module({
-  imports: [InstrumentationModule],
+  // `TutorialModule` for `TutorialStore`: E2's second half needs the per-player
+  // tutorial position and its provenance, and the provenance is what separates
+  // "nobody is in that position" from "the switch is off".
+  imports: [InstrumentationModule, TutorialModule],
   controllers: [EconomyController],
   providers: [
     EconomyService,
