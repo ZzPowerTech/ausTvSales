@@ -64,6 +64,13 @@
       "when": 1788357477325,
       "tag": "0008_tutorial_player_position",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788390837433,
+      "tag": "0009_suggestions",
+      "breakpoints": true
     }
   ]
 }

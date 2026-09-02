@@ -12,3 +12,9 @@ gradlew text eol=lf
 
 # Markdown sempre LF na working tree (evita ruido de EOL entre Windows e CI)
 *.md text eol=lf
+
+# Migrations sempre LF: o drizzle guarda o sha256 do CONTEUDO do arquivo em
+# __drizzle_migrations, e o script de rollback apaga essa linha pelo hash. Com
+# CRLF no Windows e LF no CI o mesmo arquivo tem dois hashes, e o DELETE viraria
+# no-op justamente na maquina onde o rollback importa.
+*.sql text eol=lf

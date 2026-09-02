@@ -843,3 +843,114 @@ export const tutorialPlayerPosition = pgTable(
     ),
   ],
 );
+
+/**
+ * The five states a suggestion can be in (spec §5.3).
+ *
+ * Stored as `text` with a check constraint rather than a Postgres enum, to match
+ * the rest of this schema and to keep adding a state a plain migration instead of
+ * an `ALTER TYPE` that cannot run inside a transaction.
+ */
+export const SUGGESTION_STATUSES = [
+  'enviada',
+  'aprovada',
+  'em_andamento',
+  'concluida',
+  'recusada',
+] as const;
+
+export type SuggestionStatus = (typeof SUGGESTION_STATUSES)[number];
+
+/** Longest suggestion text accepted on write. Also enforced by a DB check. */
+export const SUGGESTION_TEXT_MAX_CHARS = 2000;
+
+/**
+ * A player suggestion, as raised in Discord (spec §7).
+ *
+ * ## `created_at` has no database default, on purpose
+ *
+ * Every other timestamp in this schema is stamped by the database because it
+ * genuinely describes the insert. This one does not: it is the moment the player
+ * posted the suggestion, and the row can be written later than that — a bot
+ * restart, a replay, a backfill.
+ *
+ * The `Ticket-Bot` has the failure this omission prevents: `message.ts:13` uses
+ * `default: Date.now`, so an insert that forgets the date silently stores the
+ * insert time and nothing ever looks wrong. Here, forgetting it is a `NOT NULL`
+ * violation at the first write. See {@link updatedAt}, which is the opposite
+ * case and does default.
+ *
+ * ## Identity
+ *
+ * `author` and `assignee` hold **Discord user ids** (snowflakes), never display
+ * names. §8 allows an identifier and nothing more, and a display name is both
+ * personal data and mutable — the audit trail the states need has to survive a
+ * nickname change. The `Ticket-Bot` logs `displayName` today; that is the
+ * pattern this column exists not to repeat.
+ *
+ * ## Sanitization
+ *
+ * `text` is player-controlled. It is sanitized on write by
+ * `sanitizeSuggestionText`, and the consumer still escapes on render — §8 asks
+ * for both, because sanitizing cannot know the target syntax and escaping cannot
+ * undo a control character already stored.
+ */
+export const suggestions = pgTable(
+  'suggestions',
+  {
+    id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+    /**
+     * Id of the Discord message the suggestion came from.
+     *
+     * Unique: it is the natural key of the source event, so a bot that replays
+     * (reconnect, restart, double dispatch) cannot create a second row for the
+     * same suggestion.
+     */
+    discordMsgId: text('discord_msg_id').notNull(),
+    /** Discord user id of the author — an identifier, never a display name. */
+    author: text('author').notNull(),
+    /** Player-written body, already sanitized. Escaped again at render time. */
+    text: text('text').notNull(),
+    votesUp: integer('votes_up').notNull().default(0),
+    votesDown: integer('votes_down').notNull().default(0),
+    /** One of {@link SUGGESTION_STATUSES}; new suggestions start at `enviada`. */
+    status: text('status')
+      .$type<SuggestionStatus>()
+      .notNull()
+      .default('enviada'),
+    /** When the player posted it — **not** when the row was written. */
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    /** When this row last changed. Unlike {@link createdAt}, this is insert time. */
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /** Discord user id of the staff member who took it, if any. */
+    assignee: text('assignee'),
+  },
+  (table) => [
+    uniqueIndex('suggestions_discord_msg_id_unique').on(table.discordMsgId),
+    // The listing filters by state and orders by date (S10.3, S11.1).
+    index('suggestions_status_created_at_idx').on(
+      table.status,
+      table.createdAt,
+    ),
+    check(
+      'suggestions_status_valid',
+      sql`${table.status} IN ('enviada', 'aprovada', 'em_andamento', 'concluida', 'recusada')`,
+    ),
+    check(
+      'suggestions_votes_non_negative',
+      sql`${table.votesUp} >= 0 AND ${table.votesDown} >= 0`,
+    ),
+    // A suggestion with no text is not a suggestion. The sanitizer rejects it
+    // too; this is the guard for any write path that skips the sanitizer.
+    check('suggestions_text_present', sql`length(btrim(${table.text})) > 0`),
+    check(
+      'suggestions_text_max_length',
+      sql`length(${table.text}) <= ${sql.raw(String(SUGGESTION_TEXT_MAX_CHARS))}`,
+    ),
+  ],
+);
+
+export type Suggestion = typeof suggestions.$inferSelect;
+export type NewSuggestion = typeof suggestions.$inferInsert;
