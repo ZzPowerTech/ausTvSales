@@ -836,15 +836,101 @@ jogo.**
 
 ### S9.2 — Relatório periódico no Discord · 5 SP · `feat/api-weekly-report`
 
-1. Semanal: funil de 4 degraus, retenção por coorte e plataforma, saúde da instrumentação
-2. `n` ao lado de cada percentual
-3. Falha do job avisa no canal — degradação honesta, nunca silêncio
-4. Versão gerada persistida
+> ## ✅ ENTREGUE em 2026-09-01
+>
+> Módulo `report`: cron opt-in (segunda 09:00 BRT), tabela `weekly_reports`, publicação em
+> webhook **próprio**, e `GET /reports/weekly{,/latest,/:id}` + `POST /reports/weekly/run`.
+>
+> | critério | estado |
+> |---|---|
+> | 1. Funil, retenção por coorte e plataforma, saúde da instrumentação | ✅ as três seções, cada uma degradando por conta própria |
+> | 2. `n` ao lado de cada percentual | ✅ imposto pelo tipo, não pelo cuidado do renderer |
+> | 3. Falha do job avisa no canal | ✅ aviso publicado **mesmo quando o banco cai junto** — ver abaixo |
+> | 4. Versão gerada persistida | ✅ payload estruturado + o texto exato que foi enviado |
+>
+> ### O rollup semanal recusa uma semana parcial
+>
+> Um degrau só é somado quando **todos** os sete dias trazem número. Faltou um, o total sai
+> `null` com o motivo — e o motivo distingue *"a fonte está fora"* de *"a semana está
+> incompleta"*, que são coisas diferentes e teriam a mesma cara sob um `null` mudo. Somar seis
+> dias e publicar como semana é numerador menor contra denominador de semana inteira: a mesma
+> forma de erro do 4500% e do mês parcial.
+>
+> A janela termina **ontem**, não hoje. Incluir o dia corrente faria o balde mais novo ser
+> estruturalmente menor que os outros seis, e toda comparação semana-a-semana leria como queda —
+> errado na mesma direção toda semana, que é o tipo mais difícil de notar.
+>
+> **E o motivo é por degrau**, o que não era. Os degraus de tutorial caíam no texto genérico
+> *"sem fonte para este degrau"*, que culpa um ETL saudável por uma semana incompleta — e o
+> imprimia na mesma linha que a nota `6/7 dias` contradizendo-o. Achado do code review.
+>
+> ### Markdown de terceiro é neutralizado no corpo da mensagem
+>
+> Nome de check por alvo carrega o nome do servidor vindo do **catálogo do Plan**, texto livre
+> que este sistema não controla. Uma crase nele fecha o code span, e o resto da seção de saúde
+> — inclusive a linha que diz que o ciclo de checks está desligado — some dentro de um spoiler
+> ou de um fence. O `DiscordAlerter` já tinha aprendido isso; este renderer não. Quando há
+> crase, o valor sai escapado e **sem** code span: dentro de um span não existe com o que
+> escapar uma crase.
+>
+> ### Webhook próprio, sem fallback para o de alerta
+>
+> `DISCORD_REPORT_WEBHOOK_URL` é variável separada e **não** cai no `DISCORD_ALERT_WEBHOOK_URL`
+> quando ausente. O alerta pagina; o relatório é leitura de rotina. Misturar dilui o canal de
+> alerta até ninguém mais ler — que é como um canal do Discord vira mudo, e este épico já tem
+> uma história sobre isso. Sem webhook o relatório ainda é gerado e persistido, e o boot avisa.
+>
+> ### 🔴 O critério 3 era inalcançável para a única falha que acontece de verdade
+>
+> Descoberto no code review. Rastreando o que pode fazer `builder.build()` estourar: o funil
+> engole toda falha de fonte e a retenção transforma toda falha em rótulo fechado. A única
+> dependência que **rejeita** é o read model de saúde — ou seja, o **nosso próprio Postgres**.
+>
+> Com o `persist` sem `try/catch` próprio, essa mesma falha fazia o `recordFailure` estourar e
+> o `publishFailure` nunca era chamado. Resultado: sem linha, sem aviso vermelho, uma linha de
+> log — e ausência de linha é **definida neste módulo** como "o agendador não disparou", o que
+> seria falso. O modo de falha que a história existe para impedir, reproduzido pelo módulo
+> construído para impedi-lo.
+>
+> Agora o `persist` tem catch próprio e o aviso vai ao canal com ou sem linha gravada. O canal
+> é a parte que não pode depender do banco estar de pé.
+>
+> ### `POST /reports/weekly/run` existe por causa do DoD
+>
+> O DoD da S9 pede *"um relatório real gerado e conferido à mão"*. Esperar uma segunda-feira
+> faria da própria conferência uma atividade de cadência semanal, e a história deste épico diz
+> que o que só acontece por agendamento é o que nunca acontece. Limitado a 6 execuções por hora:
+> cada uma consulta o Plan na máquina do jogo e manda mensagem no canal.
+>
+> 🔴 **E esse limite era inerte.** `@Throttle` sozinho é metadado; o `ThrottlerGuard` não é
+> `APP_GUARD` neste app de propósito. A rota compilava, documentava-se como limitada e não
+> limitava nada — na única rota com efeito colateral externo. Virou `@ManualRunThrottle()`,
+> que empacota guard e perfil como o `@DashboardThrottle()` faz, e o e2e assere os cabeçalhos
+> de rate limit em vez de confiar no decorador.
+>
+> ### A falha que este módulo **não** consegue anunciar
+>
+> O agendador nunca disparar. Nada dentro de um processo que não rodou pode dizer que não rodou,
+> e por isso a ausência de linha em `weekly_reports` significa exatamente isso. As duas defesas
+> são o aviso de boot em frase inteira e o próprio corpo do relatório, que imprime toda semana se
+> o ciclo de checks está ligado.
+
+1. [x] Semanal: funil de 4 degraus, retenção por coorte e plataforma, saúde da instrumentação
+2. [x] `n` ao lado de cada percentual
+3. [x] Falha do job avisa no canal — degradação honesta, nunca silêncio
+4. [x] Versão gerada persistida
 
 ### DoD da S9
 
-- [ ] Timings anexado ao PR provando ausência de regressão de tick
-- [ ] Um relatório real gerado e conferido à mão
+- [ ] **Timings anexado ao PR provando ausência de regressão de tick** — pertence à S9.1, e
+      **não é produzível fora da produção**: exige rodar o ETL contra o MySQL do PlayerPoints na
+      máquina do jogo. O que a sessão pôde fazer foi instrumentar o ETL para *medir e persistir* o
+      próprio tempo, de modo que a primeira execução real produza a evidência. Ver o bloco da S9.1
+- [~] **Um relatório real gerado e conferido à mão** — o gatilho existe
+      (`POST /reports/weekly/run`) e o caminho inteiro é exercitado no e2e contra Postgres real,
+      com **todas** as fontes ausentes: o run é persistido, o corpo nomeia cada falha e nada vira
+      zero. O que falta é o run em **produção**, com Plan alcançável e webhook configurado, e a
+      conferência humana do texto que chega no canal. É item de dono
 
 **[CORTE]** S9.1.
 

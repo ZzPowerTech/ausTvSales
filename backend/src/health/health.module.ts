@@ -31,6 +31,11 @@ import { InstrumentationHealthService } from './instrumentation-health.service';
   imports: [InstrumentationModule, ThrottlingModule],
   controllers: [HealthController, InstrumentationHealthController],
   providers: [HealthService, InstrumentationHealthService],
-  exports: [HealthService],
+  // `InstrumentationHealthService` is exported for the weekly report (S9.2),
+  // which prints the state of the measurement layer alongside the numbers it
+  // produced. Deliberately the read model and not the store: the report should
+  // see exactly what `/health/instrumentation` publishes, so the two can never
+  // disagree about whether the system is blind.
+  exports: [HealthService, InstrumentationHealthService],
 })
 export class HealthModule {}

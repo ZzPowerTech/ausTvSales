@@ -11,6 +11,7 @@ import { InstrumentationModule } from './instrumentation/instrumentation.module'
 import { ItemsModule } from './items/items.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { FunnelModule } from './funnel/funnel.module';
+import { ReportModule } from './report/report.module';
 import { RetentionModule } from './retention/retention.module';
 import { TutorialModule } from './tutorial/tutorial.module';
 import { SalesModule } from './sales/sales.module';
@@ -53,6 +54,10 @@ import { SalesModule } from './sales/sales.module';
     // deixou de ser necessaria quando o corpo do endpoint foi lido, e este
     // modulo nao abre conexao MySQL nenhuma.
     RetentionModule,
+    // Relatorio periodico no Discord (S9.2). Nao calcula metrica nenhuma: le o
+    // funil, a retencao e o read model de saude, e o unico dado que possui e o
+    // registro do que foi reportado em cada semana.
+    ReportModule,
     CategoriesModule,
     ItemsModule,
     SalesModule,

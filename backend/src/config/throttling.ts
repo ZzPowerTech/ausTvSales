@@ -164,6 +164,44 @@ export class ThrottlingModule {}
  *
  * Bundling makes the wrong combination unrepresentable.
  */
+/**
+ * Rate limit for a route whose cost is **outbound**, not inbound.
+ *
+ * `POST /reports/weekly/run` reaches the game machine and posts to a Discord
+ * channel on every call. The dashboard profile is sized for a human clicking
+ * around a page (120/min) and is far too generous for that; six an hour is
+ * generous for someone checking a report by hand and low enough that a browser
+ * tab stuck in a retry loop cannot turn the channel into a flood.
+ *
+ * Bundled with the guard for the reason `DashboardThrottle` states and this
+ * codebase then proved by getting it wrong: `@Throttle` alone is **metadata**,
+ * and `ThrottlerGuard` is deliberately not an `APP_GUARD` here. A bare
+ * `@Throttle` compiles, reads as throttled, documents itself as throttled — and
+ * enforces nothing. It was on the one route with side effects.
+ */
+export const MANUAL_RUN_THROTTLE_TTL_MS = 3_600_000;
+export const MANUAL_RUN_THROTTLE_LIMIT = 6;
+
+export const manualRunThrottle = {
+  default: {
+    ttl: MANUAL_RUN_THROTTLE_TTL_MS,
+    limit: MANUAL_RUN_THROTTLE_LIMIT,
+  },
+} as const;
+
+export function ManualRunThrottle(): ReturnType<typeof applyDecorators> {
+  return applyDecorators(
+    UseGuards(ThrottlerGuard),
+    Throttle(manualRunThrottle),
+    ApiResponse({
+      status: 429,
+      description:
+        'Limite de execucoes manuais excedido (ver manualRunThrottle): cada ' +
+        'execucao consulta a maquina do jogo e publica no canal.',
+    }),
+  );
+}
+
 export function DashboardThrottle(): ReturnType<typeof applyDecorators> {
   return applyDecorators(
     UseGuards(ThrottlerGuard),

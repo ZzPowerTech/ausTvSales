@@ -312,3 +312,77 @@ export type Player = typeof players.$inferSelect;
 export type NewPlayer = typeof players.$inferInsert;
 export type Sale = typeof sales.$inferSelect;
 export type NewSale = typeof sales.$inferInsert;
+
+/**
+ * Every weekly report this system has generated (story S9.2, spec §6.1).
+ *
+ * ## Why the generated version is stored and not merely sent
+ *
+ * Criterion 4 of the story asks for it, and the reason is auditability: without
+ * a stored copy there is no way to reconstruct **what was known on a given
+ * date**. A Discord message can be deleted, edited, or lost in a channel purge,
+ * and "we reported the funnel at 12% in the first week of September" stops being
+ * a checkable claim the moment the only copy is a chat message.
+ *
+ * Append-only, like {@link healthChecks} and {@link tutorialSyncs}, and for the
+ * same reason: comparing this week against last week is the point.
+ *
+ * ## An `error` row is a report too
+ *
+ * A run that could not build its content still writes a row, with `status`
+ * `error` and the reason. That is what makes "the job stopped running" different
+ * from "the job ran and had nothing to say" — the distinction whose absence let
+ * the proxy sit dead for three months. The absence of a row for a week is
+ * therefore meaningful, and it means the scheduler itself did not fire.
+ *
+ * ## `delivered` is separate from `status`
+ *
+ * A report can build perfectly and fail to reach Discord. Folding the two would
+ * make a webhook outage look like an analytics outage, and send whoever reads
+ * this table to the wrong system.
+ */
+export const weeklyReports = pgTable(
+  'weekly_reports',
+  {
+    id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+    generatedAt: timestamp('generated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /** First day of the reported window, America/Sao_Paulo. */
+    periodFrom: date('period_from').notNull(),
+    /** Last day of the reported window, inclusive. */
+    periodTo: date('period_to').notNull(),
+    /** `ok` — content was built. `error` — the run failed before it could be. */
+    status: text('status').notNull().$type<'ok' | 'error'>(),
+    /**
+     * The structured report, exactly as it was assembled.
+     *
+     * Stored whole rather than as extracted columns: the shape of a report is
+     * expected to change as the epic adds layers, and a schema migration per
+     * added metric would guarantee that old rows lose the fields they used to
+     * carry. What this table is for is answering "what did the report say in
+     * September", and that answer has to survive the report changing shape.
+     */
+    payload: jsonb('payload').$type<Record<string, unknown>>(),
+    /** The rendered text that was (or would have been) sent to the channel. */
+    rendered: text('rendered'),
+    /** Whether the channel actually received it. Distinct from `status`. */
+    delivered: boolean('delivered').notNull().default(false),
+    /** Why an `error` run failed, in Portuguese. Never a stack trace. */
+    detail: text('detail'),
+  },
+  (table) => [
+    // The only two reads: "the latest report" and "the last N reports".
+    index('weekly_reports_generated_at_idx').on(table.generatedAt.desc()),
+    check(
+      'weekly_reports_status_valid',
+      sql`${table.status} IN ('ok', 'error')`,
+    ),
+    // A window that ends before it starts is a bug in the caller, and a report
+    // stored with one would silently misdate every number inside it.
+    check(
+      'weekly_reports_period_ordered',
+      sql`${table.periodFrom} <= ${table.periodTo}`,
+    ),
+  ],
+);
