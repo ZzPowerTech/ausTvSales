@@ -545,3 +545,178 @@ export const playerDimensionSyncs = pgTable(
     ),
   ],
 );
+
+/**
+ * Player-to-player payments, copied from `playerpoints_transaction_log`
+ * (story S9.1, ADR-007/ADR-008).
+ *
+ * ## Why a copy and not a live read
+ *
+ * The source table **has no index at all** — no primary key, nothing on
+ * `receiver`, `timestamp` or `source` (measured 2026-08-21). Any aggregation
+ * over it is a full table scan on the MySQL that the Minecraft server itself
+ * uses, so ADR-007 forbids reading it live and mandates a nightly ETL into this
+ * database, where the indexes are ours.
+ *
+ * ## Only `PAY_SENDER` and `PAY_RECEIVER` are copied
+ *
+ * 1.332 rows of 6.664. `OFFSET` carries the administrative grant of 9.999.999
+ * that R2 keeps out of every revenue metric, and `SET` is an arrivals series
+ * rather than a payment — it lands in {@link accountCreationsDaily} as a count,
+ * with no player row at all.
+ *
+ * ## The natural key, and why the source's lack of one is a real problem
+ *
+ * A table with no primary key cannot tell a **re-read** from a **second
+ * payment**. Two players can genuinely pay the same amount to the same person in
+ * the same second, and the log records both as byte-identical rows.
+ *
+ * So the key here is `(transaction_type, source, receiver, amount, occurred_at,
+ * ordinal)`, where `ordinal` counts identical rows within one run, assigned in a
+ * deterministic order. Re-running the ETL reproduces the same ordinals — the
+ * upsert is a no-op, which is what makes it idempotent — while two genuinely
+ * identical payments keep ordinals 0 and 1 and both survive. Collapsing them
+ * would silently delete a payment; inventing a surrogate key per run would
+ * duplicate every row every night.
+ *
+ * ## The direction is inferred from the type name and the sign, not observed
+ *
+ * `PAY_RECEIVER` rows carry a positive amount and `PAY_SENDER` rows a negative
+ * one, and both have `source` filled — that much is measured. That `receiver`
+ * holds the credited account and `source` the counterparty is the natural
+ * reading of the schema and **has not been confirmed against a known payment**.
+ * Both types are therefore copied verbatim, so a correction later costs a query
+ * and not a re-ETL, and the sync record counts each type separately: if the two
+ * counts ever diverge, the pairing assumption is wrong and the number says so.
+ */
+export const playerPayments = pgTable(
+  'player_payments',
+  {
+    /** `PAY_SENDER` or `PAY_RECEIVER`, verbatim from the source. */
+    transactionType: text('transaction_type').notNull(),
+    /** The counterparty uuid, as the source records it. */
+    source: text('source').notNull(),
+    /** The account the row applies to, as the source records it. */
+    receiver: text('receiver').notNull(),
+    /** Signed amount, in the game's cash unit. Integer in the source. */
+    amount: integer('amount').notNull(),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+    /** Disambiguates byte-identical rows. See the note above. */
+    ordinal: integer('ordinal').notNull(),
+    syncedAt: timestamp('synced_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.transactionType,
+        table.source,
+        table.receiver,
+        table.amount,
+        table.occurredAt,
+        table.ordinal,
+      ],
+    }),
+    // The feed reads "the last N payments"; E3 reads a time window.
+    index('player_payments_occurred_at_idx').on(table.occurredAt.desc()),
+    // The anomaly marks read "this pair, in this window" and "this sender's
+    // distinct receivers" — both lead with the counterparty.
+    index('player_payments_source_occurred_at_idx').on(
+      table.source,
+      table.occurredAt.desc(),
+    ),
+    index('player_payments_receiver_occurred_at_idx').on(
+      table.receiver,
+      table.occurredAt.desc(),
+    ),
+  ],
+);
+
+/**
+ * Account creations per day, from the `SET` / `Starting balance` rows (R1).
+ *
+ * ADR-007 calls this an **independent arrivals series**: it is continuous, it
+ * comes from a plugin that never stopped writing, and it **covers the Plan
+ * blackout of May–July 2026** — the three months where the proxy was dead and
+ * the funnel has nothing at all. That makes it a reconciliation source for
+ * §6.2, not merely an economy figure.
+ *
+ * ## Aggregated, with no player row
+ *
+ * `SET` rows carry a `receiver` uuid, and none of it is stored: the question
+ * ("how many accounts were created that day") is answered by counting, and the
+ * S8.0 rule applies — spec §8 keeps player identity out of this database
+ * wherever a count suffices. That is also why this table is separate from
+ * {@link playerPayments}, where the join genuinely needs the uuid.
+ *
+ * Replaced on every sync, like `tutorial_daily`: the source is a log, so a full
+ * recount is the cheapest correct thing and re-running is the normal operation.
+ */
+export const accountCreationsDaily = pgTable(
+  'account_creations_daily',
+  {
+    /** Calendar day in America/Sao_Paulo. */
+    day: date('day').primaryKey(),
+    /** `SET` rows on that day. */
+    created: integer('created').notNull(),
+  },
+  (table) => [
+    check(
+      'account_creations_daily_created_non_negative',
+      sql`${table.created} >= 0`,
+    ),
+  ],
+);
+
+/**
+ * Provenance of each PlayerPoints ETL run (story S9.1).
+ *
+ * Same reason the other two provenance tables exist: an empty
+ * {@link playerPayments} is indistinguishable from a sync that never ran.
+ *
+ * `duration_ms` and `source_query_ms` are here because the S9 Definition of Done
+ * asks for timings proving the ETL costs the game nothing, and the number has to
+ * be written down by the thing that measured it. This is the ETL that actually
+ * touches the game's MySQL — the player-dimension one is a single HTTP call —
+ * so this is the row that answers that question.
+ */
+export const playerPaymentSyncs = pgTable(
+  'player_payment_syncs',
+  {
+    id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+    ranAt: timestamp('ran_at', { withTimezone: true }).notNull().defaultNow(),
+    /** `ok` — payments and the arrivals series were refreshed. */
+    status: text('status').notNull().$type<'ok' | 'error'>(),
+    /** `PAY_*` rows read from the source. */
+    paymentsRead: integer('payments_read'),
+    /** Rows upserted into {@link playerPayments}. */
+    paymentsWritten: integer('payments_written'),
+    /**
+     * `PAY_SENDER` and `PAY_RECEIVER` counted apart.
+     *
+     * They should match one-to-one. If they ever stop matching, the assumption
+     * that the two types are the two halves of one payment is wrong, and every
+     * social number built on it is wrong with it. Recorded rather than asserted.
+     */
+    senderRows: integer('sender_rows'),
+    receiverRows: integer('receiver_rows'),
+    /** `SET` rows counted, feeding {@link accountCreationsDaily}. */
+    creationsRead: integer('creations_read'),
+    /** Days written to the arrivals series. */
+    creationDaysWritten: integer('creation_days_written'),
+    /** Wall-clock duration of the whole run, milliseconds. */
+    durationMs: integer('duration_ms'),
+    /** Time spent inside the MySQL query itself, milliseconds. */
+    sourceQueryMs: integer('source_query_ms'),
+    /** Why an `error` run failed, in Portuguese. Never a stack trace. */
+    detail: text('detail'),
+  },
+  (table) => [
+    index('player_payment_syncs_ran_at_idx').on(table.ranAt.desc()),
+    check(
+      'player_payment_syncs_status_valid',
+      sql`${table.status} IN ('ok', 'error')`,
+    ),
+  ],
+);

@@ -50,7 +50,7 @@ export interface CohortRevenue {
 
 /** Provenance of one input to the economy layer. */
 export interface EconomySourceState {
-  name: 'sales' | 'player_dimension';
+  name: 'sales' | 'player_dimension' | 'player_payments';
   ok: boolean;
   /** ISO-8601 of the data's own currency, where there is one. */
   asOf: string | null;
