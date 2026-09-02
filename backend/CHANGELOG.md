@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.17.1](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.17.0...backend-v0.17.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* **admin:** marca de amostra pequena por horizonte, não só por coorte ([#194](https://github.com/ZzPowerTech/ausTvSales/issues/194)) ([8534a8c](https://github.com/ZzPowerTech/ausTvSales/commit/8534a8c8a8adb6e89d10a288098bf5bd721ec8da))
+* **admin:** o piso de tamanho decidia sozinho quais coortes publicavam 100% ([#192](https://github.com/ZzPowerTech/ausTvSales/issues/192)) ([c3dbc35](https://github.com/ZzPowerTech/ausTvSales/commit/c3dbc35baec9290f6d1489acb85ce700e48f2040))
+
 ## [0.17.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.16.0...backend-v0.17.0) (2026-09-02)
 
 
