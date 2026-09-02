@@ -476,6 +476,14 @@ function monthStates(all: readonly CohortRetention[]): Map<string, MonthState> {
     // A failing cohort settles the month whatever else it holds. A month can
     // carry a failing cohort AND a healthy one at the same time — production
     // 2025-08 does — and that makes it evidence, not a wall.
+    //
+    // The consequence, stated because it is not obvious: one failing cohort of
+    // twenty defeats the clean-month wall for its whole month, so a small cohort
+    // there can be suppressed while a 500-player cohort beside it publishes a
+    // demonstrably real curve. That is the intended reading — the write
+    // PROVABLY touched that month — and it is the exact case production 2025-08
+    // needs. The suppression reason carries the ratio ("3 de 4"), so the payload
+    // never claims the month was uniformly bad.
     if (judgedImplausible(cohort)) {
       states.set(cohort.cohort, 'confirmed');
       continue;

@@ -292,7 +292,7 @@ describe('WeeklyReportBuilder', () => {
         confirmedCohorts: 21,
         judgedCohorts: 22,
         inheritedCohorts: 23,
-        inheritedPlayers: 331,
+        inheritedPlayers: 327,
       },
     ];
     const funnel = {

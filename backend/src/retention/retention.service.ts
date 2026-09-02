@@ -374,12 +374,19 @@ export class RetentionService {
     // span with zero inherited cohorts is still the detector saying "this range
     // of the dataset is an import", which is worth knowing even on the reads
     // where nothing small happened to fall inside it.
+    //
+    // The two warnings this method emits have DIFFERENT SCOPES, and the words
+    // "no dataset" below are what keeps them apart: a span is a property of the
+    // whole payload and its counts never shrink to the window, while the stamp
+    // warning underneath counts the cohorts actually being returned. Two numbers
+    // in one log with no scope on either is how a reader concludes the wrong
+    // thing from a line that is technically true.
     for (const span of spans) {
       this.logger.warn(
-        `Faixa contaminada ${span.from}..${span.to}: ` +
-          `${span.confirmedCohorts} de ${span.judgedCohorts} coorte(s) ` +
-          `julgaveis reprovadas por evidencia propria em ` +
-          `${span.confirmedMonths.length} mes(es), e mais ` +
+        `Faixa contaminada ${span.from}..${span.to} (contagens do dataset ` +
+          `inteiro, nao desta janela): ${span.confirmedCohorts} de ` +
+          `${span.judgedCohorts} coorte(s) julgaveis reprovadas por evidencia ` +
+          `propria em ${span.confirmedMonths.length} mes(es), e mais ` +
           `${span.inheritedCohorts} coorte(s) (${span.inheritedPlayers} ` +
           'jogadores) suprimidas por heranca — pequenas demais para julgar ' +
           'sozinhas, mesma forma de ~100%, dentro da faixa.',
@@ -392,7 +399,7 @@ export class RetentionService {
     }
 
     this.logger.warn(
-      `${suppressed.length} de ${cohorts.length} coortes tiveram ` +
+      `Nesta janela, ${suppressed.length} de ${cohorts.length} coortes tiveram ` +
         `${RETENTION_HORIZON_DAYS.map(horizonLabel).join('/')} suprimidos por ` +
         `carimbo de importacao (limiar ${this.contaminationMax}). Dias ` +
         `detectados: ${
