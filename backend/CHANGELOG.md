@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.16.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.15.2...backend-v0.16.0) (2026-09-02)
+
+
+### Features
+
+* **admin:** contato social e feed de moderação, sobre uma cópia noturna do log ([#186](https://github.com/ZzPowerTech/ausTvSales/issues/186)) ([7d15052](https://github.com/ZzPowerTech/ausTvSales/commit/7d15052053806fdc2e0d6d53ac236ed76a8a22ee))
+* **admin:** receita por plataforma e coorte, sem plugin e sem credencial nova ([#185](https://github.com/ZzPowerTech/ausTvSales/issues/185)) ([8ffe290](https://github.com/ZzPowerTech/ausTvSales/commit/8ffe290bbe2e085b3dbbd9d70b85760300004ead))
+* **admin:** relatório semanal que também avisa quando ele próprio falha ([#184](https://github.com/ZzPowerTech/ausTvSales/issues/184)) ([66bff98](https://github.com/ZzPowerTech/ausTvSales/commit/66bff98694ac7ad362c0dcbebe41c341912d48fc))
+* **admin:** retenção por coorte sem abrir a exceção que a história pedia ([#183](https://github.com/ZzPowerTech/ausTvSales/issues/183)) ([a987377](https://github.com/ZzPowerTech/ausTvSales/commit/a987377932a27a340c872b0604ad9558f87a76bc))
+
 ## [0.15.2](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.15.1...backend-v0.15.2) (2026-09-01)
 
 
