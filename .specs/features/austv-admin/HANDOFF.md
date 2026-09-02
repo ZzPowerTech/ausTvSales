@@ -1323,8 +1323,51 @@ restaurar**.
    `WEEKLY_REPORT_ENABLED`, mais `DISCORD_REPORT_WEBHOOK_URL`. É a mesma forma do ETL do
    tutorial, que ficou meses no repo sem estar configurado e só apareceu na validação de
    2026-09-01.
-3. **Conferir a direção do pagamento** contra um pagamento conhecido. Um comando no jogo
-   responde, e dela dependem `from`/`to` do feed e a marca `funding_many`.
+3. 🟡 **Meio-conferido em 2026-09-02, e o meio que falta é justamente a direção.** O dono leu
+   um pagamento real e mediu o **layout**: as duas linhas que o PlayerPoints grava por
+   transferência **trocam `source` e `receiver` entre si**, com o amount negado.
+
+   ```
+   PAY_RECEIVER  source=c628…   receiver=41574…    35
+   PAY_SENDER    source=41574…  receiver=c628…    -35
+   ```
+
+   Isso é forte e resolve uma coisa: **nenhuma leitura dessas colunas vale para as duas
+   linhas**, então fixar `transaction_type` é pré-requisito para elas significarem qualquer
+   coisa, e quem consultar `player_payments` direto sem filtrar mistura duas leituras opostas no
+   mesmo resultado. Registrado no `schema.ts`, em `CANONICAL_PAYMENT_TYPE` e no
+   `directionCaveat` do payload.
+
+   **🔴 Mas o par não decide a direção, e eu escrevi aqui que decidia.** Ele é um espelho
+   perfeito: sobrevive intacto tanto a `receiver` ser o sujeito da linha (o que faz `source` ser
+   o pagador na `PAY_RECEIVER` — o que o feed assume) quanto a `source` ser o sujeito, que
+   inverteria todo `from`/`to` e apontaria `funding_many` para quem **recebeu** de muitos. Nem o
+   sinal (o `+` está na linha do recebedor sob as duas leituras) nem os nomes dos tipos (as duas
+   concordam que nomeiam o sujeito da linha) quebram o empate.
+
+   O erro de método: *"as colunas trocam"* é **consequência** da simetria e carrega informação
+   zero sobre direção, e eu o tratei como a confirmação — reescrevendo para "CONFIRMADA" uma
+   ressalva que um moderador lê antes de agir sobre uma marca. Pego pelo review, não por mim, e
+   é a segunda vez neste ciclo que publico uma certeza que a evidência não sustenta.
+
+   **O que resolve, e custa um `SELECT` em vez de um comando no jogo:** uma linha de tipo
+   **unilateral** — `SET` (a série de chegadas do R1) ou `OFFSET` (o grant administrativo de
+   9.999.999). Elas têm uma parte real só, então a coluna que carrega o uuid do jogador ali é o
+   sujeito, e a direção sai por dedução sem simetria onde se esconder. O código **já aposta**
+   nessa leitura: `PlayerPointsDatabase.accountCreations` deliberadamente não seleciona o
+   `receiver` de uma linha `SET` *porque ali é o jogador*. Aposta não é medida — mas é a
+   corroboração que faltava citar.
+   Alternativa igualmente barata: o dono dizer qual dos dois uuids do par era o dele.
+   **Um defeito real caiu junto:** o E3 fazia o join sem filtrar o tipo, então casava o mesmo
+   jogador nas duas linhas e contava todo pagamento duas vezes. **A duplicação era inerte** —
+   as contagens só são lidas como `> 0` para escolher o grupo, e dobrar preserva o zero —, então
+   nenhum número publicado estava errado. Corrigido mesmo assim: o dia em que uma dessas
+   contagens virar número publicado, ela é 2×.
+   **E o motivo de nenhum teste pegar é o mesmo padrão de sempre:** todas as fixtures de
+   pagamento eram `PAY_RECEIVER`. Com uma linha por pagamento, um join que lê os dois tipos é
+   indistinguível de um que lê o certo — a propriedade que separa os dois simplesmente não
+   existia no conjunto de testes. É a segunda vez em dois dias que a lacuna é essa forma:
+   *a fixture não tinha a combinação que expõe o defeito*, e não *faltava um caso*.
 4. ✅ **Feito em 2026-09-02.** A posição no tutorial por jogador foi autorizada pelo dono e
    entregue: `tutorial_player_position`, escrita pelo mesmo ETL, atrás de
    `TUTORIAL_POSITION_ENABLED`. `/economy/first-spend` publica `byFunnelPosition` (três

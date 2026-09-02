@@ -8,6 +8,7 @@ import type { EconomySourceState } from './economy.types';
 import { PaymentsStore, type StoredPayment } from './payments.store';
 import {
   FEED_DISCLAIMER,
+  CANONICAL_PAYMENT_TYPE,
   PAYMENT_DIRECTION_CAVEAT,
   type FeedPayment,
   type FlagMark,
@@ -15,16 +16,6 @@ import {
 } from './social.types';
 
 const MS_PER_DAY = 86_400_000;
-
-/**
- * Only `PAY_RECEIVER` rows are read.
- *
- * Each payment is logged twice — once from each side — so reading both types
- * would double every count in the window and every pair repetition with it. The
- * receiver side is the one carrying the positive amount, which is what a human
- * reads as "the payment".
- */
-const CANONICAL_TYPE = 'PAY_RECEIVER';
 
 /** Defaults, documented in `.env.example` as uncalibrated guesses. */
 const DEFAULT_WINDOW_DAYS = 30;
@@ -126,7 +117,7 @@ export class PaymentsFeedService {
 
     const since = new Date(Date.now() - windowDays * MS_PER_DAY);
     const window = (await this.payments.allPaymentsSince(since)).filter(
-      (payment) => payment.transactionType === CANONICAL_TYPE,
+      (payment) => payment.transactionType === CANONICAL_PAYMENT_TYPE,
     );
 
     // Percentile over the WHOLE window, not over the page. A mark computed on

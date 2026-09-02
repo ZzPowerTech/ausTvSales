@@ -10,6 +10,7 @@ import { PlayerDimensionStore } from './player-dimension.store';
 import {
   CONTACT_GROUPS,
   SOCIAL_D7_SEMANTICS,
+  CANONICAL_PAYMENT_TYPE,
   TUTORIAL_SEPARATION_CAVEAT,
   type ContactGroup,
   type ContactGroupResult,
@@ -188,6 +189,37 @@ export class SocialService {
    * who *send or receive*, and a newcomer being paid by a veteran is social
    * contact just as much as the reverse — arguably more, since it is the
    * veteran choosing to engage.
+   *
+   * ## One ledger row per payment, and the `OR` still catches both directions
+   *
+   * `player_payments` holds **two** rows per transfer, and they swap `source`
+   * and `receiver` between them (see {@link CANONICAL_PAYMENT_TYPE}). Without
+   * the type filter this join matched a player on both of them — every payment
+   * counted twice, whichever end of it the player was on.
+   *
+   * That doubling was inert here, and saying so is the honest version: the two
+   * counts below are only ever read as `> 0` when picking a contact group, and
+   * doubling preserves zero. No published number was wrong. What it was is a
+   * loaded gun — the day either count is published as a count, it is 2×.
+   *
+   * The `OR` still reaches both ends from one row, and — usefully — it does so
+   * **without depending on the direction**: it is symmetric in the two columns,
+   * so this metric is correct whichever of the two readings of `source` and
+   * `receiver` turns out to be right.
+   *
+   * ## What the filter does cost
+   *
+   * A payment whose `PAY_RECEIVER` half is missing now disappears from this
+   * metric entirely, and the player is filed under `none` with no warning. The
+   * unfiltered version got that case right, by accident — it counted the
+   * surviving half.
+   *
+   * Not hypothetical by decree: the ETL counts `senderRows` against
+   * `receiverRows` precisely because a broken pairing is the observation that
+   * would falsify the assumption this rests on. Production is 666/666 today, so
+   * the cost is zero today — but it is a real trade, and the honest version is
+   * that it converts a logged condition into a silent one rather than that it is
+   * free.
    */
   private async contactRows(
     fromMonth: string,
@@ -207,7 +239,8 @@ export class SocialService {
         )::int AS spontaneous
       FROM ${playerDimension}
       LEFT JOIN ${playerPayments}
-        ON (
+        ON ${playerPayments.transactionType} = ${CANONICAL_PAYMENT_TYPE}
+        AND (
              ${playerPayments.receiver} = ${playerDimension.uuid}::text
           OR ${playerPayments.source} = ${playerDimension.uuid}::text
         )

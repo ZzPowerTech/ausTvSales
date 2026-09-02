@@ -34,6 +34,22 @@ describe('Economy social (e2e)', () => {
   const SOCIAL = '11111111-1111-4111-8111-00000000aa01';
   const TUTORIAL_ONLY = '11111111-1111-4111-8111-00000000aa02';
   const SILENT = '11111111-1111-4111-8111-00000000aa03';
+  /**
+   * Receives the tutorial amount and sends a spontaneous one, and only the
+   * receive half is paired.
+   *
+   * This player exists to make the type filter observable. Every other fixture
+   * here is a matched pair, and a matched pair CANNOT show the difference: the
+   * two rows are negations of each other, the SQL groups on `abs(amount)`, so
+   * reading both simply doubles each count — and the group is picked by `> 0`,
+   * which doubling preserves. A test built on paired rows passes with the filter
+   * and passes without it.
+   *
+   * With two halves carrying DIFFERENT amounts, the readings diverge:
+   * filtered → `tutorial_only` (only the 100 is seen); unfiltered → the -250 is
+   * seen too and the player becomes `spontaneous`.
+   */
+  const CROSS = '11111111-1111-4111-8111-00000000aa04';
 
   const REGISTERED = new Date('2026-01-10T15:00:00.000Z');
   /** Survived past D7. */
@@ -55,6 +71,7 @@ describe('Economy social (e2e)', () => {
         dimension(SOCIAL, REGISTERED, LATE),
         dimension(TUTORIAL_ONLY, REGISTERED, LATE),
         dimension(SILENT, REGISTERED, EARLY),
+        dimension(CROSS, REGISTERED, LATE),
       ]);
   });
 
@@ -188,14 +205,53 @@ describe('Economy social (e2e)', () => {
           amount: 42,
           occurredAt: RECENT,
         }),
+        // The `PAY_SENDER` halves of the first three payments, with `source` and
+        // `receiver` SWAPPED and the amount negated — the shape a real
+        // PlayerPoints log has, confirmed against a live payment on 2026-09-02.
+        //
+        // Every fixture in this file used to be receiver-only, which is why the
+        // double-count went unseen: with only one row per payment, a join that
+        // reads both types is indistinguishable from one that reads the right
+        // one. These three rows are the property that tells them apart.
+        payment({
+          transactionType: 'PAY_SENDER',
+          source: SOCIAL,
+          receiver: 'someone-else',
+          amount: -250,
+          minutesAfter: 5,
+        }),
+        payment({
+          transactionType: 'PAY_SENDER',
+          source: TUTORIAL_ONLY,
+          receiver: 'someone-else',
+          amount: -100,
+          minutesAfter: 5,
+        }),
+        payment({
+          transactionType: 'PAY_SENDER',
+          source: SILENT,
+          receiver: 'someone-else',
+          amount: -300,
+          minutesAfter: 60 * 24,
+        }),
+        // CROSS: the two halves carry different amounts, which is the only shape
+        // that makes the type filter observable. See the constant.
+        payment({ receiver: CROSS, amount: 100, minutesAfter: 5 }),
+        payment({
+          transactionType: 'PAY_SENDER',
+          source: CROSS,
+          receiver: 'someone-else',
+          amount: -250,
+          minutesAfter: 5,
+        }),
       ]);
 
       await db.insert(playerPaymentSyncs).values({
         status: 'ok',
-        paymentsRead: 6,
-        paymentsWritten: 6,
-        senderRows: 0,
-        receiverRows: 6,
+        paymentsRead: 11,
+        paymentsWritten: 11,
+        senderRows: 4,
+        receiverRows: 7,
         creationsRead: 0,
         creationDaysWritten: 0,
         durationMs: 20,
@@ -240,16 +296,53 @@ describe('Economy social (e2e)', () => {
         d7: { percent: 100, n: 1 },
       });
       // The tutorial payment is separated from spontaneous contact, which is a
-      // requirement of the story rather than a refinement.
+      // requirement of the story rather than a refinement. Two players: the one
+      // with only a tutorial payment, and CROSS, whose spontaneous half is on
+      // the ledger row this metric does not read.
       expect(byGroup.get('tutorial_only')).toMatchObject({
-        players: 1,
-        d7: { percent: 100, n: 1 },
+        players: 2,
+        d7: { percent: 100, n: 2 },
       });
       // The player whose only payment fell outside the first-minutes window.
       expect(byGroup.get('none')).toMatchObject({
         players: 1,
         d7: { percent: 0, n: 1 },
       });
+    });
+
+    it('reads one ledger row per payment, not both', async () => {
+      // A first attempt at this test used a matched pair and proved nothing: the
+      // two rows negate each other, the SQL groups on `abs(amount)`, and the
+      // group is picked by `> 0` — so reading both merely doubles both counts
+      // and the published group is identical either way. It passed with the
+      // filter and passed without it.
+      //
+      // CROSS is the shape that discriminates. Its `PAY_RECEIVER` half is the
+      // tutorial amount and its unpaired `PAY_SENDER` half is a spontaneous one,
+      // so the two readings put it in DIFFERENT groups: `tutorial_only` when the
+      // type is pinned, `spontaneous` when both rows are read.
+      const rows = await db.execute<{ total: number }>(
+        sql`SELECT count(*)::int AS total FROM ${playerPayments}
+             WHERE ${playerPayments.receiver} = ${CROSS}
+                OR ${playerPayments.source} = ${CROSS}`,
+      );
+      // Both rows really are in the table — otherwise this proves nothing.
+      expect(rows.rows[0].total).toBe(2);
+
+      const response = await request(app.getHttpServer())
+        .get('/economy/social-contact?from=2026-01&to=2026-01')
+        .set('Cookie', authCookie)
+        .expect(200);
+
+      const body = response.body as {
+        groups: { group: string; players: number }[];
+      };
+
+      const byGroup = new Map(body.groups.map((g) => [g.group, g.players]));
+      // 2 = TUTORIAL_ONLY + CROSS. Drop the filter and CROSS moves to
+      // `spontaneous`, taking both of these numbers with it.
+      expect(byGroup.get('tutorial_only')).toBe(2);
+      expect(byGroup.get('spontaneous')).toBe(1);
     });
 
     it('shows the feed with the thresholds and the disclaimer', async () => {
@@ -279,8 +372,11 @@ describe('Economy social (e2e)', () => {
         amount: 42,
         flags: [],
       });
-      // The caveat a mark can be wrong about travels with the data.
-      expect(body.directionCaveat).toContain('DIRECAO e inferida');
+      // Both halves travel with the data: the column swap is measured, the
+      // direction is still inferred, and a moderator needs to know which is
+      // which before acting on a `funding_many`.
+      expect(body.directionCaveat).toContain('MEDIDO');
+      expect(body.directionCaveat).toContain('CONTINUA INFERIDA');
     });
 
     it('publishes the arrivals series with its caveat', async () => {
