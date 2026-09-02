@@ -132,6 +132,14 @@ describe('Economy (e2e)', () => {
   });
 
   afterAll(async () => {
+    // This suite seeds `tutorial_syncs`, and a successful sync row is **global
+    // state** that the weekly-report suite reads: with one present, the funnel's
+    // `tutorial_daily` source reports `ok` and that suite's "every upstream
+    // missing" assertion stops being true. Truncating on the way in is not
+    // enough when the row outlives the suite that wrote it.
+    await db.execute(
+      sql`TRUNCATE tutorial_player_position, tutorial_syncs RESTART IDENTITY CASCADE`,
+    );
     await app.close();
   });
 
@@ -258,7 +266,7 @@ describe('Economy (e2e)', () => {
       // The blocked half of E2 is published as blocked, not omitted.
       expect(body.byFunnelPosition).toBeNull();
       expect(body.funnelPositionUnavailableReason).toContain(
-        'posicao do jogador no tutorial',
+        'TUTORIAL_POSITION_ENABLED',
       );
     });
   });
