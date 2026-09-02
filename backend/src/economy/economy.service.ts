@@ -60,8 +60,13 @@ type ExcludedRow = {
  * because the PlayerPoints log holds a 9.999.999 row. This service never opens
  * that log: revenue comes from `sales`, where each row is a purchase carrying
  * the price the Genesis `%price%` placeholder resolved. The exclusion is
- * **structural**, not a filter someone has to remember to write, and a test
- * pins it.
+ * **structural**, not a filter someone has to remember to write.
+ *
+ * No test asserts it, and none can: there is nothing to assert against, because
+ * nothing in this module can reach the PlayerPoints log. A structural guarantee
+ * is stronger than a tested one — but an earlier version of this comment claimed
+ * a test existed, which is the kind of claim this repository audits later and
+ * finds wrong.
  *
  * ## Platform comes from the uuid; cohort comes from the dimension
  *

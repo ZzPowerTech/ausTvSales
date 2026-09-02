@@ -64,38 +64,57 @@ export class PlayerDimensionStore {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDB) {}
 
   /**
-   * Upsert every row, in chunks. Returns how many were written.
+   * Upsert every row, in one transaction. Returns how many were written.
    *
    * Idempotent by construction: the same payload applied twice produces the same
    * table, which is criterion 2 of the story ("idempotente e re-executável").
+   *
+   * ## Why the whole loop is one transaction
+   *
+   * Because three places promise it is. The ETL's floor rule exists to avoid
+   * *"metade das linhas congeladas ao lado de metade atualizadas"*, and the sync
+   * service and the scheduler both state that a failure leaves the previous
+   * dimension exactly as it was.
+   *
+   * Chunked without a transaction, a failure on chunk 7 of 12 left ~3.000 rows
+   * refreshed beside ~2.500 stale — the precise state the floor rule was built
+   * to prevent — while `lastSuccessfulSync` still pointed at the previous night,
+   * so `/economy/revenue` kept serving an `asOf` from a table that was half
+   * tonight's. No consumer could tell.
+   *
+   * It also makes the return value true: inside a committed transaction, every
+   * row of every chunk landed, so `chunk.length` is rows written and not rows
+   * attempted.
    */
   async upsert(rows: readonly DimensionRow[]): Promise<number> {
     let written = 0;
 
-    for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
-      const chunk = rows.slice(i, i + CHUNK_SIZE);
-      await this.db
-        .insert(playerDimension)
-        .values(
-          chunk.map((row) => ({
-            uuid: row.uuid,
-            platform: row.platform,
-            registeredAt: row.registeredAt,
-            lastSeenAt: row.lastSeenAt,
-            syncedAt: new Date(),
-          })),
-        )
-        .onConflictDoUpdate({
-          target: playerDimension.uuid,
-          set: {
-            platform: sql`excluded.platform`,
-            registeredAt: sql`excluded.registered_at`,
-            lastSeenAt: sql`excluded.last_seen_at`,
-            syncedAt: sql`excluded.synced_at`,
-          },
-        });
-      written += chunk.length;
-    }
+    await this.db.transaction(async (tx) => {
+      for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+        const chunk = rows.slice(i, i + CHUNK_SIZE);
+        await tx
+          .insert(playerDimension)
+          .values(
+            chunk.map((row) => ({
+              uuid: row.uuid,
+              platform: row.platform,
+              registeredAt: row.registeredAt,
+              lastSeenAt: row.lastSeenAt,
+              syncedAt: new Date(),
+            })),
+          )
+          .onConflictDoUpdate({
+            target: playerDimension.uuid,
+            set: {
+              platform: sql`excluded.platform`,
+              registeredAt: sql`excluded.registered_at`,
+              lastSeenAt: sql`excluded.last_seen_at`,
+              syncedAt: sql`excluded.synced_at`,
+            },
+          });
+        written += chunk.length;
+      }
+    });
 
     return written;
   }

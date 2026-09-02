@@ -125,7 +125,16 @@ export interface EconomyRevenueReport {
     salesTotal: number;
     revenueWithCohort: Money;
   } | null;
-  /** What was left out for having no real timestamp. */
+  /**
+   * What was left out for having no real timestamp.
+   *
+   * ⚠️ **Not windowed.** This is the whole historical corpus, whatever `from`
+   * and `to` say, so a March request republishes every migrated row beside a
+   * March figure. That matches `AnalyticsService`, which does the same for the
+   * same reason — the historical rows all sit before any window anyway, and the
+   * point of the field is to make the exclusion visible rather than to measure
+   * it. Stated here because the field name does not say it.
+   */
   excludedHistorical: { sales: number; revenue: Money };
   sources: EconomySourceState[];
 }

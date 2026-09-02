@@ -201,7 +201,18 @@ export const tutorialDaily = pgTable(
   {
     /** Calendar day in America/Sao_Paulo. Bucketed at write time. */
     day: date('day').notNull(),
-    /** `bedrock` | `java_offline` | `java_premium` | `unknown` (ADR-003). */
+    /**
+     * `bedrock` | `java_offline` | `java_premium` | `unknown` (ADR-003).
+     *
+     * Written by the ETL and **read by no query in this application** — the read
+     * paths recompute it from the uuid, so that ADR-003 has exactly one
+     * implementation and it is the TypeScript one. It is kept because an
+     * operator reading this table by hand needs the derived value beside the
+     * uuid, and because the index below leads with `registered_at` anyway.
+     *
+     * No `CHECK` constraint: the only writer is `platformOf`, whose return type
+     * is the union. A constraint would be a second spelling of that rule.
+     */
     platform: text('platform').notNull(),
     /** Players whose earliest tutorial `started-date` fell on this day. */
     entered: integer('entered').notNull(),
@@ -411,10 +422,28 @@ export const weeklyReports = pgTable(
  * no funil — alimentada por ETL a partir do Plan. É o que torna o cruzamento
  * possível."*
  *
- * The footprint is also not new: `sales.player_uuid` and `players.uuid` have
- * held player identity since sprint 1. Spec §8 permits *"nenhum dado pessoal
- * além de UUID e valor"* for this layer, and nothing here goes beyond that —
- * no nickname, no IP, no session.
+ * ## The footprint this adds, stated plainly
+ *
+ * It **is** new, and an earlier version of this comment said otherwise by
+ * pointing at `sales.player_uuid` and `players.uuid`. Those hold the uuids of
+ * people who *bought something*. This table lands the uuid of **every
+ * registered player** — ~5.565 — plus two behavioural timestamps each, a whole
+ * population that had never appeared in this database.
+ *
+ * It is permitted: ADR-008 names this dimension by column, and spec §8 allows
+ * *"nenhum dado pessoal além de UUID e valor"* for this layer. Nothing here goes
+ * beyond that — no nickname, no IP, no session. But "permitted" and "not new"
+ * are different claims, and only the first one is true.
+ *
+ * Saying so matters because this same story argues, in `economy.types.ts`, that
+ * per-player tutorial position is the owner's call **on personal-data-footprint
+ * grounds**. Two expansions of the same kind cannot be held to opposite
+ * standards; the difference is that ADR-008 already decided this one and nothing
+ * has decided the other.
+ *
+ * ⚠️ **There is no retention or deletion policy for this table.** Rows are
+ * upserted and never removed. That is a gap for the owner, not a defect of this
+ * story.
  *
  * ## Deliberately separate from {@link players}
  *
@@ -434,7 +463,18 @@ export const playerDimension = pgTable(
   'player_dimension',
   {
     uuid: uuid('uuid').primaryKey(),
-    /** `bedrock` | `java_offline` | `java_premium` | `unknown` (ADR-003). */
+    /**
+     * `bedrock` | `java_offline` | `java_premium` | `unknown` (ADR-003).
+     *
+     * Written by the ETL and **read by no query in this application** — the read
+     * paths recompute it from the uuid, so that ADR-003 has exactly one
+     * implementation and it is the TypeScript one. It is kept because an
+     * operator reading this table by hand needs the derived value beside the
+     * uuid, and because the index below leads with `registered_at` anyway.
+     *
+     * No `CHECK` constraint: the only writer is `platformOf`, whose return type
+     * is the union. A constraint would be a second spelling of that rule.
+     */
     platform: text('platform').notNull(),
     /** `registerDate` from `/v1/retention`. The cohort axis. */
     registeredAt: timestamp('registered_at', { withTimezone: true }).notNull(),

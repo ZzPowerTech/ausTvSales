@@ -41,6 +41,16 @@ describe('Economy (e2e)', () => {
 
   const ITEM = 'economyE2eItem';
 
+  /**
+   * 2026-03-11 02:00 UTC is 2026-03-10 23:00 in São Paulo.
+   *
+   * The one fixture that can tell `AT TIME ZONE 'America/Sao_Paulo'` from its
+   * absence. Every other sale here sits at 15:00 UTC — midday in both zones —
+   * so the test named "applies the window in São Paulo local time" passed
+   * byte-identically with the timezone conversion deleted. This one does not.
+   */
+  const LATE_NIGHT = '2026-03-11T02:00:00.000Z';
+
   beforeAll(async () => {
     ({ app, authCookie } = await createAuthenticatedApp());
     db = app.get<DrizzleDB>(DRIZZLE);
@@ -106,6 +116,16 @@ describe('Economy (e2e)', () => {
         ),
         historicalImport: true,
       },
+      // 23:00 BRT on the 10th. A UTC bucket would file it on the 11th.
+      {
+        ...sale(
+          '11111111-0000-4000-8000-000000000005',
+          PREMIUM_2,
+          '7.00',
+          '2026-03-10',
+        ),
+        purchasedAt: new Date(LATE_NIGHT),
+      },
     ]);
   });
 
@@ -155,10 +175,10 @@ describe('Economy (e2e)', () => {
         excludedHistorical: { sales: number; revenue: string };
       };
 
-      // 60 + 20 + 20, with the 999.00 historical row excluded.
+      // 60 + 20 + 20 + 7, with the 999.00 historical row excluded.
       expect(body.totals).toEqual({
-        revenue: '100.00',
-        sales: 3,
+        revenue: '107.00',
+        sales: 4,
         buyers: 3,
       });
       expect(body.byPlatform).toEqual([
@@ -167,14 +187,14 @@ describe('Economy (e2e)', () => {
           revenue: '20.00',
           sales: 1,
           buyers: 1,
-          share: { percent: 20, n: 1 },
+          share: { percent: 18.7, n: 1 },
         },
         {
           platform: 'java_premium',
-          revenue: '80.00',
-          sales: 2,
+          revenue: '87.00',
+          sales: 3,
           buyers: 2,
-          share: { percent: 80, n: 2 },
+          share: { percent: 81.3, n: 3 },
         },
       ]);
       expect(body.byCohort).toBeNull();
@@ -185,14 +205,28 @@ describe('Economy (e2e)', () => {
       });
     });
 
-    it('applies the window in São Paulo local time', async () => {
-      const response = await request(app.getHttpServer())
+    it('applies the window in São Paulo local time, not UTC', async () => {
+      // The 7.00 sale is 2026-03-11 02:00 UTC = 2026-03-10 23:00 BRT. Asking
+      // for the 11th onwards must NOT include it; a UTC bucket would.
+      const from11 = await request(app.getHttpServer())
         .get('/economy/revenue?from=2026-03-11&to=2026-03-12')
         .set('Cookie', authCookie)
         .expect(200);
 
-      const body = response.body as { totals: { revenue: string } };
-      expect(body.totals.revenue).toBe('20.00');
+      expect(
+        (from11.body as { totals: { revenue: string } }).totals.revenue,
+      ).toBe('20.00');
+
+      // And asking for the 10th alone must include it.
+      const on10 = await request(app.getHttpServer())
+        .get('/economy/revenue?from=2026-03-10&to=2026-03-10')
+        .set('Cookie', authCookie)
+        .expect(200);
+
+      // 60.00 from the 10th plus the 7.00 late-night sale.
+      expect(
+        (on10.body as { totals: { revenue: string } }).totals.revenue,
+      ).toBe('67.00');
     });
 
     it('rejects an inverted window', async () => {
@@ -229,14 +263,20 @@ describe('Economy (e2e)', () => {
 
   describe('with a synced dimension', () => {
     beforeAll(async () => {
-      await db
-        .insert(playerDimension)
-        .values([
-          dimension(PREMIUM, '2026-01-05', '2026-04-01'),
-          dimension(PREMIUM_2, '2026-01-20', '2026-04-01'),
-          dimension(BEDROCK, '2026-02-02', '2026-04-01'),
-          dimension(SILENT, '2026-01-25', '2026-02-01'),
-        ]);
+      await db.insert(playerDimension).values([
+        dimension(PREMIUM, '2026-01-05', '2026-04-01'),
+        dimension(PREMIUM_2, '2026-01-20', '2026-04-01'),
+        // Registered 2026-02-01 01:00 UTC = 2026-01-31 22:00 BRT. The cohort
+        // is JANUARY, and only the Sao Paulo truncation puts it there — this
+        // is the one dimension row that can tell the two apart.
+        dimension(
+          BEDROCK,
+          '2026-02-02',
+          '2026-04-01',
+          new Date('2026-02-01T01:00:00.000Z'),
+        ),
+        dimension(SILENT, '2026-01-25', '2026-02-01'),
+      ]);
       await db.insert(playerDimensionSyncs).values({
         status: 'ok',
         rowsRead: 4,
@@ -246,13 +286,18 @@ describe('Economy (e2e)', () => {
       });
     });
 
-    function dimension(uuid: string, registered: string, lastSeen: string) {
+    function dimension(
+      uuid: string,
+      registered: string,
+      lastSeen: string,
+      registeredAt = new Date(`${registered}T15:00:00.000Z`),
+    ) {
       return {
         uuid,
         platform: uuid.startsWith('00000000-0000-0000-0009-')
           ? 'bedrock'
           : 'java_premium',
-        registeredAt: new Date(`${registered}T15:00:00.000Z`),
+        registeredAt,
         lastSeenAt: new Date(`${lastSeen}T15:00:00.000Z`),
       };
     }
@@ -278,26 +323,29 @@ describe('Economy (e2e)', () => {
 
       expect(body.byCohort).toEqual([
         {
+          // The Bedrock player registered at 2026-02-01 01:00 UTC, which is
+          // 2026-01-31 22:00 BRT — January, not February. A UTC truncation
+          // would put this row in its own `2026-02` bucket.
           cohort: '2026-01',
-          platform: 'java_premium',
-          revenue: '80.00',
-          sales: 2,
-          buyers: 2,
-        },
-        {
-          cohort: '2026-02',
           platform: 'bedrock',
           revenue: '20.00',
           sales: 1,
           buyers: 1,
         },
+        {
+          cohort: '2026-01',
+          platform: 'java_premium',
+          revenue: '87.00',
+          sales: 3,
+          buyers: 2,
+        },
       ]);
       // Every sale matched a cohort here, and the coverage says so explicitly
       // rather than leaving a reader to assume it.
       expect(body.cohortCoverage).toEqual({
-        salesWithCohort: 3,
-        salesTotal: 3,
-        revenueWithCohort: '100.00',
+        salesWithCohort: 4,
+        salesTotal: 4,
+        revenueWithCohort: '107.00',
       });
     });
 
@@ -319,8 +367,10 @@ describe('Economy (e2e)', () => {
         }[];
       };
 
-      const january = body.byCohort.find((c) => c.cohort === '2026-01');
-      // Three players registered in January; one of them never bought.
+      const january = body.byCohort.find(
+        (c) => c.cohort === '2026-01' && c.platform === 'java_premium',
+      );
+      // Three Java premium players registered in January; one never bought.
       expect(january).toMatchObject({
         cohortSize: 3,
         spenders: 2,
@@ -336,12 +386,44 @@ describe('Economy (e2e)', () => {
 
     it('restricts to the cohort window asked for', async () => {
       const response = await request(app.getHttpServer())
-        .get('/economy/first-spend?from=2026-02&to=2026-02')
+        .get('/economy/first-spend?from=2026-01&to=2026-01')
         .set('Cookie', authCookie)
         .expect(200);
 
       const body = response.body as { byCohort: { cohort: string }[] };
-      expect(body.byCohort.map((c) => c.cohort)).toEqual(['2026-02']);
+      // Everyone registered in January once the São Paulo truncation is applied.
+      expect(new Set(body.byCohort.map((c) => c.cohort))).toEqual(
+        new Set(['2026-01']),
+      );
+    });
+
+    it('counts a buyer whose first purchase predates their registration', async () => {
+      // They demonstrably bought. Leaving them out of `spenders` published a
+      // share whose numerator silently dropped real buyers — and `registerDate`
+      // is when Plan first saw the player, not when the account was created,
+      // while `sales` reaches further back.
+      const response = await request(app.getHttpServer())
+        .get('/economy/first-spend?from=2026-01&to=2026-01')
+        .set('Cookie', authCookie)
+        .expect(200);
+
+      const body = response.body as {
+        byCohort: {
+          platform: string;
+          spenders: number;
+          beforeRegistration: number;
+          everSpent: { percent: number | null };
+        }[];
+      };
+
+      const bedrock = body.byCohort.find((c) => c.platform === 'bedrock');
+      // Registered 2026-01-31 22:00 BRT, bought on 2026-03-15: a normal
+      // interval, so nothing lands in `beforeRegistration` here.
+      expect(bedrock).toMatchObject({
+        spenders: 1,
+        beforeRegistration: 0,
+        everSpent: { percent: 100 },
+      });
     });
 
     it('rejects a day where a cohort month is expected', async () => {
