@@ -1166,3 +1166,70 @@ não volta.
 - **Verificar o controle antes de confiar num teste.** Nesta sessão: um `nmap` foi descartado
   porque o controle falhou; um `fechada` foi descartado porque era o comando não existindo no CMD;
   um "Plan sem histórico" era o banco errado sendo consultado.
+
+---
+
+## Sprint 9 entregue em 2026-09-02 — e o que ela deixou por medir
+
+As três histórias estão em `main`: S8.2 (#183), S9.2 (#184), S9.1 em duas fatias (#185, #186).
+
+### Erros de método que esta sprint cometeu, para não repetir
+
+**1. Um teste que passa não prova que a decisão está certa; prova que ela não mudou.**
+Dois casos, ambos encontrados por code review e não pelo CI:
+
+- O harness do ETL de pagamentos tinha `[]` como padrão de `accountCreations`, então **todo
+  teste do arquivo executava `replaceCreations([])`** — a chamada que apaga a série de
+  chegadas — e nenhum asseria nada sobre isso. O caminho destrutivo rodava no caminho feliz.
+- O e2e asseria `expect(body.days).toEqual([])` com o comentário *"um array vazio dentro de
+  um intervalo coberto é uma resposta real"*. Era a saída exata do defeito, fixada como
+  contrato.
+
+**2. O tipo da linha é o que o código acredita, não o que o driver faz.** O `pg` converte
+uma coluna `timestamptz` em `Date` e os tipos de linha dizem isso. Ele **não** faz o mesmo
+com o resultado de um agregado: `min(purchased_at)` voltou como string e o `.getTime()`
+estourou. Os unitários mockam o handle do Drizzle, então o tipo era o que o teste escrevia.
+Só o e2e contra Postgres real viu. Todo timestamp lido por `db.execute` passa por um
+normalizador agora.
+
+**3. Uma guarda pode liberar exatamente o que ela existe para recusar.** A regex que exigia
+offset explícito numa data-string aceitava `2026-09-01`, porque ela só olhava o fim da
+string e `-01` casa com "menos uma hora". O V8 então lê a forma só-data como meia-noite UTC
+= 21:00 BRT do dia anterior, e todo registro do dia 1 cairia na coorte do mês anterior. O
+defeito chegou ao `main` pelo #183 e foi corrigido pelo #185.
+
+**4. Rebasear uma pilha de PRs perde trabalho se você limpar a árvore.** Quatro correções do
+review do #185 foram descartadas por um `git checkout -- .` antes de trocar de branch, e o
+commit seguinte as descrevia como aplicadas. Duas o CI pegou; duas só apareceram ao conferir
+o arquivo. Se for preciso guardar trabalho para rebasear, guarde e **confira depois de
+restaurar**.
+
+### O que sobra para o dono, e nenhum item é código
+
+1. **Provisionar o usuário MySQL read-only e dedicado** do PlayerPoints no `jogar.austv.net`.
+   O usuário dos plugins é exatamente o que **não** se deve reusar: as credenciais dele estão
+   em texto plano em quatro configs no servidor do jogo. Sem isso, E3, E4 e a série de
+   chegadas reportam `never_synced` — nunca zero.
+2. **Ligar os três jobs na VPS.** `PLAYER_DIMENSION_SYNC_ENABLED`, `PAYMENTS_SYNC_ENABLED` e
+   `WEEKLY_REPORT_ENABLED`, mais `DISCORD_REPORT_WEBHOOK_URL`. É a mesma forma do ETL do
+   tutorial, que ficou meses no repo sem estar configurado e só apareceu na validação de
+   2026-09-01.
+3. **Conferir a direção do pagamento** contra um pagamento conhecido. Um comando no jogo
+   responde, e dela dependem `from`/`to` do feed e a marca `funding_many`.
+4. **Decidir sobre a posição no tutorial por jogador**, que destrava a metade de E2 que não
+   foi entregue. É expansão de dado pessoal sob a §8; o caminho está descrito no
+   `economy.types.ts` e custa uma tabela alimentada pelo ETL que já lê esse dado e o descarta.
+5. **Fechar (ou rejustificar) a exceção 1 do ADR-002.** Ela não tem mais nenhum consumidor.
+6. **Calibrar os limiares novos** contra a primeira leitura de produção: os dois do detector
+   de carimbo (retenção) e os quatro do feed de moderação. Todos saem no payload de propósito,
+   e todos estão marcados como chute no `.env.example`.
+
+### Os dois itens do DoD da S9 que não podem ser fechados daqui
+
+- **"Timings anexado ao PR provando ausência de regressão de tick"** — exige rodar contra a
+  produção. O que dá para fazer foi feito: os dois ETLs medem a si mesmos e persistem
+  `duration_ms`, e o do PlayerPoints persiste também `source_query_ms`, o tempo dentro da
+  query do banco do jogo. A primeira execução real produz a evidência sozinha.
+- **"Um relatório real gerado e conferido à mão"** — o gatilho existe
+  (`POST /reports/weekly/run`) e o caminho inteiro é exercitado no e2e com **todas** as fontes
+  ausentes. Falta o run em produção e a leitura humana do que chegou no canal.

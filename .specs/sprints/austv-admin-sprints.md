@@ -1050,6 +1050,46 @@ jogo.**
 > usuário, senão o cron era registrado para um job que só sabia falhar; e o e2e do feed deixou de
 > ter data fixa, que quebraria sozinho em 2027 sem janela maior para compensar.
 
+## Fechamento da S9 — 2026-09-02
+
+| história | estado |
+|---|---|
+| **S8.2** — Retenção por coorte (herdada do `[CORTE]` da S8) | ✅ entregue — PR [#183](https://github.com/ZzPowerTech/ausTvSales/pull/183) |
+| **S9.1** — Módulo `economy` | ✅ entregue em duas fatias — PRs [#185](https://github.com/ZzPowerTech/ausTvSales/pull/185) (receita) e [#186](https://github.com/ZzPowerTech/ausTvSales/pull/186) (social) |
+| **S9.2** — Relatório semanal no Discord | ✅ entregue — PR [#184](https://github.com/ZzPowerTech/ausTvSales/pull/184) |
+
+**18 SP contra 13 de capacidade, e o `[CORTE]` não foi exercido.** Ler isso como
+velocidade seria o erro que o `HANDOFF.md` avisa ao medir a S6: a S8.2 chegou aqui
+**destravada** — o `curl` que a bloqueava foi dado em 2026-08-29 —, e o que ela exigia era
+código, não investigação. A S9.1 também encolheu no caminho: a metade de E2 que cruza gasto
+com posição no funil **não foi entregue**, por decisão registrada que é do dono.
+
+### O que o code review mudou, e vale mais que a contagem de SP
+
+Cada PR passou por um agente de review com o spec inteiro em mãos. **Os quatro voltaram
+`BLOCKED`**, e três dos achados eram da mesma família — um número errado com cara de número
+certo:
+
+| PR | achado que bloqueou | por que importa |
+|---|---|---|
+| #183 | maturidade medida contra o **relógio**, sobrevivência contra o **dado** | com a coleta parada, publicava `D30: 0,0%` sobre base de centenas: o apagão de três meses vestido de medição |
+| #183 | detector de carimbo só via **um dia isolado** | o `HANDOFF` diz "idêntico **ou colado**", e a saída de uma detecção perdida é uma coorte a 100% |
+| #184 | o aviso de falha era **inalcançável** pela única falha que acontece | a única dependência que rejeita é o nosso Postgres — e ela também derrubava o `recordFailure` |
+| #184 | o limite de 6 execuções/hora era **metadado inerte** | `@Throttle` sem guard, na única rota com efeito externo |
+| #185 | `everSpent` descartava comprador real do **próprio numerador** | dois endpoints do mesmo módulo se contradizendo |
+| #186 | a série de chegadas **não tinha piso** e é reescrita | uma leitura vazia apagava 26 meses irrecuperáveis, e gravava `ok` por cima |
+
+Dois padrões que valem registrar como método, não como incidente:
+
+1. **O e2e contra Postgres real pegou o que o unitário não podia.** O `pg` devolve o
+   resultado de um agregado como string, não `Date`; os unitários mockam o driver, então o
+   tipo da linha era o que o teste escrevia e não o que o driver entrega. Regra que fica:
+   *o tipo da linha é o que o código acredita, não o que o driver faz*.
+2. **Testes que fixavam o comportamento errado.** O harness do ETL de pagamentos rodava o
+   caminho destrutivo em toda execução sem asserir nada, e o e2e fixava `days: []` como
+   resposta válida — a saída exata do defeito. Um teste que passa não prova que a decisão
+   está certa; prova que ela não mudou.
+
 ### DoD da S9
 
 - [ ] **Timings anexado ao PR provando ausência de regressão de tick** — pertence à S9.1, e
