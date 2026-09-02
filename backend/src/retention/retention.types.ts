@@ -164,6 +164,32 @@ export type RetentionMeasure =
       n: number;
       /** Players still seen `horizon` days after registering. The numerator. */
       survived: number;
+      /**
+       * True when **this horizon's base** is below the configured minimum.
+       *
+       * ## Why the cohort-level mark was not enough
+       *
+       * {@link CohortRetention.belowMinimum} looks at the cohort's *size*, and
+       * the first production read showed what that misses: `2026-08 / bedrock`
+       * has 43 players — comfortably above a minimum of 30, so the cohort is
+       * unmarked — and publishes `D30: 0%` over `n: 5`. Five people. A number
+       * that reads as a total collapse of retention, resting on a base small
+       * enough that one player moves it twenty points, with nothing anywhere
+       * saying so.
+       *
+       * The bases of one cohort routinely differ across horizons, because
+       * maturity is filtered per player: a cohort registered three weeks ago has
+       * its whole size at D1 and almost nobody at D30. So a single mark next to
+       * three percentages is wrong for two of them, exactly as a single `n`
+       * would be — and this project already refused the single `n` for that
+       * reason.
+       *
+       * **Marked, never hidden**, which is the rule criterion 2 of the story
+       * fixed and the owner reaffirmed on 2026-09-02 when choosing between
+       * marking and suppressing. A suppressed small sample is invisible; a
+       * marked one leaves the judgement with whoever reads it.
+       */
+      belowMinimum: boolean;
     }
   | {
       horizon: RetentionHorizonLabel;
@@ -259,12 +285,17 @@ export interface CohortRetention {
   /** Players who registered in this month on this platform. */
   size: number;
   /**
-   * True when `size` is below the configured minimum.
+   * True when the cohort's **size** is below the configured minimum.
    *
    * **Marked, never hidden** (criterion 2 of the story). Hiding a small sample
    * is the same error as omitting `n`: it turns noise into an apparent trend by
    * leaving only the cohorts that happened to be large. Marking leaves the
    * decision with whoever reads it.
+   *
+   * ⚠️ This is about the cohort, not about any one number in it. A cohort can be
+   * large and still publish a percentage over five people — see
+   * {@link RetentionMeasure} `belowMinimum`, which is the per-horizon mark and
+   * the one that qualifies an actual figure.
    */
   belowMinimum: boolean;
   contamination: CohortContamination;

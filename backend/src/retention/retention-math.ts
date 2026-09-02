@@ -268,7 +268,8 @@ function suppressImplausible(
   return measures.map((m) => ({
     horizon: m.horizon,
     percent: null,
-    n: m.percent === null ? m.n : m.n,
+    // The base survives suppression, here as everywhere.
+    n: m.n,
     survived: null,
     reason: 'implausible_survival' as const,
     unavailableReason:
@@ -772,6 +773,10 @@ function measure(
     percent: round((survived / eligible.length) * 100, 1),
     n: eligible.length,
     survived,
+    // Against THIS horizon's base, not the cohort's size. `2026-08 / bedrock` in
+    // production has 43 members and five of them mature at D30; the cohort-level
+    // mark says nothing, and the number it says nothing about is `0%`.
+    belowMinimum: eligible.length < options.minimumCohortSize,
   };
 }
 

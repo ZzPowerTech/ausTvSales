@@ -130,7 +130,7 @@ sprints.
 velocidade**: a S8.2 chegou destravada e o que ela pedia era código, não investigação, e a S9.1
 encolheu no caminho (ver abaixo).
 
-Suíte: **72 suítes, 896 testes** unitários, mais 5 arquivos de e2e novos contra Postgres real.
+Suíte: **72 suítes, 901 testes** unitários, mais 5 arquivos de e2e novos contra Postgres real.
 
 **O que a Sprint 9 mede agora, e o que cada número exige do ambiente:**
 
@@ -202,11 +202,18 @@ não depende mais de nada da S6.
   **O buraco deixado de propósito:** coorte pequena a 100% **fora** de intervalo provado
   continua publicando — onze jogadores que ficam não provam nada sozinhos, que é a razão de o
   piso existir.
-  **E o que sobra para o dono:** `belowMinimum` olha o tamanho da **coorte**, não a base do
-  **horizonte**. `2026-08 / bedrock` tem 43 jogadores e publica `D30: 0%` sobre `n: 5` sem marca
-  nenhuma de amostra pequena. Marcar por medida (muda o formato do payload) ou suprimir abaixo do
-  mínimo (perde número às vezes legítimo) — *marcar, nunca esconder* é a regra da própria
-  história, mas a escolha do formato é dele.
+  **✅ E o segundo achado da mesma leitura foi fechado no mesmo dia, pelo dono ("marcar por
+  medida"):** `belowMinimum` olhava o tamanho da **coorte**, não a base do **horizonte**, então
+  `2026-08 / bedrock` (43 jogadores) publicava `D30: 0%` sobre `n: 5` sem marca nenhuma. A marca
+  passou a existir por medida, contra a base daquele horizonte; a de coorte continua, porque
+  responde outra pergunta. As bases de uma coorte divergem por construção — a maturidade é
+  filtrada por jogador —, então uma marca só ao lado de três percentuais erra em dois, do mesmo
+  jeito que um `n` só erraria. Marcar e não suprimir, porque amostra pequena suprimida é
+  invisível. **A primeira explicação que dei para a lacuna de teste estava errada**, e o review a
+  derrubou: fixtures com bases divergentes por horizonte já existiam. O que faltava é mais
+  estreito — nenhuma tinha uma coorte **no ou acima** do mínimo cuja base de horizonte caísse
+  **abaixo** dele; o piso de coorte cobria o caso por acidente. Faltava a combinação, não o
+  eixo de variação. Detalhe e o erro de método no `HANDOFF.md`.
 - **✅ As duas leituras foram feitas em 2026-08-29, e destravaram a S8.2.** O `/v1/retention`
   devolve 5565 linhas com `playerUUID`, `registerDate`, `lastSeenDate`, `playtime` e
   `timeDifference` — coorte e plataforma saem daí, então **a premissa da exceção 1 do ADR-002
