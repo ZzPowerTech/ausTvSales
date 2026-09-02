@@ -122,6 +122,24 @@ describe('PaymentsFeedService', () => {
       expect(report.disclaimer).toContain('nunca acusacao automatica');
       expect(report.disclaimer).toContain('site publico');
     });
+
+    it('carries the direction caveat, which is the one a mark can be wrong about', async () => {
+      // `from`/`to` and `funding_many` all rest on the reading that `receiver`
+      // is the credited account — natural, and never confirmed against a known
+      // payment. Every other caveat in this module travels in the payload; this
+      // one lived only in a source comment while the feed printed it as fact.
+      const report = await service([payment()]).feed();
+
+      expect(report.directionCaveat).toContain('DIRECAO e inferida');
+      expect(report.directionCaveat).toContain('funding_many');
+    });
+
+    it('carries the direction caveat even when there is nothing to show', async () => {
+      const report = await service([], { last: null }).feed();
+
+      expect(report.payments).toBeNull();
+      expect(report.directionCaveat).toContain('DIRECAO e inferida');
+    });
   });
 
   describe('the outlier mark', () => {

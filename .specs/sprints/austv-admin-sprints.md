@@ -1013,6 +1013,42 @@ jogo.**
 > metades de um mesmo pagamento é a leitura natural do schema e **não foi confirmada contra um
 > pagamento conhecido**. Os dois tipos são copiados verbatim e contados separadamente a cada
 > execução; se as contagens divergirem, a premissa caiu e o número diz isso.
+>
+> ### 🔴 Três achados do code review, e o primeiro destruía dado irrecuperável
+>
+> **1. A série de chegadas não tinha piso, e ela é REESCRITA a cada execução.** O piso só olhava
+> os pagamentos. Uma leitura degenerada de `SET` — log podado para 30 dias, ou um release do
+> PlayerPoints renomeando o rótulo — passava pelo piso, o `replaceCreations` apagava 26 meses e
+> commitava, e o `recordSuccess` gravava `ok` por cima. O `/economy/account-creations` passaria a
+> responder `days: []` com `source.ok: true` e sem motivo: *"ninguém nunca criou conta"*,
+> publicado como medição.
+>
+> O que se perderia não existe em outro lugar: essa é a única série de chegadas independente do
+> Plan, e o único registro do apagão do proxy de mai–jul/2026 — os três meses que o funil não
+> cobre. A transação que o store usa protege contra **crash** entre o delete e o insert; não
+> protege contra uma **leitura bem-sucedida e degenerada**, que é o caso que acontece. Agora as
+> duas leituras têm piso, e o `SET` tem o seu com a razão explícita.
+>
+> Pior: **o conjunto de testes rodava esse caminho destrutivo em toda execução e não asseria
+> nada** — o harness tinha `[]` como padrão de `accountCreations` —, e o e2e fixava
+> `days: []` como resposta válida. Os dois foram corrigidos.
+>
+> **2. A direção do pagamento é inferida, e o feed marcava conta em cima dela.** O comentário do
+> schema já dizia que `receiver` ser a conta creditada *"não foi confirmado contra um pagamento
+> conhecido"* — mas o feed imprimia `from`/`to` como fato e emitia `funding_many` chaveado em
+> `source`. Se a leitura estiver invertida, o moderador investiga quem **recebeu** de nove
+> pessoas achando que financiou nove. Todo outro caveat deste módulo viaja no payload; este, que
+> é o único sobre o qual uma marca pode estar *errada*, morava só num comentário. Agora viaja.
+>
+> **3. O docblock do controller ainda dizia "E1 e E2" e "nenhum uuid chega ao contrato".** Era
+> verdade quando escrito e nada disso sobreviveu à fatia social — o feed publica uuid e valor de
+> transação de propósito, e é justamente por isso que este controller nunca pode ganhar uma rota
+> `@Public()`.
+>
+> Menores do mesmo review: timeout de execução server-side na query que varre a tabela inteira do
+> banco do jogo (o `connectTimeout` não cobria isso); `configured` passou a exigir host, banco e
+> usuário, senão o cron era registrado para um job que só sabia falhar; e o e2e do feed deixou de
+> ter data fixa, que quebraria sozinho em 2027 sem janela maior para compensar.
 
 ### DoD da S9
 

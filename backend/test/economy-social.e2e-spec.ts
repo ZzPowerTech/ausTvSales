@@ -71,6 +71,17 @@ describe('Economy social (e2e)', () => {
     };
   }
 
+  /**
+   * Feed fixtures are anchored to **now**, not to a constant.
+   *
+   * `MAX_FEED_WINDOW_DAYS` is 366, so a payment pinned to a fixed 2026-01-10
+   * falls out of every reachable window once the wall clock passes 2027-01-11 —
+   * and no larger `days` value exists to compensate. The contact fixtures stay
+   * anchored to `REGISTERED`, because E3 measures against each player's own
+   * registration and does not care where "now" is.
+   */
+  const RECENT = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+
   function payment(over: {
     source?: string;
     receiver?: string;
@@ -78,15 +89,16 @@ describe('Economy social (e2e)', () => {
     minutesAfter?: number;
     ordinal?: number;
     transactionType?: string;
+    occurredAt?: Date;
   }) {
     return {
       transactionType: over.transactionType ?? 'PAY_RECEIVER',
       source: over.source ?? 'someone-else',
       receiver: over.receiver ?? SOCIAL,
       amount: over.amount ?? 250,
-      occurredAt: new Date(
-        REGISTERED.getTime() + (over.minutesAfter ?? 5) * 60_000,
-      ),
+      occurredAt:
+        over.occurredAt ??
+        new Date(REGISTERED.getTime() + (over.minutesAfter ?? 5) * 60_000),
       ordinal: over.ordinal ?? 0,
     };
   }
@@ -168,14 +180,22 @@ describe('Economy social (e2e)', () => {
           minutesAfter: 10,
           ordinal: 1,
         }),
+        // Anchored to now, so the feed window can reach it for as long as this
+        // suite exists.
+        payment({
+          source: 'recent-sender',
+          receiver: 'recent-receiver',
+          amount: 42,
+          occurredAt: RECENT,
+        }),
       ]);
 
       await db.insert(playerPaymentSyncs).values({
         status: 'ok',
-        paymentsRead: 5,
-        paymentsWritten: 5,
+        paymentsRead: 6,
+        paymentsWritten: 6,
         senderRows: 0,
-        receiverRows: 5,
+        receiverRows: 6,
         creationsRead: 0,
         creationDaysWritten: 0,
         durationMs: 20,
@@ -234,9 +254,9 @@ describe('Economy social (e2e)', () => {
 
     it('shows the feed with the thresholds and the disclaimer', async () => {
       const response = await request(app.getHttpServer())
-        // 366 is the cap; the seeded payments are inside it. Asking for more
-        // than the cap is what the next test asserts is refused.
-        .get('/economy/payments/feed?days=366&limit=10')
+        // A week is enough to reach the `RECENT` payment, and it does not depend
+        // on the wall clock staying near the seeded 2026-01-10.
+        .get('/economy/payments/feed?days=7&limit=10')
         .set('Cookie', authCookie)
         .expect(200);
 
@@ -244,14 +264,23 @@ describe('Economy social (e2e)', () => {
         windowSize: number;
         amountP95: number | null;
         thresholds: Record<string, number>;
+        directionCaveat: string;
         payments: { from: string; to: string; amount: number; flags: [] }[];
       };
 
-      expect(body.windowSize).toBe(5);
-      // Five payments is below the floor for an outlier mark to mean anything.
+      expect(body.windowSize).toBe(1);
+      // One payment is far below the floor for an outlier mark to mean anything.
       expect(body.amountP95).toBeNull();
       expect(body.thresholds.repeatedPair).toBe(3);
-      expect(body.payments).toHaveLength(5);
+      expect(body.payments).toHaveLength(1);
+      expect(body.payments[0]).toMatchObject({
+        from: 'recent-sender',
+        to: 'recent-receiver',
+        amount: 42,
+        flags: [],
+      });
+      // The caveat a mark can be wrong about travels with the data.
+      expect(body.directionCaveat).toContain('DIRECAO e inferida');
     });
 
     it('publishes the arrivals series with its caveat', async () => {
@@ -265,8 +294,11 @@ describe('Economy social (e2e)', () => {
         caveat: string;
       };
 
-      // Nothing was seeded into the series, and an empty array inside a covered
-      // range is a real answer — the source state is what says the ETL ran.
+      // Nothing was seeded into `account_creations_daily` by this suite, and the
+      // provenance row says the ETL ran — so an empty range is a real answer
+      // HERE. It would not be a real answer coming out of the ETL: a zero `SET`
+      // read is refused before `replaceCreations` is ever called, precisely so
+      // that this shape can never be produced by wiping the series.
       expect(body.days).toEqual([]);
       // The caveat is contractual: this counts accounts, not arrivals, and
       // reading a plugin's own series as reality is what produced the

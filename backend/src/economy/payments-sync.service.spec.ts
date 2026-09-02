@@ -56,8 +56,17 @@ function harness(
     {
       configured: over.configured ?? true,
       payments: over.payments ?? jest.fn().mockResolvedValue([]),
+      // Defaults to ONE creation, not zero. With `[]` as the default, every test
+      // in this file executed `replaceCreations([])` — the exact call that wipes
+      // the arrivals series — and none of them asserted anything about it. The
+      // destructive path ran unnoticed on the happy path.
       accountCreations:
-        over.accountCreations ?? jest.fn().mockResolvedValue([]),
+        over.accountCreations ??
+        jest
+          .fn()
+          .mockResolvedValue([
+            { occurredAt: Date.parse('2026-03-10T15:00:00Z') },
+          ]),
     } as unknown as PlayerPointsDatabase,
     {
       upsertPayments,
@@ -75,6 +84,11 @@ function harness(
     recordSuccess,
     recordFailure,
   };
+}
+
+/** One `SET` row, so the happy path is not silently the destructive one. */
+function creation(day = '2026-03-10') {
+  return { occurredAt: Date.parse(`${day}T15:00:00Z`) };
 }
 
 /** First argument of the first call, typed by the caller. */
@@ -190,6 +204,47 @@ describe('PaymentsSyncService', () => {
       expect(h.replaceCreations).not.toHaveBeenCalled();
     });
 
+    it('refuses a zero SET read rather than deleting 26 months of arrivals', async () => {
+      // The arrivals series is REPLACED, not upserted: a short read does not
+      // degrade it, it destroys it. And it is the only record of the
+      // mai–jul/2026 proxy blackout, which exists nowhere else to recover from.
+      // A log pruned to 30 days, or a renamed `SET` label, would have deleted it
+      // and committed — then written an `ok` provenance row on top.
+      const h = harness({
+        payments: jest.fn().mockResolvedValue([payment()]),
+        accountCreations: jest.fn().mockResolvedValue([]),
+        lastSuccessfulSync: previous(1332),
+      });
+
+      const result = await h.service.sync();
+
+      expect(result.status).toBe('error');
+      expect(result.detail).toContain('26 meses');
+      expect(h.replaceCreations).not.toHaveBeenCalled();
+      // The payments copy is untouched too: the run refuses as a whole.
+      expect(h.upsertPayments).not.toHaveBeenCalled();
+    });
+
+    it('refuses a SET read that collapsed against the last successful run', async () => {
+      // A healthy payments read, so the failure can only come from the SET side
+      // — otherwise the payments floor trips first and the test proves nothing.
+      const h = harness({
+        payments: jest
+          .fn()
+          .mockResolvedValue(Array.from({ length: 1332 }, () => payment())),
+        accountCreations: jest
+          .fn()
+          .mockResolvedValue(Array.from({ length: 100 }, () => creation())),
+        lastSuccessfulSync: previous(1332),
+      });
+
+      const result = await h.service.sync();
+
+      expect(result.status).toBe('error');
+      expect(result.detail).toContain('100 linhas');
+      expect(h.replaceCreations).not.toHaveBeenCalled();
+    });
+
     it('refuses a read that collapsed against the last successful run', async () => {
       // A short feed that does not look broken is the worst degradation a
       // moderation tool can have.
@@ -197,6 +252,9 @@ describe('PaymentsSyncService', () => {
         payments: jest
           .fn()
           .mockResolvedValue(Array.from({ length: 100 }, () => payment())),
+        accountCreations: jest
+          .fn()
+          .mockResolvedValue(Array.from({ length: 1299 }, () => creation())),
         lastSuccessfulSync: previous(1332),
       });
 
@@ -204,6 +262,25 @@ describe('PaymentsSyncService', () => {
 
       expect(result.status).toBe('error');
       expect(result.detail).toContain('100 pagamentos contra 1332');
+    });
+
+    it('writes the arrivals series when both reads are healthy', async () => {
+      const h = harness({
+        payments: jest.fn().mockResolvedValue([payment()]),
+        accountCreations: jest
+          .fn()
+          .mockResolvedValue([creation('2026-03-10'), creation('2026-03-12')]),
+      });
+
+      expect((await h.service.sync()).status).toBe('ok');
+
+      const written = firstArg<{ day: string; created: number }[]>(
+        h.replaceCreations,
+      );
+      expect(written).toEqual([
+        { day: '2026-03-10', created: 1 },
+        { day: '2026-03-12', created: 1 },
+      ]);
     });
 
     it('accepts the first run, which has nothing to compare against', async () => {

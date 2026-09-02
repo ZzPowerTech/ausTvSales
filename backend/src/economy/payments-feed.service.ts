@@ -8,6 +8,7 @@ import type { EconomySourceState } from './economy.types';
 import { PaymentsStore, type StoredPayment } from './payments.store';
 import {
   FEED_DISCLAIMER,
+  PAYMENT_DIRECTION_CAVEAT,
   type FeedPayment,
   type FlagMark,
   type PaymentsFeedReport,
@@ -118,6 +119,7 @@ export class PaymentsFeedService {
           'pagamento aconteceu", que num instrumento de moderacao e a pior ' +
           'leitura errada possivel.',
         disclaimer: FEED_DISCLAIMER,
+        directionCaveat: PAYMENT_DIRECTION_CAVEAT,
         sources: [source],
       };
     }
@@ -165,6 +167,10 @@ export class PaymentsFeedService {
         }),
       ),
       disclaimer: FEED_DISCLAIMER,
+      // Travels with every response, like every other caveat in this module.
+      // This is the one a mark can be wrong *about* rather than merely
+      // imprecise, and it was the only one living solely in a source comment.
+      directionCaveat: PAYMENT_DIRECTION_CAVEAT,
       sources: [source],
     };
   }

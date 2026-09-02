@@ -173,7 +173,7 @@ export class SocialService {
         group,
         players: bucket.players,
         immature: bucket.immature,
-        d7: this.share(bucket.survived, base),
+        d7: this.share(bucket.survived, base, bucket.players),
       };
     });
 
@@ -259,14 +259,17 @@ export class SocialService {
     }
   }
 
-  private share(part: number, whole: number): Share {
+  private share(part: number, whole: number, players: number): Share {
     if (whole === 0) {
       return {
         percent: null,
         n: 0,
         unavailableReason:
-          'nenhum jogador deste grupo teve 7 dias de oportunidade ainda — ' +
-          'publicar 0% aqui seria o calendario, nao a retencao',
+          players === 0
+            ? 'nenhum jogador caiu neste grupo no periodo — nao ha base para ' +
+              'calcular D7, o que nao e o mesmo que D7 de 0%'
+            : 'nenhum jogador deste grupo teve 7 dias de oportunidade ainda — ' +
+              'publicar 0% aqui seria o calendario, nao a retencao',
       };
     }
     return { percent: Math.round((part / whole) * 1000) / 10, n: whole };

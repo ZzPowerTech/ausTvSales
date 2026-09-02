@@ -92,7 +92,7 @@ export class PaymentsSyncService {
     }
     const sourceQueryMs = Date.now() - queryStartedAt;
 
-    const floor = await this.floorRefusal(payments.length);
+    const floor = await this.floorRefusal(payments.length, creations.length);
     if (floor !== null) {
       return this.fail(startedAt, sourceQueryMs, floor);
     }
@@ -153,9 +153,35 @@ export class PaymentsSyncService {
     return { status: 'ok' };
   }
 
-  /** Refuse the write when the read is degenerate. */
-  private async floorRefusal(read: number): Promise<string | null> {
-    if (read === 0) {
+  /**
+   * Refuse the write when either read is degenerate.
+   *
+   * ## Why the arrivals series needs a floor of its own, and needs it more
+   *
+   * The payments copy is an **upsert**: a short read leaves the feed missing
+   * rows, which is bad. The arrivals series is a **replace**, inside a
+   * transaction that deletes before it inserts — so a short read does not
+   * degrade it, it **destroys** it.
+   *
+   * And the loss is not recoverable from here. `SET` rows are the one arrivals
+   * signal independent of Plan, and they are the only record of the mai–jul/2026
+   * proxy blackout — the three months the funnel has nothing at all for. A log
+   * pruned to the last 30 days (an entirely plausible operation on an unindexed
+   * table whose scan cost is the reason ADR-007 exists), or a PlayerPoints
+   * release that renames the `SET` label, would have deleted 26 months and
+   * committed. `recordSuccess` would then write an `ok` row, and
+   * `/economy/account-creations` would answer `days: []` with `source.ok: true`
+   * and no reason — "nobody ever created an account", published as measurement.
+   *
+   * The transaction the store uses protects against a **crash** between the
+   * delete and the insert. It does nothing about a **successful degenerate
+   * read**, which is the case that actually happens.
+   */
+  private async floorRefusal(
+    payments: number,
+    creations: number,
+  ): Promise<string | null> {
+    if (payments === 0) {
       return (
         'O log do PlayerPoints devolveu zero pagamentos. A copia anterior foi ' +
         'mantida: uma tabela vazia e indistinguivel de uma leitura degradada, ' +
@@ -163,14 +189,46 @@ export class PaymentsSyncService {
       );
     }
 
-    const previous = await this.store.lastSuccessfulSync();
-    const before = previous?.paymentsRead ?? 0;
-    if (before > 0 && read < before * MIN_SHARE_OF_PREVIOUS) {
+    if (creations === 0) {
       return (
-        `O log do PlayerPoints devolveu ${read} pagamentos contra ${before} da ` +
-        'ultima execucao bem-sucedida. A copia anterior foi mantida: um upsert ' +
-        'parcial nao apaga nada, mas deixa o feed curto sem parecer quebrado, ' +
-        'que e a pior degradacao possivel de um instrumento de moderacao.'
+        'O log do PlayerPoints devolveu zero linhas `SET`. A serie de chegadas ' +
+        'anterior foi mantida: ela e REESCRITA a cada execucao, entao gravar ' +
+        'uma leitura vazia apagaria 26 meses de historico — inclusive o apagao ' +
+        'do proxy de mai-jul/2026, que e o unico trecho que so esta serie cobre ' +
+        'e que nao existe em lugar nenhum para ser recuperado.'
+      );
+    }
+
+    const previous = await this.store.lastSuccessfulSync();
+    if (previous === null) {
+      return null;
+    }
+
+    const beforePayments = previous.paymentsRead ?? 0;
+    if (
+      beforePayments > 0 &&
+      payments < beforePayments * MIN_SHARE_OF_PREVIOUS
+    ) {
+      return (
+        `O log do PlayerPoints devolveu ${payments} pagamentos contra ` +
+        `${beforePayments} da ultima execucao bem-sucedida. A copia anterior ` +
+        'foi mantida: um upsert parcial nao apaga nada, mas deixa o feed curto ' +
+        'sem parecer quebrado, que e a pior degradacao possivel de um ' +
+        'instrumento de moderacao.'
+      );
+    }
+
+    const beforeCreations = previous.creationsRead ?? 0;
+    if (
+      beforeCreations > 0 &&
+      creations < beforeCreations * MIN_SHARE_OF_PREVIOUS
+    ) {
+      return (
+        `O log do PlayerPoints devolveu ${creations} linhas \`SET\` contra ` +
+        `${beforeCreations} da ultima execucao bem-sucedida. A serie de ` +
+        'chegadas anterior foi mantida: como ela e reescrita inteira, uma ' +
+        'leitura encolhida nao a degrada — ela a substitui, e o que se perde ' +
+        'nao existe em outro lugar.'
       );
     }
 

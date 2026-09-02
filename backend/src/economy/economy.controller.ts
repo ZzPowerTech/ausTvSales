@@ -33,22 +33,34 @@ const DEFAULT_CREATIONS_WINDOW_DAYS = 365;
 const MS_PER_DAY = 86_400_000;
 
 /**
- * The economy layer — E1 and E2 (story S9.1, spec §6.4).
+ * The economy layer — E1, E2, E3, E4 and the R1 arrivals series (story S9.1,
+ * spec §6.4).
  *
  * ## Behind the global guard, and that is the §8 requirement
  *
  * Nothing here is `@Public()`, so the deny-by-default `SessionAuthGuard` lets
  * through only the ids on `ALLOWED_DISCORD_IDS`. Spec §8 is explicit that
  * *"nome de jogador e valor de transação não aparecem no site público sob
- * nenhuma circunstância"*, and while these two routes publish **aggregates**
- * rather than per-player values, revenue by platform is still a business figure
- * that has no reason to be readable from the internet.
+ * nenhuma circunstância"*, and the payments feed publishes exactly that pair —
+ * so the absence of a decorator is not a convention here, it is the control.
  *
- * ## No player identity in either response
+ * ## What each route does and does not carry
  *
- * Both endpoints read `player_uuid` — to derive `platform` (ADR-003) and to join
- * the cohort — and publish only counts, months, platforms and money. A uuid
- * never reaches either contract.
+ * `revenue`, `first-spend`, `social-contact` and `account-creations` publish
+ * **aggregates only**: counts, months, platforms, money and days. They read
+ * `player_uuid` to derive `platform` (ADR-003) and to join the cohort, and drop
+ * it inside the aggregation.
+ *
+ * `payments/feed` is the exception, and it is deliberate: E4 is a moderation
+ * tool, so it publishes **per-player uuids and transaction amounts**. Spec §6.4
+ * bounds that to "nenhum dado pessoal além de UUID e valor", which it respects —
+ * no nickname, no IP. It is the reason this controller must never gain a
+ * `@Public()` route, and the reason a future reader should check this paragraph
+ * before relaxing anything here.
+ *
+ * ⚠️ An earlier version of this docblock said "E1 and E2", "these two routes"
+ * and "a uuid never reaches either contract". All three were true when written
+ * and none survived the social slice.
  */
 @ApiTags('Economia')
 @DashboardThrottle()

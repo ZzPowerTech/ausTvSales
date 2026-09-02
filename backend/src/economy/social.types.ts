@@ -57,9 +57,16 @@ export type ContactGroup = (typeof CONTACT_GROUPS)[number];
 /** One group, and how it survived. */
 export interface ContactGroupResult {
   group: ContactGroup;
-  /** Players in this group. The base for `d7`. */
+  /** Players in this group. **Not** the base for `d7` — see that field. */
   players: number;
-  /** Share of the group still seen 7 days after registering. */
+  /**
+   * Share of the group still seen 7 days after registering.
+   *
+   * The base is `players - immature`, **not** `players`: a player whose seven
+   * days have not elapsed cannot have an outcome, and leaving them in the
+   * denominator would drag every group down by however many of them it happens
+   * to contain. `Share.n` carries the real base.
+   */
   d7: Share;
   /**
    * Players whose 7-day window has not closed yet, excluded from `d7`.
@@ -93,7 +100,17 @@ export interface SocialContactReport {
 
 /** Why one payment in the feed is worth a human look. */
 export const PAYMENT_FLAGS = [
-  /** Amount at or above the window's 95th percentile. */
+  /**
+   * Amount **strictly above** the window's 95th percentile.
+   *
+   * Strictly, and not "at or above": in a window whose amounts are all equal
+   * every row sits at its own p95, and `>=` would mark the entire feed — which
+   * is how a signal becomes noise and then becomes ignored.
+   *
+   * This is a **tail marker**, not a statistical test. In a window with real
+   * dispersion it marks roughly the top 5% by construction, which is what a feed
+   * that exists to surface candidates for a human should do.
+   */
   'amount_outlier',
   /** The same sender→receiver pair repeated in the window. */
   'repeated_pair',
@@ -155,6 +172,8 @@ export interface PaymentsFeedReport {
   unavailableReason?: string;
   /** The rule that governs how this feed may be used. */
   disclaimer: string;
+  /** Why `from`, `to` and `funding_many` rest on an unconfirmed reading. */
+  directionCaveat: string;
   sources: EconomySourceState[];
 }
 
@@ -165,6 +184,31 @@ export interface PaymentsFeedReport {
  * misuse than one whose limits live in a spec nobody opens while looking at a
  * suspicious row.
  */
+/**
+ * The one caveat a mark can be wrong *about*, rather than merely imprecise.
+ *
+ * That `receiver` holds the credited account and `source` the counterparty is
+ * the natural reading of the schema and **has not been confirmed against a known
+ * payment** — the copy's own schema comment says so. Every other caveat in this
+ * module travels in the payload; this one lived only in a source comment, while
+ * the feed printed `from`/`to` as fact and issued `funding_many` keyed on
+ * `source`.
+ *
+ * If the reading is inverted, a staff member sees uuid X flagged as funding nine
+ * people when X is the account that *received* from nine. The
+ * `senderRows`/`receiverRows` counter in the ETL detects a broken **pairing**,
+ * not an inverted **direction**: 666/666 is consistent with either.
+ */
+export const PAYMENT_DIRECTION_CAVEAT =
+  'A DIRECAO e inferida, nao confirmada. Que `receiver` seja a conta creditada ' +
+  'e `source` a contraparte e a leitura natural do schema do PlayerPoints e ' +
+  'nunca foi conferida contra um pagamento conhecido. Se estiver invertida, ' +
+  '`from`/`to` estao trocados e a marca `funding_many` aponta para quem ' +
+  'RECEBEU de muitos, nao para quem financiou. O contador de PAY_SENDER x ' +
+  'PAY_RECEIVER do ETL detecta pareamento quebrado, nao direcao invertida: ' +
+  '666/666 e compativel com as duas leituras. Conferir contra um pagamento ' +
+  'conhecido custa um comando no jogo.';
+
 export const FEED_DISCLAIMER =
   'Marcacao e SINALIZACAO, nunca acusacao automatica: cada marca diz o que foi ' +
   'observado e contra que limiar, e a decisao e humana. Um pagamento marcado ' +

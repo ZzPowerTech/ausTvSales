@@ -9,6 +9,20 @@ import { createPool, type Pool, type RowDataPacket } from 'mysql2/promise';
 
 const DEFAULT_PORT = 3306;
 const DEFAULT_CONNECT_TIMEOUT_MS = 8_000;
+/**
+ * Ceiling on a single query, in milliseconds.
+ *
+ * `connectTimeout` covers getting the connection and nothing else. The query
+ * that follows is a **full table scan of the MySQL the Minecraft server is
+ * using** — there is no query shape that avoids it — so an accepted-then-slow
+ * read under lock contention at 03:45 can still be running when players come
+ * online. Two minutes is far above the ~6.664-row scan this actually is, and far
+ * below "still running at breakfast".
+ *
+ * Enforced through `MAX_EXECUTION_TIME`, which MySQL applies server-side: a
+ * client-side timer would abandon the socket and leave the scan running.
+ */
+const QUERY_TIMEOUT_MS = 120_000;
 /** One is enough: a single nightly job is the only caller. */
 const POOL_SIZE = 1;
 /** PlayerPoints' own default. Configurable because the plugin allows a prefix. */
@@ -125,10 +139,16 @@ export class PlayerPointsDatabase implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    if (!this.host) {
+    // Host, database AND user, not just the host — the same bar `PlanDatabase`
+    // sets. With only the host set, `configured` used to be true, the scheduler
+    // registered the cron, and every night wrote an `error` row: a job that can
+    // only record failure, which is precisely what the scheduler's own guard
+    // says it declines to register.
+    if (!this.host || this.database === '' || this.user === '') {
       this.logger.warn(
-        'PLAYERPOINTS_DB_HOST nao configurado — E3 (contato social) e E4 (feed ' +
-          'de pagamentos) vao reportar `never_synced`, nunca zero. A camada de ' +
+        'Conexao do PlayerPoints incompleta (PLAYERPOINTS_DB_HOST, _NAME e ' +
+          '_USER sao todos obrigatorios) — E3 (contato social) e E4 (feed de ' +
+          'pagamentos) vao reportar `never_synced`, nunca zero. A camada de ' +
           'receita nao depende disto.',
       );
       return;
@@ -184,7 +204,8 @@ export class PlayerPointsDatabase implements OnModuleInit, OnModuleDestroy {
   async payments(): Promise<PaymentRow[]> {
     const pool = this.requirePool();
     const [rows] = await pool.query<RawPaymentRow[]>(
-      `SELECT transaction_type, source, receiver, amount,
+      `SELECT /*+ MAX_EXECUTION_TIME(${QUERY_TIMEOUT_MS}) */
+              transaction_type, source, receiver, amount,
               UNIX_TIMESTAMP(timestamp) * 1000 AS ts
          FROM \`${this.table}\`
         WHERE transaction_type IN ('PAY_SENDER', 'PAY_RECEIVER')
@@ -228,7 +249,8 @@ export class PlayerPointsDatabase implements OnModuleInit, OnModuleDestroy {
   async accountCreations(): Promise<CreationRow[]> {
     const pool = this.requirePool();
     const [rows] = await pool.query<RawCreationRow[]>(
-      `SELECT UNIX_TIMESTAMP(timestamp) * 1000 AS ts
+      `SELECT /*+ MAX_EXECUTION_TIME(${QUERY_TIMEOUT_MS}) */
+              UNIX_TIMESTAMP(timestamp) * 1000 AS ts
          FROM \`${this.table}\`
         WHERE transaction_type = 'SET'`,
     );
