@@ -18,6 +18,29 @@ export const Platform = {
 
 export type Platform = (typeof Platform)[keyof typeof Platform];
 
+/**
+ * Every platform, plus the `all` any-platform filter, for a query DTO.
+ *
+ * Lives here rather than in a feature's DTO because it is a **property of
+ * ADR-003**, not of the funnel: three modules segment by platform now, and the
+ * first one to need it happened to be the funnel. Importing a feature's DTO to
+ * reuse a constant couples two features through a file that has nothing else to
+ * do with either — flagged by review on the retention DTO, and correct.
+ *
+ * The order is the funnel's original order, kept so the OpenAPI enum does not
+ * churn for consumers already reading it.
+ */
+export const PLATFORM_VALUES = [
+  'all',
+  Platform.Bedrock,
+  Platform.JavaOffline,
+  Platform.JavaPremium,
+  Platform.Unknown,
+] as const;
+
+/** A platform, or `all`. What a query DTO accepts. */
+export type PlatformFilterValue = (typeof PLATFORM_VALUES)[number];
+
 /** Floodgate stamps every Bedrock player with this prefix. */
 const BEDROCK_PREFIX = '00000000-0000-0000-0009-';
 

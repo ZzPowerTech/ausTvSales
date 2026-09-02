@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsOptional, Matches } from 'class-validator';
-import { PLATFORM_VALUES } from '../../funnel/dto/funnel-query.dto';
+import { PLATFORM_VALUES } from '../../instrumentation/platform';
 
 /** `YYYY-MM`, the grain of a cohort. */
 export const MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
