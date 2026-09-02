@@ -517,12 +517,111 @@ existe para impedir.
 
 ### S8.2 — Retenção D1/D7/D30 por coorte e plataforma · 5 SP · `feat/api-cohort-retention`
 
-1. Coorte mensal × plataforma, com `n`
-2. Coortes com `n` abaixo do mínimo configurável são marcadas, não escondidas
-3. Único ponto do sistema autorizado a fazer SQL direto (ADR-002), em usuário read-only, isolado
-   num módulo
+> ## ✅ ENTREGUE em 2026-09-01, na Sprint 9 — e **sem abrir a exceção 1**
+>
+> ⚠️ **O bloco `🛑 NÃO INICIADA` mais abaixo é histórico.** Ele registra o estado de
+> 2026-08-28 e a decisão de mover a história para a S9, e fica de pé porque o raciocínio
+> dele — em especial a resposta à pergunta *"mas a S8.1 entregou com um degrau sem
+> fonte, por que a S8.2 não?"* — continua sendo o registro de por que esta história
+> esperou. Nada nele descreve o estado atual.
+>
+> Módulo `retention`: `GET /retention/cohorts`, coorte mensal × plataforma, `n` por horizonte.
+> Zero MySQL, zero credencial nova.
+>
+> | critério | estado |
+> |---|---|
+> | 1. Coorte mensal × plataforma, com `n` | ✅ e o `n` é **por horizonte**, não por coorte — ver abaixo |
+> | 2. Coortes abaixo do mínimo **marcadas, não escondidas** | ✅ `belowMinimum`, com o mínimo em vigor publicado ao lado |
+> | 3. Único ponto autorizado a fazer SQL direto | ➖ **sem objeto**: a história não faz SQL. O critério pressupunha a exceção 1, que caiu em 2026-08-29 |
+>
+> ### O `n` é por horizonte, e isso não é detalhe de implementação
+>
+> Um jogador registrado há dez dias teve oportunidade de sobreviver a um dia e **não** a trinta.
+> Dividir a coorte inteira no D30 é o que faz o mês corrente sair `0,0%` — um número que se lê
+> como colapso e é o calendário. Então cada horizonte conta só quem teve `N` dias de
+> oportunidade e publica **essa** contagem como sua base. As três bases de uma mesma coorte
+> divergem de propósito; um `n` único ao lado de três percentuais estaria errado em dois deles.
+>
+> Coorte cuja base madura é vazia sai `null` com `immature_horizon`. Nunca zero.
+>
+> ### As duas armadilhas do `HANDOFF.md`, e como cada uma foi tratada
+>
+> **1. Coortes antigas dando 100% por causa da unificação.** O `HANDOFF.md` é explícito que a
+> fronteira de 2025-08 é *"ajuste empírico, não mecanismo"* e pede **um teste sobre o dado**. O
+> que entrou é isso: uma escrita em massa deixa a **mesma** `lastSeenDate` em toda linha que
+> tocou, e população orgânica não concentra um décimo de si num único dia de calendário. Os dias
+> que concentram saem no payload (`stampDays`, com dia, `n` e a população sobre a qual o share
+> foi tirado), e a coorte que passa do teto sai `null` com `import_artifact` **e a evidência** —
+> nunca os ~100%, nunca silêncio.
+>
+> A detecção é por **janela de até dois dias adjacentes**, não por dia isolado, e isso saiu
+> do code review: o `HANDOFF.md` diz *"idêntico **ou colado** à data da unificação"*, e
+> "colado" é exatamente o caso que um teste por dia não vê — duas metades de ~8% contra um
+> limiar de 10%, com a saída de uma detecção perdida sendo uma coorte publicada a 100%.
+> Dois dias e não mais: com janela livre, um mês de jogo normal vira uma corrida única com
+> um terço da população e o detector passa a suprimir o dado saudável.
+>
+> **E há uma segunda guarda, independente do detector.** Uma coorte que sobrevive a ≥99% em
+> **todos** os horizontes não é retenção — coorte real perde gente já no D1 —, e essa forma
+> aparece qualquer que tenha sido o espalhamento dos carimbos. É ela que fecha o caso que o
+> detector populacional não enxerga: uma coorte antiga pequena, inteiramente importada, que
+> cabe abaixo do limiar de 10% de 5.565 linhas. Sai `implausible_survival`, com a base
+> publicada.
+>
+> ⚠️ **Os dois limiares do detector não estão calibrados**, e estão marcados como tal no
+> `.env.example`, na mesma prateleira dos três da S6.3. Foram escolhidos por estarem
+> obviamente fora de comportamento orgânico, não por medição contra esta população. **A
+> primeira leitura de produção é o que vira calibração** — e a evidência necessária sai na
+> própria resposta, de propósito.
+>
+> **2. Coorte do mês corrente imatura.** Coberta pelo filtro de maturidade, que é o mesmo
+> mecanismo: não há caso especial para "mês corrente", há oportunidade contada por jogador.
+>
+> ### 🔴 E uma terceira, que o code review encontrou e que era pior que as duas
+>
+> A maturidade era medida contra o **relógio** enquanto a sobrevivência é medida contra o
+> `lastSeenDate`, que vem do dado. Com a coleta parada, o calendário continua tornando todo
+> jogador "maduro" enquanto nenhum pode ser observado sobrevivendo — e o módulo publicava o
+> zero resultante como medição, com um `n` de aparência saudável ao lado.
+>
+> Isto é o apagão de três meses vestido de número certo, no módulo cujo docblock prometia
+> justamente nunca fazer isso. A oportunidade passou a ser limitada por `dataThrough`, e um
+> horizonte que a fonte não alcança sai `source_stale` — nunca `0,0%`. As duas ausências têm
+> motivos distintos de propósito: uma diz "espere", a outra diz "a fonte morreu".
+>
+> ### Degradação
+>
+> Plan inalcançável, não configurado ou respondendo forma desconhecida → relatório **sem
+> coortes e com a falha nomeada** (`not_configured` / `unreachable` / `contract_mismatch`),
+> nunca um relatório de zeros. `cohorts: []` ao lado de `source.ok: false` é o contrato.
+>
+> Com o Plan fora do ar **e um payload anterior em cache**, o anterior é servido marcado
+> `stale` com a idade — melhor que nada, e só aceitável porque a marca viaja junto. O cache
+> em si é a mitigação que a §8 do spec pede (*"cache com TTL por endpoint"*) e que faltava:
+> sem ele, uma aba de dashboard podia puxar as 5.565 linhas 120 vezes por janela da máquina
+> do jogo, porque é o que o throttle permite.
+>
+> E `cohorts: []` ao lado de `source.ok: **true**` também ganhou resposta: quando a janela
+> pedida cai fora do que a fonte cobre, sai `coverageWarning` dizendo isso. Sem ele, era
+> indistinguível de "ninguém se registrou nesse período" — a mesma confusão que o PR #180
+> consertou no funil com `coversFrom`.
+>
+> ### A dívida que esta história cria, e vale registrar antes que vire descoberta
+>
+> O corpo do `/v1/retention` foi lido em 2026-08-29, mas o que ficou registrado foram os
+> **nomes dos campos e a contagem de linhas** — não os tipos JSON deles, nem o envelope. O
+> parser foi escrito tolerante às três formas plausíveis de data (epoch ms, epoch s, string) e
+> **recusa ruidosamente** o que não reconhece, em vez de adivinhar. É o mais perto da regra do
+> repo que dá para chegar sem acesso à instância: **a primeira execução em produção é a
+> observação que ninguém fez**, e ela produz ou o número ou um `contract_mismatch` que nomeia
+> o campo faltante.
 
-> ### 🛑 NÃO INICIADA — três pré-requisitos abertos, e escrever assim mesmo repetiria a S6.2
+1. [x] Coorte mensal × plataforma, com `n`
+2. [x] Coortes com `n` abaixo do mínimo configurável são marcadas, não escondidas
+3. ➖ ~~Único ponto do sistema autorizado a fazer SQL direto (ADR-002), em usuário read-only,
+   isolado num módulo~~ — sem objeto: nenhum SQL foi escrito
+
+> ### 🛑 [HISTÓRICO — estado de 2026-08-28] NÃO INICIADA — três pré-requisitos abertos
 >
 > Avaliada em **2026-08-28**, depois de S8.0 e S8.1 entregues. Recomendação: **mover para a S9**,
 > que é exatamente a válvula de escape que o próprio plano nomeia para esta história (`[CORTE]` da
@@ -686,7 +785,10 @@ existe para impedir.
 - [ ] ~~Usuário read-only comprovadamente sem permissão de escrita — pertence à S8.2~~ —
       **deixou de pertencer**: a S8.2 consome o `/v1/retention` e não abre conexão MySQL. A
       exigência continua válida para a exceção **2**, que segue de pé, e por isso não é
-      apagada daqui — só deixa de estar atrelada a esta história
+      apagada daqui — só deixa de estar atrelada a esta história.
+      **Confirmado ao entregar a S8.2 em 2026-09-01:** o módulo não tem MySQL nenhum, então
+      não há usuário novo a provar. A pendência é integralmente da exceção 2 e do
+      `PlanDatabase`, que já existia antes desta história
 
 ### Fechamento da S8 — 2026-08-28
 
@@ -694,7 +796,7 @@ existe para impedir.
 |---|---|
 | **S8.0** — Fonte de dados do tutorial | ✅ **entregue** (PRs #168, #169). Fecha também o 7º check da §6.1 e o critério 5 da S6.3 |
 | **S8.1** — Módulo `funnel` | ✅ **entregue** (PR #170). Corrigida em 2026-08-31: o degrau sem fonte é o **`rede`**, não o `survival` — os dois trocaram de lugar quando se mediu que `plan_users` é o Survival |
-| **S8.2** — Retenção por coorte | 🛑 **não iniciada** — três pré-requisitos abertos, ver o bloco dela |
+| **S8.2** — Retenção por coorte | ✅ **entregue em 2026-09-01**, dentro da Sprint 9, sem abrir a exceção 1 do ADR-002. Ver o bloco dela |
 
 **Recomendação: mover a S8.2 para a S9**, que é a válvula de escape que o próprio plano nomeia
 (`[CORTE]` da S8). Isso põe a S8 em 13 SP contra 13 de capacidade e resolve o estouro registrado no

@@ -107,11 +107,30 @@ usa** — a S8.2, única história que dependia dela, sai do endpoint. Fechá-la
 dono, porque foi ele quem a abriu; até lá ela fica registrada aqui como o que é: uma
 autorização de pé sem motivo de pé.
 
+**Confirmado em 2026-09-01, quando a S8.2 foi entregue:** o módulo `retention` não abre
+conexão MySQL nenhuma e não pede credencial nova. A exceção segue aberta e agora está
+aberta para **ninguém**.
+
+> ⚠️ **Uma versão anterior deste parágrafo afirmava que `grep` por `plan_sessions` e
+> `plan_user_info` sobre `backend/src/retention/` retornava vazio. Não retornava** — o
+> nome da tabela aparecia num docblock e, pior, dentro da string `semantics`, que viaja no
+> corpo de **toda** resposta HTTP. O code review pegou; o nome saiu do corpo (é violação de
+> CWE-209 publicar identificador de schema de terceiro) e ficou só no docblock, onde é
+> contexto para quem lê o código.
+>
+> A alegação verificável é a que importa e ela se sustenta: **nenhum SQL, nenhuma conexão
+> MySQL, nenhuma credencial nova**. A outra era do tipo que este repositório audita depois
+> e encontra errada.
+
 > **A ressalva que sobra, e não é sobre acesso:** `lastSeenDate` dá o **intervalo de
 > sobrevivência**, não o retorno no dia N. Entregar retenção por intervalo, rotulada como
 > tal, é melhor que abrir três tabelas para entregar a outra — mas é uma métrica
 > diferente, e chamar uma de outra seria o erro de denominador que já custou uma linha do
 > DoD da S8.
+>
+> **O rótulo foi entregue como parte do contrato, não como nota de rodapé:** toda resposta
+> de `/retention/cohorts` carrega o campo `semantics`, e ele diz por extenso que "D30" ali
+> significa *ainda visto 30 dias depois de registrar*, não *voltou no trigésimo dia*.
 
 #### Exceção 2 — inventário de instâncias (2026-08-23)
 

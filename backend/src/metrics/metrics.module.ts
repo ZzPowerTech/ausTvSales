@@ -25,6 +25,10 @@ import { PlanCache } from './plan-cache';
   imports: [InstrumentationModule, ThrottlingModule],
   controllers: [MetricsController],
   providers: [MetricsService, PlanCache],
-  exports: [MetricsService],
+  // `PlanCache` e exportado para o modulo de retencao (S8.2), que consome o
+  // mesmo `/v1/*` e esta sob a mesma mitigacao da secao 8 do spec. O docblock do
+  // proprio cache ja antecipava isto: "the S8.2 cohort module is a second
+  // consumer waiting".
+  exports: [MetricsService, PlanCache],
 })
 export class MetricsModule {}

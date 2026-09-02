@@ -1,16 +1,11 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsOptional, Matches } from 'class-validator';
 import { DATE_PATTERN } from '../../analytics/dto/period-query.dto';
-import { Platform } from '../../instrumentation/platform';
+import { PLATFORM_VALUES } from '../../instrumentation/platform';
 
-/** Accepted `platform` values. `all` sums every platform. */
-export const PLATFORM_VALUES = [
-  'all',
-  Platform.Bedrock,
-  Platform.JavaOffline,
-  Platform.JavaPremium,
-  Platform.Unknown,
-] as const;
+// `PLATFORM_VALUES` moved to `instrumentation/platform.ts`, beside the union it
+// enumerates. It is a property of ADR-003 rather than of this feature, and three
+// modules now segment by platform — the funnel was only the first to need it.
 
 /**
  * Query for a funnel series (story S8.1).
