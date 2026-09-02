@@ -130,7 +130,7 @@ sprints.
 velocidade**: a S8.2 chegou destravada e o que ela pedia era código, não investigação, e a S9.1
 encolheu no caminho (ver abaixo).
 
-Suíte: **72 suítes, 901 testes** unitários, mais 5 arquivos de e2e novos contra Postgres real.
+Suíte: **72 suítes, 903 testes** unitários, mais 5 arquivos de e2e novos contra Postgres real.
 
 **O que a Sprint 9 mede agora, e o que cada número exige do ambiente:**
 

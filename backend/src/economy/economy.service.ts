@@ -13,7 +13,8 @@ import {
 import { PlayerDimensionStore } from './player-dimension.store';
 import { TutorialStore } from '../tutorial/tutorial.store';
 import {
-  FUNNEL_POSITION_UNAVAILABLE,
+  FUNNEL_POSITION_NO_TUTORIAL_SYNC,
+  FUNNEL_POSITION_SWITCH_OFF,
   FUNNEL_POSITIONS,
   type CohortFirstSpend,
   type CohortRevenue,
@@ -402,13 +403,27 @@ export class EconomyService {
         ? lastSync.stepOrder.split(',')
         : null;
 
-    // `positionsWritten` null means the switch was off on the last good run, so
-    // the table is either empty or stale from an older configuration. Either way
-    // it cannot be read as a measurement.
-    if (lastSync === null || lastSync.positionsWritten === null) {
+    // Two different absences, and telling them apart is the whole point: no
+    // successful tutorial run at all sends you to `TUTORIAL_SYNC_ENABLED` and
+    // the directories, while a run with `positionsWritten` null sends you to
+    // `TUTORIAL_POSITION_ENABLED`. One message for both named the second — and
+    // against a real instance whose parent ETL was unconfigured, that pointed
+    // at the one variable already set correctly.
+    if (lastSync === null) {
       return {
         byFunnelPosition: null,
-        funnelPositionUnavailableReason: FUNNEL_POSITION_UNAVAILABLE,
+        funnelPositionUnavailableReason: FUNNEL_POSITION_NO_TUTORIAL_SYNC,
+        byFurthestStep: null,
+        stepOrder,
+      };
+    }
+
+    // The switch was off on the last good run, so the table is either empty or
+    // stale from an older configuration. Either way it is not a measurement.
+    if (lastSync.positionsWritten === null) {
+      return {
+        byFunnelPosition: null,
+        funnelPositionUnavailableReason: FUNNEL_POSITION_SWITCH_OFF,
         byFurthestStep: null,
         stepOrder,
       };

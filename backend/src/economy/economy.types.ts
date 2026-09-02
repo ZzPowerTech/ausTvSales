@@ -143,7 +143,7 @@ export interface EconomyRevenueReport {
  * E2 — time to first spend, and funnel position as a predictor (spec §6.4).
  *
  * The first half is delivered. The second is not, and the reason is in
- * {@link FUNNEL_POSITION_UNAVAILABLE} rather than in a silent omission.
+ * {@link FUNNEL_POSITION_SWITCH_OFF} rather than in a silent omission.
  */
 export interface FirstSpendReport {
   /** Cohort months covered. */
@@ -276,11 +276,40 @@ export interface FurthestStepSpend {
  * S8.0 ETL, which already reads exactly that from `Quests/playerdata` and throws
  * it away.
  */
-export const FUNNEL_POSITION_UNAVAILABLE =
-  'A posicao por jogador no tutorial nunca foi gravada: o ETL do tutorial roda ' +
-  'com `TUTORIAL_POSITION_ENABLED` desligado, ou ainda nao completou uma ' +
-  'execucao com ele ligado. Sem ela nao ha como cruzar onde o jogador parou com ' +
-  'o que ele gastou — e uma lista vazia aqui se leria como "ninguem em posicao ' +
-  'nenhuma gastou", que e a confusao que este epico existe para remover. O ' +
-  'restante de E2 (tempo ate o primeiro gasto) nao depende disto e continua ' +
-  'valendo.';
+/**
+ * Two absences that look identical from outside and send you to different files.
+ *
+ * The position table is filled from inside the tutorial ETL, so it is empty
+ * under two completely different conditions:
+ *
+ * - the tutorial ETL itself has never completed a run — nothing to do with the
+ *   position switch, and turning that switch on changes nothing at all;
+ * - the ETL runs, and the position switch was off on its last good run.
+ *
+ * The first version of this module published **one** message for both, and it
+ * named the position switch. Read against a production instance on 2026-09-02
+ * — where the parent ETL was unconfigured and the owner had just turned the
+ * child switch on — it sent the reader to the one variable that was already
+ * correct. That is precisely the failure this epic exists to remove, committed
+ * by the mechanism built to remove it.
+ */
+export const FUNNEL_POSITION_NO_TUTORIAL_SYNC =
+  'O ETL do tutorial nunca completou uma execucao com sucesso, entao a posicao ' +
+  'por jogador nao existe — e `TUTORIAL_POSITION_ENABLED` NAO E O QUE FALTA: ' +
+  'ele e um sub-switch avaliado DENTRO da varredura, e liga-lo sozinho nao ' +
+  'produz nada. Quem gate a varredura e `TUTORIAL_SYNC_ENABLED` mais os ' +
+  'diretorios `TUTORIAL_PLAYERDATA_DIR` e `TUTORIAL_QUESTS_DIR`; sem os tres, ' +
+  'nao ha varredura para o sub-switch modificar. A varredura roda em cron ' +
+  '(`TUTORIAL_SYNC_CRON`, 03:00 por padrao) e nao tem gatilho manual, entao ' +
+  'depois de configurar e preciso esperar um ciclo. O mesmo ETL alimenta o ' +
+  '`tutorial_daily` do funil: se ele esta `never_synced`, e este o motivo.';
+
+export const FUNNEL_POSITION_SWITCH_OFF =
+  'O ETL do tutorial roda, mas a ultima execucao boa foi com ' +
+  '`TUTORIAL_POSITION_ENABLED` desligado — entao a tabela de posicao esta vazia ' +
+  'ou congelada numa configuracao antiga, e nao pode ser lida como medicao. ' +
+  'Sem ela nao ha como cruzar onde o jogador parou com o que ele gastou, e uma ' +
+  'lista vazia aqui se leria como "ninguem em posicao nenhuma gastou", que e a ' +
+  'confusao que este epico existe para remover. Ligar o switch basta; a ' +
+  'proxima varredura noturna preenche. O restante de E2 (tempo ate o primeiro ' +
+  'gasto) nao depende disto e continua valendo.';
