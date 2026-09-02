@@ -694,6 +694,17 @@ DoD:
 que sobra é sempre o que exige tocar o ambiente real. A diferença é que desta vez ele foi tocado, e
 por isso a lacuna apareceu em vez de continuar suposta.
 
+> **✅ RESOLVIDO em 2026-09-02.** O dono configurou as quatro variáveis e o mirror. Na leitura das
+> 22:05 o `tutorial_daily` está `ok` com **7/7 dias de cobertura**, e os dois degraus produzem
+> número. Ver "A primeira leitura de produção com o funil inteiro vivo", abaixo.
+>
+> ⚠️ **E este bloco envelheceu mal no meio do caminho.** Entre 2026-09-01 e 2026-09-02 eu continuei
+> lendo *"o ETL não está configurado"* como estado atual e diagnostiquei um `stepOrder: null` do
+> dono a partir disso — quando o que estava desligado era só o sub-switch da posição. O texto
+> acima era verdade na data dele e deixou de ser sem que nada no documento avisasse. Achado de
+> método: **um registro de estado de ambiente precisa de data no corpo, não só no cabeçalho da
+> seção** — quem lê depois não tem como saber que a validação expirou.
+
 ### ✅ O terceiro item fechou: o ciclo real de 03:50:24
 
 O `HealthCheckScheduler` agenda a primeira execução um intervalo após o boot, e o container subiu
@@ -1405,12 +1416,68 @@ restaurar**.
    `GRANT SELECT ON <db>.playerpoints_transaction_log TO 'austv_admin_ro'@'<host-da-VPS>'`.
    É a única tabela que este sistema lê ali, e o `SET` dela é a série de chegadas do R1.
 
-### Os dois itens do DoD da S9 que não podem ser fechados daqui
+### Os dois itens do DoD da S9
 
 - **"Timings anexado ao PR provando ausência de regressão de tick"** — exige rodar contra a
   produção. O que dá para fazer foi feito: os dois ETLs medem a si mesmos e persistem
   `duration_ms`, e o do PlayerPoints persiste também `source_query_ms`, o tempo dentro da
-  query do banco do jogo. A primeira execução real produz a evidência sozinha.
-- **"Um relatório real gerado e conferido à mão"** — o gatilho existe
-  (`POST /reports/weekly/run`) e o caminho inteiro é exercitado no e2e com **todas** as fontes
-  ausentes. Falta o run em produção e a leitura humana do que chegou no canal.
+  query do banco do jogo. A primeira execução real produz a evidência sozinha, e o primeiro
+  ciclo do `payments` roda em 2026-09-03 03:45.
+- ✅ **"Um relatório real gerado e conferido à mão" — FECHADO em 2026-09-02 22:05.** O
+  `POST /reports/weekly/run` devolveu `id: 1`, `status: "ok"`, **`delivered: true`**, e a
+  mensagem chegou no canal. Abaixo, o que ela disse.
+
+### A primeira leitura de produção com o funil inteiro vivo (2026-09-02 22:05)
+
+Relatório da janela `2026-08-26..2026-09-01`.
+
+**O número que o épico existia para produzir:**
+
+| degrau | semana | conversão |
+|---|---|---|
+| `rede` | — | ponto cego aceito, sem fonte |
+| `survival` | **59** | — |
+| `tutorial_entrou` | **8** | **13,6%** (n=59) |
+| `tutorial_concluiu` | **1** | **12,5%** (n=8) |
+
+**Um jogador de cada 59 termina o onboarding.** O `funnel.tutorial_entry_rate` está `breached`
+contra o piso de 0,7 — o sétimo check, construído na S8.0 para pegar exatamente os 8 meses em que
+o tutorial parou de capturar novatos, disparando por um problema real do jogo e não por defeito de
+medição. Saúde agregada: `degraded`, `ok=5 · breached=1 · no_data=0 · error=0`, com
+`funnel.network_to_survival` publicado em `blindSpots` e fora do agregado, como projetado.
+
+**As duas correções da sessão, validadas em produção:**
+
+- `contaminatedSpans` veio **idêntico** ao que `retention-production-shape.spec.ts` prevê:
+  `2024-06..2025-08`, `judgedCohorts: 22`, `confirmedCohorts: 21`, `inheritedCohorts: 23`,
+  `inheritedPlayers: 327`. Os quatro números batem com a fixture escrita a partir da leitura de
+  `/retention/cohorts` — o teste replica a produção, não uma aproximação dela.
+- A marca por horizonte aparece no texto entregue ao canal:
+  `D30 0,0% (n=5 ⚠️ base pequena)`. Antes do PR #194 esse zero saía sobre cinco pessoas sem marca
+  nenhuma, numa coorte de 43 que o `belowMinimum` de coorte declarava saudável.
+
+**🔴 A anomalia do `java_offline` deixou de ser suspeita e virou medida.** Coortes de 2026-07,
+todas com base publicada:
+
+| plataforma | tamanho | D1 | D7 | D30 |
+|---|---|---|---|---|
+| `bedrock` | 62 | 22,6% | 17,7% | **1,6%** |
+| `java_premium` | 52 | 25,0% | 17,3% | **3,8%** |
+| **`java_offline`** | **151** | 49,7% | 44,4% | **38,4%** |
+
+Dez a vinte e quatro vezes a retenção das outras duas, **e é a maior coorte das três** — logo
+domina qualquer número agregado por plataforma. Nenhuma decisão baseada em retenção agregada
+deveria ser tomada antes de investigar isso. Casa com a suspeita de tráfego automatizado já
+registrada neste documento, agora com três meses de medida limpa em vez de uma impressão.
+
+**Decisão em aberto, criada por esta leitura:** `FUNNEL_MIN_TUTORIAL_ENTRY_RATE=0.7` contra um
+nível real de ~13% deixa o check **permanentemente vermelho** até o onboarding ser consertado. É
+uma afirmação verdadeira, mas `degraded` permanente tem o mesmo defeito que o ponto cego tinha
+antes do `ACCEPTED_BLIND_SPOTS`: um segundo check piorando não move mais o agregado. Ou o dono
+aceita isso enquanto o funil não for consertado, ou o limiar deixa de ser piso absoluto e vira
+linha de tendência. Não se decide isso pelo código.
+
+**Ainda não observado:** `player_dimension` (03:30) e `payments` (03:45) rodam pela primeira vez
+em 2026-09-03. Até lá, receita por coorte, tempo até o 1º gasto, E3, E4 e R1 continuam sem base — e
+a posição por jogador no tutorial depende do ciclo das 03:00 com o `TUTORIAL_POSITION_ENABLED`
+ligado, que só passou a valer hoje.

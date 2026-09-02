@@ -190,6 +190,27 @@ Suíte: **72 suítes, 903 testes** unitários, mais 5 arquivos de e2e novos cont
 **Próxima: Sprint 10** — sugestões (modelo, corpus e bot). Sem gate: a S6.1 foi cancelada e a S10
 não depende mais de nada da S6.
 
+**🟢 A primeira leitura de produção com o funil inteiro vivo — 2026-09-02 22:05.** O relatório
+semanal rodou por gatilho manual, `delivered: true`, e **fecha o item do DoD da S9** que pedia um
+relatório real conferido à mão. Detalhe no
+[`HANDOFF.md`](.specs/features/austv-admin/HANDOFF.md). O essencial:
+
+- **O número que o épico existia para produzir:** na semana, **59** chegaram ao Survival, **8**
+  entraram no tutorial (13,6%) e **1** concluiu (12,5% de 8). Um jogador de cada 59 termina o
+  onboarding. O `funnel.tutorial_entry_rate` está `breached` — o sétimo check disparando por um
+  problema real do jogo, não por defeito de medição.
+- **As duas correções desta sessão, validadas em produção.** O `contaminatedSpans` veio idêntico
+  ao que o `retention-production-shape.spec.ts` prevê (21 de 22, 23 herdadas, 327 jogadores), e a
+  marca por horizonte apareceu no canal: `D30 0,0% (n=5 ⚠️ base pequena)`.
+- **🔴 A anomalia do `java_offline` virou medida.** Coorte 2026-07: D30 de **38,4%** (n=151) contra
+  **1,6%** do bedrock (n=62) e **3,8%** do java_premium (n=52) — e é a maior das três, logo domina
+  qualquer agregado por plataforma. Investigar antes de decidir qualquer coisa sobre retenção.
+- **Decisão criada pela leitura:** `FUNNEL_MIN_TUTORIAL_ENTRY_RATE=0.7` contra ~13% real deixa o
+  check permanentemente vermelho. É verdade, mas `degraded` permanente tem o mesmo defeito que o
+  ponto cego tinha: um segundo check piorando não move o agregado. Do dono.
+- **Ainda não observado:** `player_dimension` (03:30) e `payments` (03:45) rodam pela primeira vez
+  em 2026-09-03.
+
 **Em aberto, e vale mais que sprint:**
 
 - **🔴 A primeira calibração de produção da retenção, em 2026-09-02, achou um defeito de
@@ -284,12 +305,12 @@ não depende mais de nada da S6.
   `no_data=1 · anunciados=0 · entregues=0 · pontos_cegos=1` — o ponto cego não paginou o canal, e o
   contador diz que foi pelo ramo `accepted_blind_spot`, não por acaso.
   **🔴 E a validação derrubou uma alegação minha:** eu disse que a segunda metade do DoD da S8
-  (`~100%` de entrada no tutorial, `694/682`) era *calculável, só não rodada*. Rodou: **não é
-  calculável em produção**, porque o `tutorial_daily` está `never_synced` — o **ETL da S8.0 não
-  está configurado na VPS** (`TUTORIAL_PLAYERDATA_DIR` vazio, `TUTORIAL_SYNC_ENABLED=false`).
-  Dois dos quatro degraus do funil nunca produziram dado em produção, e o
-  `funnel.tutorial_entry_rate` está em `error` por isso. É o padrão da auditoria de 2026-08-27 pela
-  terceira vez — só que desta vez o ambiente foi tocado, então a lacuna apareceu.
+  (`~100%` de entrada no tutorial, `694/682`) era *calculável, só não rodada*. Em 2026-09-01 não
+  era: o `tutorial_daily` estava `never_synced` porque o **ETL da S8.0 não estava configurado na
+  VPS**. **✅ Configurado pelo dono em 2026-09-02** — ver o bloco da leitura de produção abaixo.
+  ⚠️ E este item envelheceu mal: eu continuei lendo "não está configurado" como estado atual no dia
+  seguinte e diagnostiquei errado um `stepOrder: null` a partir disso. **Registro de estado de
+  ambiente precisa de data no corpo**, senão quem lê depois não sabe que expirou.
 - **O alerta de saúde CHEGA — comprovado em 2026-08-26.** Alertas reais do
   `platform.offline_account_share` foram observados no canal: `breached`, recuperação e o `n` ao
   lado do percentual, funcionando em produção. A camada deixou de ser construção sobre algo que
