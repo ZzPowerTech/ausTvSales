@@ -12,8 +12,20 @@ function cohort(over: Partial<CohortRetention> = {}): CohortRetention {
     belowMinimum: false,
     contamination: { share: 0, n: 0, suspect: false, detectedBy: null },
     measures: [
-      { horizon: 'D1', percent: 61.9, n: 42, survived: 26 },
-      { horizon: 'D7', percent: 33.3, n: 42, survived: 14 },
+      {
+        horizon: 'D1',
+        percent: 61.9,
+        n: 42,
+        survived: 26,
+        belowMinimum: false,
+      },
+      {
+        horizon: 'D7',
+        percent: 33.3,
+        n: 42,
+        survived: 14,
+        belowMinimum: false,
+      },
       {
         horizon: 'D30',
         percent: null,
@@ -272,8 +284,47 @@ describe('renderWeeklyReport', () => {
       }),
     );
 
-    expect(text).toContain('amostra pequena');
+    expect(text).toContain('coorte pequena');
     expect(text).toContain('carimbo de importacao');
+  });
+
+  it('marks the HORIZON whose base is small, not just the cohort', () => {
+    // A cohort of 43 publishing `D30: 0%` over five people was unmarked before
+    // 2026-09-02: `belowMinimum` looked at the cohort's size and the cohort was
+    // large. The mark belongs beside the number it qualifies.
+    const text = renderWeeklyReport(
+      report({
+        retention: {
+          ...report().retention,
+          cohorts: [
+            cohort({
+              size: 43,
+              belowMinimum: false,
+              measures: [
+                {
+                  horizon: 'D1',
+                  percent: 20,
+                  n: 43,
+                  survived: 9,
+                  belowMinimum: false,
+                },
+                {
+                  horizon: 'D30',
+                  percent: 0,
+                  n: 5,
+                  survived: 0,
+                  belowMinimum: true,
+                },
+              ],
+            }),
+          ],
+        },
+      }),
+    );
+
+    expect(text).toContain('D1 20,0% (n=43)');
+    expect(text).toContain('D30 0,0% (n=5 ⚠️)');
+    expect(text).not.toContain('coorte pequena');
   });
 
   it('warns loudly when the health cycle is switched off', () => {

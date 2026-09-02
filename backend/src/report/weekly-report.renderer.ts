@@ -236,7 +236,7 @@ function healthLines(report: WeeklyReport): string[] {
 
 function renderCohort(cohort: CohortRetention): string {
   const marks = [
-    cohort.belowMinimum ? '⚠️ amostra pequena' : null,
+    cohort.belowMinimum ? '⚠️ coorte pequena' : null,
     cohort.contamination.suspect ? '⚠️ carimbo de importacao' : null,
   ].filter((mark): mark is string => mark !== null);
 
@@ -251,7 +251,11 @@ function renderMeasure(measure: RetentionMeasure): string {
   if (measure.percent === null) {
     return `${measure.horizon} — sem dado (${measure.reason})`;
   }
-  return `${measure.horizon} ${percent(measure.percent)} (n=${measure.n})`;
+  // The mark rides on the horizon, not on the cohort line, because that is where
+  // it is true: a cohort of 43 whose D30 rests on five people needs the warning
+  // beside the D30 and nowhere else.
+  const mark = measure.belowMinimum ? ' ⚠️' : '';
+  return `${measure.horizon} ${percent(measure.percent)} (n=${measure.n}${mark})`;
 }
 
 function renderCount(count: StepCount): string {

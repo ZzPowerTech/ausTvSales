@@ -913,14 +913,26 @@ linha de SQL.
 > razão de o piso existir. O que a correção remove é julgar em isolamento aquilo que é uma
 > propriedade de uma *escrita* em massa.
 >
-> **🔴 Achado secundário da mesma leitura, ainda em aberto:** `belowMinimum` olha o tamanho da
-> **coorte** e não a base do **horizonte**. A coorte `2026-08 / bedrock` tem 43 jogadores
-> (acima do mínimo de 30, logo `belowMinimum: false`) e publica `D30: 0%` sobre `n: 5`, sem
-> nenhuma marca de amostra pequena. É a mesma família de erro que este épico combate, num
-> lugar que nenhum teste alcançava porque nenhuma fixture tinha bases divergentes por
-> horizonte. Duas saídas — marcar por medida (muda o formato do payload) ou suprimir o
-> percentual quando a base do horizonte fica abaixo do mínimo (perde número às vezes
-> legítimo). **Marcar, nunca esconder** é a regra da própria história; a escolha é do dono.
+> **✅ Achado secundário da mesma leitura, fechado em 2026-09-02 por decisão do dono
+> ("marcar por medida").** `belowMinimum` olhava o tamanho da **coorte** e não a base do
+> **horizonte**. A coorte `2026-08 / bedrock` tem 43 jogadores (acima do mínimo de 30, logo
+> `belowMinimum: false`) e publicava `D30: 0%` sobre `n: 5`, sem nenhuma marca de amostra
+> pequena — um colapso aparente que um único jogador move vinte pontos.
+>
+> A marca passou a existir **por medida**, calculada contra a base daquele horizonte. A de
+> coorte continua, porque responde outra pergunta ("vale olhar para esta coorte?"), e as duas
+> estão documentadas uma pela outra. As bases de uma mesma coorte divergem por construção — a
+> maturidade é filtrada por jogador —, então uma marca só ao lado de três percentuais estaria
+> errada para dois deles, exatamente como um `n` só estaria. Este projeto já recusou o `n`
+> único por esse motivo; a marca seguiu a mesma regra.
+>
+> Escolhido **marcar** e não suprimir: amostra pequena suprimida é invisível, e *marcar, nunca
+> esconder* é o critério 2 da própria história. No relatório semanal a marca fica ao lado do
+> horizonte (`D30 0,0% (n=5 ⚠️)`), não na linha da coorte, porque é ali que ela é verdadeira.
+>
+> Vale registrar por que nenhum teste pegava isto: **nenhuma fixture tinha bases divergentes
+> por horizonte**. Todas construíam coortes cujos jogadores maturavam juntos, então `n` era o
+> mesmo nos três e a distinção que o defeito explora não existia no conjunto de testes.
 >
 > **Anomalia que vale investigação, não correção:** em 2026-07 o `java_offline` dá D30 = 38,4%
 > (n=151) contra 1,6% (n=62) do bedrock. Vinte e quatro vezes a retenção do bedrock é

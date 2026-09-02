@@ -283,7 +283,106 @@ describe('buildCohorts', () => {
         horizon: 'D30',
         percent: 30,
         n: 100,
+        belowMinimum: false,
         survived: 30,
+      });
+    });
+  });
+
+  describe('the small-sample mark is per horizon, not per cohort', () => {
+    /**
+     * ONE cohort of 43 whose D30 rests on five people.
+     *
+     * The production shape of `2026-08 / bedrock`, read on 2026-09-02. Both
+     * groups register in the same month on purpose — split them across a month
+     * boundary and they become two cohorts, which is a different fixture
+     * answering a different question:
+     *
+     * - 38 register on 2026-07-20, twelve days before the read: mature at D1 and
+     *   D7, not at D30;
+     * - 5 register on 2026-07-01, thirty-one days before: mature everywhere.
+     *
+     * Nobody comes back, so D30 publishes `0%` over a base of five.
+     */
+    function lopsided(): RetentionPlayer[] {
+      return [
+        ...Array.from({ length: 38 }, (_, i) =>
+          player(bedrock(i), '2026-07-20', '2026-07-20'),
+        ),
+        ...Array.from({ length: 5 }, (_, i) =>
+          player(bedrock(100 + i), '2026-07-01', '2026-07-01'),
+        ),
+      ];
+    }
+
+    it('marks a horizon whose base is small even when the cohort is not', () => {
+      // The defect the first production read exposed. `belowMinimum` looked only
+      // at the cohort's size — 43, comfortably above the minimum of 30 — so
+      // `D30: 0%` went out over five people with no mark anywhere. A collapse
+      // that one player moves by twenty points, published as a measurement.
+      const [cohort] = buildCohorts(lopsided(), options());
+
+      expect(cohort.size).toBe(43);
+      expect(cohort.belowMinimum).toBe(false);
+
+      expect(measureOf(cohort.measures, 'D30')).toMatchObject({
+        percent: 0,
+        n: 5,
+        belowMinimum: true,
+      });
+      expect(measureOf(cohort.measures, 'D1')).toMatchObject({
+        n: 43,
+        belowMinimum: false,
+      });
+      expect(measureOf(cohort.measures, 'D7')).toMatchObject({
+        n: 43,
+        belowMinimum: false,
+      });
+    });
+
+    it('marks every horizon when the cohort itself is small', () => {
+      const members = Array.from({ length: 10 }, (_, i) =>
+        player(bedrock(i), '2026-01-01', '2026-01-01'),
+      );
+
+      const [cohort] = buildCohorts(members, options());
+
+      expect(cohort.belowMinimum).toBe(true);
+      expect(
+        cohort.measures.map((m) =>
+          m.percent === null ? null : m.belowMinimum,
+        ),
+      ).toEqual([true, true, true]);
+    });
+
+    it('marks nothing when every base clears the minimum', () => {
+      const members = Array.from({ length: 40 }, (_, i) =>
+        player(bedrock(i), '2026-01-01', '2026-01-01'),
+      );
+
+      const [cohort] = buildCohorts(members, options());
+
+      expect(cohort.belowMinimum).toBe(false);
+      expect(
+        cohort.measures.map((m) =>
+          m.percent === null ? null : m.belowMinimum,
+        ),
+      ).toEqual([false, false, false]);
+    });
+
+    it('follows the configured minimum rather than a constant', () => {
+      const members = Array.from({ length: 40 }, (_, i) =>
+        player(bedrock(i), '2026-01-01', '2026-01-01'),
+      );
+
+      const [cohort] = buildCohorts(
+        members,
+        options({ minimumCohortSize: 100 }),
+      );
+
+      expect(measureOf(cohort.measures, 'D1')).toMatchObject({
+        n: 40,
+        belowMinimum: true,
       });
     });
   });
