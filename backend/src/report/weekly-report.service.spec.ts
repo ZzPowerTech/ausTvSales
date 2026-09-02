@@ -20,6 +20,7 @@ function report(): WeeklyReport {
       to: '2026-08',
       cohorts: [],
       stampDays: [],
+      contaminatedSpans: [],
       source: {
         name: 'plan_retention',
         ok: true,

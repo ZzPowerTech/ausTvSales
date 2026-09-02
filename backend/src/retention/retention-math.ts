@@ -282,7 +282,37 @@ function suppressImplausible(
 }
 
 /**
- * Find the run of registration months where the import artefact is proven.
+ * How many consecutive months without evidence a run will bridge.
+ *
+ * Six. This is a judgement call and is marked as one — there is no mechanism
+ * that makes seven wrong and six right. What there is: the production dataset
+ * needs **five** (2024-09 through 2025-01 hold not one cohort of twenty, fifteen
+ * cohorts, every one at 100%), so six is the smallest round number that covers
+ * the one case ever observed with a month to spare.
+ *
+ * What the cap is actually for is bounding how far an inference may travel with
+ * no evidence under it. The bulk write itself takes minutes; the gap has nothing
+ * to do with its duration and everything to do with how many players happened to
+ * register. Past roughly half a year the population has turned over enough that
+ * "the same write" stops being the obvious explanation, and the cost of
+ * suppressing a real cohort starts to outweigh the cost of publishing a fake
+ * one.
+ */
+const MAX_SPAN_GAP_MONTHS = 6;
+
+/**
+ * What one registration month says about the artefact.
+ *
+ * `clean` is the one that matters and the one the first version of this detector
+ * did not have. A month whose judgeable cohorts all passed — and which holds no
+ * failing cohort of its own — is evidence **against** a write covering it, and
+ * an inference that walks straight through it is not an inference about a write
+ * any more.
+ */
+type MonthState = 'confirmed' | 'clean' | 'unknown';
+
+/**
+ * Find the runs of registration months where the import artefact is proven.
  *
  * ## The defect this closes, measured
  *
@@ -304,71 +334,114 @@ function suppressImplausible(
  * being detected is a bulk **write**: a write covers a contiguous range of
  * registrations, so the months around a proven month are the same event.
  *
- * ## The gaps are inside the span, and that is the point
+ * ## Runs, not the interval between the extremes
  *
- * In that same read, 2024-09 through 2025-01 contain no cohort of 20 or more at
- * all — five consecutive months, fifteen cohorts, every one at 100%, and not one
- * of them judgeable on its own. They sit between 2024-08 and 2025-02, both
- * proven. Treating the gap as clean is what published them.
+ * The first version of this function returned `[min(confirmed), max(confirmed)]`
+ * and that was unbounded extrapolation dressed as a mechanism: it invoked
+ * contiguity as its justification and then never tested contiguity anywhere. Two
+ * imports two years apart made one span of two years, and a cohort eleven months
+ * from the nearest evidence in either direction was suppressed by it.
+ *
+ * So a run is grown instead, and stops at a wall:
+ *
+ * - a **clean** month (see {@link MonthState}) — a healthy judgeable cohort is
+ *   evidence against the write, and inference does not cross it;
+ * - a gap longer than {@link MAX_SPAN_GAP_MONTHS}.
+ *
+ * Months inside a run with nothing judgeable in them stay inside it. In
+ * production, 2024-09 through 2025-01 are five consecutive such months holding
+ * fifteen cohorts at 100% — reading that gap as clean is what published them.
  *
  * @param all cohorts over the WHOLE payload, never a request window. A window
  *   narrow enough to exclude every judgeable cohort would find no span and
  *   publish the artefact in full, which is the failure this exists to prevent.
  */
-export function detectContaminatedSpan(
+export function detectContaminatedSpans(
   all: readonly CohortRetention[],
-): ConfirmedSpan | null {
-  const confirmed = all.filter(judgedImplausible);
+): ConfirmedSpan[] {
+  const states = monthStates(all);
+  const confirmed = [...states.entries()]
+    .filter(([, state]) => state === 'confirmed')
+    .map(([month]) => month)
+    .sort();
+
   if (confirmed.length === 0) {
-    return null;
+    return [];
   }
 
-  const confirmedMonths = [
-    ...new Set(confirmed.map((cohort) => cohort.cohort)),
-  ].sort();
+  const runs: string[][] = [[confirmed[0]]];
+  for (let i = 1; i < confirmed.length; i++) {
+    const previous = confirmed[i - 1];
+    const next = confirmed[i];
+    const gap = monthsBetween(previous, next) - 1;
+    const walled =
+      gap > MAX_SPAN_GAP_MONTHS || hasCleanMonthBetween(states, previous, next);
 
-  return {
-    from: confirmedMonths[0],
-    to: confirmedMonths[confirmedMonths.length - 1],
-    confirmedMonths,
-    confirmedCohorts: confirmed.length,
-  };
+    if (walled) {
+      runs.push([next]);
+    } else {
+      runs[runs.length - 1].push(next);
+    }
+  }
+
+  return runs.map((months) => {
+    const from = months[0];
+    const to = months[months.length - 1];
+    const inside = all.filter(
+      (cohort) => cohort.cohort >= from && cohort.cohort <= to,
+    );
+
+    return {
+      from,
+      to,
+      confirmedMonths: months,
+      confirmedCohorts: inside.filter(judgedImplausible).length,
+      judgedCohorts: inside.filter(judgeable).length,
+    };
+  });
 }
 
 /**
  * Suppress the cohorts that inherit a proven span.
  *
- * Deliberately narrow: a cohort is only touched when it is inside the span
+ * Deliberately narrow: a cohort is only touched when it falls inside a span
  * **and** already reads at or above {@link IMPLAUSIBLE_SURVIVAL} on every
- * horizon. The size requirement is the only thing relaxed. A clean cohort inside
- * a contaminated span keeps its numbers, because the span is evidence about a
- * write and not a blanket verdict on a period.
+ * horizon. The size requirement is the only thing relaxed.
  *
- * @param span `null` disables the pass entirely and returns the input untouched.
+ * A consequence worth being explicit about, because "clean cohort" is the wrong
+ * way to think about it: a small cohort inside a span that genuinely retained
+ * everybody **is** suppressed, because it is indistinguishable from the artefact
+ * by construction. What survives untouched is a cohort with a *different shape*
+ * — one that lost people, at any horizon, by any amount.
+ *
+ * @param spans an empty list disables the pass entirely.
  */
-export function applyContaminatedSpan(
+export function applyContaminatedSpans(
   cohorts: readonly CohortRetention[],
-  span: ConfirmedSpan | null,
-): { cohorts: CohortRetention[]; span: ContaminatedSpan | null } {
-  if (span === null) {
-    return { cohorts: [...cohorts], span: null };
+  spans: readonly ConfirmedSpan[],
+): { cohorts: CohortRetention[]; spans: ContaminatedSpan[] } {
+  if (spans.length === 0) {
+    return { cohorts: [...cohorts], spans: [] };
   }
 
-  let inheritedCohorts = 0;
-  let inheritedPlayers = 0;
+  const inherited = spans.map(() => ({ cohorts: 0, players: 0 }));
 
   const out = cohorts.map((cohort) => {
+    // Runs never overlap, so the first match is the only match.
+    const index = spans.findIndex(
+      (span) => cohort.cohort >= span.from && cohort.cohort <= span.to,
+    );
+
     if (
-      cohort.cohort < span.from ||
-      cohort.cohort > span.to ||
+      index < 0 ||
       judgedImplausible(cohort) ||
       !readsImplausible(cohort.measures)
     ) {
       return cohort;
     }
 
-    inheritedCohorts += 1;
-    inheritedPlayers += cohort.size;
+    inherited[index].cohorts += 1;
+    inherited[index].players += cohort.size;
 
     return {
       ...cohort,
@@ -380,15 +453,86 @@ export function applyContaminatedSpan(
         n: m.n,
         survived: null,
         reason: 'contaminated_span',
-        unavailableReason: spanReason(span),
+        unavailableReason: spanReason(spans[index]),
       })),
     };
   });
 
   return {
     cohorts: out,
-    span: { ...span, inheritedCohorts, inheritedPlayers },
+    spans: spans.map((span, i) => ({
+      ...span,
+      inheritedCohorts: inherited[i].cohorts,
+      inheritedPlayers: inherited[i].players,
+    })),
   };
+}
+
+/** What each registration month says about the artefact. */
+function monthStates(all: readonly CohortRetention[]): Map<string, MonthState> {
+  const states = new Map<string, MonthState>();
+
+  for (const cohort of all) {
+    // A failing cohort settles the month whatever else it holds. A month can
+    // carry a failing cohort AND a healthy one at the same time — production
+    // 2025-08 does — and that makes it evidence, not a wall.
+    if (judgedImplausible(cohort)) {
+      states.set(cohort.cohort, 'confirmed');
+      continue;
+    }
+    if (states.get(cohort.cohort) === 'confirmed') {
+      continue;
+    }
+    if (judgeable(cohort)) {
+      states.set(cohort.cohort, 'clean');
+    } else if (!states.has(cohort.cohort)) {
+      states.set(cohort.cohort, 'unknown');
+    }
+  }
+
+  return states;
+}
+
+/** True when a clean month sits strictly between two confirmed ones. */
+function hasCleanMonthBetween(
+  states: ReadonlyMap<string, MonthState>,
+  from: string,
+  to: string,
+): boolean {
+  for (const [month, state] of states) {
+    if (state === 'clean' && month > from && month < to) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Calendar months from `from` to `to`, signed. Both `YYYY-MM`. */
+function monthsBetween(from: string, to: string): number {
+  const [fromYear, fromMonth] = from.split('-').map(Number);
+  const [toYear, toMonth] = to.split('-').map(Number);
+  return (toYear - fromYear) * 12 + (toMonth - fromMonth);
+}
+
+/**
+ * True when {@link suppressImplausible} was able to reach a verdict on this
+ * cohort — large enough, and with every horizon actually measured.
+ *
+ * A cohort of two hundred whose D30 is `immature_horizon` is not a pass and not
+ * a failure; it is silence, and counting it either way would misstate the base
+ * the suppression reason publishes.
+ */
+function judgeable(cohort: CohortRetention): boolean {
+  // A condemned cohort WAS judgeable — its percentages read `null` precisely
+  // because the guard judged it. Testing "every horizon measured" on its own
+  // counts exactly zero of them, which made the reason string say "0 de 0" while
+  // suppressing twenty-three cohorts.
+  return (
+    judgedImplausible(cohort) ||
+    (cohort.size >= IMPLAUSIBLE_MIN_COHORT &&
+      cohort.measures.length > 0 &&
+      cohort.measures.every((m) => m.percent !== null))
+  );
 }
 
 /** True when {@link suppressImplausible} judged this cohort on its own evidence. */
@@ -414,14 +558,17 @@ function spanReason(span: ConfirmedSpan): string {
     'teste de implausibilidade se abstem dela sozinha — sobre onze jogadores ' +
     'nenhum resultado prova nada. Mas ela sobrevive a ' +
     `${IMPLAUSIBLE_SURVIVAL * 100}% ou mais em TODOS os horizontes E registra ` +
-    `dentro de ${span.from}..${span.to}, um intervalo em que ` +
-    `${span.confirmedCohorts} coorte(s) grande(s) o bastante para serem ` +
-    'julgadas foram TODAS reprovadas pelo mesmo teste. O artefato vem de uma ' +
-    'escrita em massa, e escrita em massa cobre uma faixa continua de ' +
-    'registros: a vizinhanca e a mesma importacao, nao sorte. Julgar so pelo ' +
-    'tamanho e o que fazia este modulo publicar 100% de retencao em D30 sobre ' +
-    'bases de dez a dezenove jogadores, cercadas por coortes suprimidas. ' +
-    'A base fica publicada; o percentual, nao. Ver `contaminatedSpan`.'
+    `dentro de ${span.from}..${span.to}, onde ${span.confirmedCohorts} de ` +
+    `${span.judgedCohorts} coorte(s) grande(s) o bastante para serem julgadas ` +
+    'foram reprovadas pelo mesmo teste. Essa faixa nao atravessa nenhum mes ' +
+    'cujas coortes julgaveis tenham TODAS passado, nem lacuna maior que ' +
+    `${MAX_SPAN_GAP_MONTHS} meses sem evidencia — sem essas duas paredes o ` +
+    'intervalo seria extrapolacao, nao inferencia. O artefato vem de escrita ' +
+    'em massa, e escrita em massa cobre uma faixa continua de registros: a ' +
+    'vizinhanca e a mesma importacao, nao sorte. Julgar so pelo tamanho e o ' +
+    'que fazia este modulo publicar 100% de retencao em D30 sobre bases de dez ' +
+    'a dezenove jogadores, cercadas por coortes suprimidas. A base fica ' +
+    'publicada; o percentual, nao. Ver `contaminatedSpans`.'
   );
 }
 

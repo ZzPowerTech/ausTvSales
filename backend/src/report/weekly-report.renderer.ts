@@ -116,7 +116,7 @@ function funnelLines(report: WeeklyReport): string[] {
 }
 
 function retentionLines(report: WeeklyReport): string[] {
-  const { cohorts, source, from, to, stampDays, contaminatedSpan } =
+  const { cohorts, source, from, to, stampDays, contaminatedSpans } =
     report.retention;
 
   const lines = [
@@ -156,18 +156,38 @@ function retentionLines(report: WeeklyReport): string[] {
     );
   }
 
-  // Printed even when `stampDays` is empty, which is the case that matters: in
-  // this population the artefact is real and leaves no single stamp day, so
-  // without this line a reader sees a column of blanks and no reason for them.
-  if (contaminatedSpan !== undefined) {
+  // Gated on the cohorts ACTUALLY RENDERED, never on a span existing.
+  //
+  // The spans are dataset-wide and the weekly window is the last three months,
+  // so in production a span (`2024-06..2025-08`) is permanently present and
+  // permanently irrelevant to what this section prints. The first version of
+  // this line was ungated, which would have shipped the same warning to the
+  // channel every week for ever, beside three months of cohorts that all have
+  // their numbers — a standing false note in an alert channel, which is how this
+  // project has already recorded that a channel goes deaf.
+  const blanked = cohorts.filter((cohort) =>
+    cohort.measures.some(
+      (m) =>
+        m.percent === null &&
+        (m.reason === 'contaminated_span' ||
+          m.reason === 'implausible_survival'),
+    ),
+  );
+
+  if (blanked.length > 0) {
+    const overlapping = contaminatedSpans.filter(
+      (span) => span.from <= to && span.to >= from,
+    );
+
     lines.push(
       '',
-      `⚠️ Faixa de importacao \`${contaminatedSpan.from}..${contaminatedSpan.to}\`: ` +
-        `${contaminatedSpan.confirmedCohorts} coorte(s) reprovadas por ` +
-        `evidencia propria e mais ${contaminatedSpan.inheritedCohorts} ` +
-        `(${contaminatedSpan.inheritedPlayers} jogadores) pequenas demais para ` +
-        'julgar sozinhas mas com a mesma forma de ~100%. Todas saem sem numero, ' +
-        'com o motivo — a base fica.',
+      `⚠️ ${blanked.length} de ${cohorts.length} coorte(s) desta janela sairam ` +
+        'sem numero por artefato de importacao — a base de cada uma fica' +
+        (overlapping.length === 0
+          ? '.'
+          : `. Faixa: ${overlapping
+              .map((span) => `\`${span.from}..${span.to}\``)
+              .join(', ')}.`),
     );
   }
 

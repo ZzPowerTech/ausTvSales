@@ -121,12 +121,7 @@ export class WeeklyReportBuilder {
       to: report.to,
       cohorts: report.cohorts,
       stampDays: report.stampDays,
-      // Spread rather than assigned: the field is absent when nothing was
-      // proven, and `contaminatedSpan: undefined` is a different thing from a
-      // field that is not there once this crosses JSON.
-      ...(report.contaminatedSpan === undefined
-        ? {}
-        : { contaminatedSpan: report.contaminatedSpan }),
+      contaminatedSpans: report.contaminatedSpans,
       source: report.source,
     };
   }

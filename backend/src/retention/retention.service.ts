@@ -10,9 +10,9 @@ import {
   type RetentionPlayer,
 } from './plan-retention';
 import {
-  applyContaminatedSpan,
+  applyContaminatedSpans,
   buildCohorts,
-  detectContaminatedSpan,
+  detectContaminatedSpans,
   detectStampDays,
 } from './retention-math';
 import {
@@ -170,7 +170,7 @@ export class RetentionService {
       contaminationMax: this.contaminationMax,
     });
 
-    const spanned = applyContaminatedSpan(all, detectContaminatedSpan(all));
+    const spanned = applyContaminatedSpans(all, detectContaminatedSpans(all));
 
     const cohorts = spanned.cohorts.filter(
       (cohort) =>
@@ -179,7 +179,7 @@ export class RetentionService {
         (platform === 'all' || cohort.platform === platform),
     );
 
-    this.warnOnSuppression(cohorts, stampDays, spanned.span);
+    this.warnOnSuppression(cohorts, stampDays, spanned.spans);
 
     return {
       semantics: RETENTION_SEMANTICS,
@@ -188,7 +188,7 @@ export class RetentionService {
       evaluatedAt: new Date(evaluatedAt).toISOString(),
       minimumCohortSize: this.minimumCohortSize,
       stampDays,
-      ...(spanned.span === null ? {} : { contaminatedSpan: spanned.span }),
+      contaminatedSpans: spanned.spans,
       cohorts,
       ...this.coverageWarning(loaded.state, fromMonth, toMonth, cohorts.length),
       source: loaded.state,
@@ -351,6 +351,7 @@ export class RetentionService {
       evaluatedAt: new Date(evaluatedAt).toISOString(),
       minimumCohortSize: this.minimumCohortSize,
       stampDays: [],
+      contaminatedSpans: [],
       cohorts: [],
       source,
     };
@@ -367,12 +368,17 @@ export class RetentionService {
   private warnOnSuppression(
     cohorts: readonly CohortRetention[],
     stampDays: readonly StampDay[],
-    span: ContaminatedSpan | null,
+    spans: readonly ContaminatedSpan[],
   ): void {
-    if (span !== null && span.inheritedCohorts > 0) {
+    // Logged whenever a span exists, not only when it suppressed something. A
+    // span with zero inherited cohorts is still the detector saying "this range
+    // of the dataset is an import", which is worth knowing even on the reads
+    // where nothing small happened to fall inside it.
+    for (const span of spans) {
       this.logger.warn(
-        `Faixa contaminada ${span.from}..${span.to}: ${span.confirmedCohorts} ` +
-          `coorte(s) reprovadas por evidencia propria em ` +
+        `Faixa contaminada ${span.from}..${span.to}: ` +
+          `${span.confirmedCohorts} de ${span.judgedCohorts} coorte(s) ` +
+          `julgaveis reprovadas por evidencia propria em ` +
           `${span.confirmedMonths.length} mes(es), e mais ` +
           `${span.inheritedCohorts} coorte(s) (${span.inheritedPlayers} ` +
           'jogadores) suprimidas por heranca — pequenas demais para julgar ' +

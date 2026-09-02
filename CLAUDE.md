@@ -130,7 +130,7 @@ sprints.
 velocidade**: a S8.2 chegou destravada e o que ela pedia era código, não investigação, e a S9.1
 encolheu no caminho (ver abaixo).
 
-Suíte: **70 suítes, 863 testes** unitários, mais 5 arquivos de e2e novos contra Postgres real.
+Suíte: **72 suítes, 896 testes** unitários, mais 5 arquivos de e2e novos contra Postgres real.
 
 **O que a Sprint 9 mede agora, e o que cada número exige do ambiente:**
 
@@ -183,13 +183,22 @@ não depende mais de nada da S6.
   publicada tinha ≤19 — a divisão cai exatamente sobre o piso de tamanho do guarda, que portanto
   decidiu os 45 casos sozinho.
   **Corrigido:** veredito herdado por vizinhança (`contaminated_span`). Uma coorte pequena demais
-  para julgar é suprimida quando mostra a mesma forma de ~100% **e** registra dentro do intervalo
-  entre o primeiro e o último mês com evidência própria — lacunas incluídas, porque 2024-09 a
-  2025-01 são cinco meses sem uma única coorte de 20 e quinze coortes a 100%. Só o requisito de
-  **tamanho** é relaxado: curva real dentro do intervalo continua publicando. A inferência tem
-  motivo próprio (separado do `implausible_survival`, que julga por evidência direta) e o
-  intervalo sai em `contaminatedSpan` para ser conferido; a detecção roda sobre o payload
-  inteiro e a janela é aplicada depois, senão pedir só a lacuna faria a evidência sumir.
+  para julgar é suprimida quando mostra a mesma forma de ~100% **e** registra dentro de uma
+  **corrida** de meses contaminados — lacunas incluídas, porque 2024-09 a 2025-01 são cinco meses
+  sem uma única coorte de 20 e quinze coortes a 100%. Só o requisito de **tamanho** é relaxado:
+  curva real dentro da corrida continua publicando. A inferência tem motivo próprio (separado do
+  `implausible_survival`, que julga por evidência direta) e as corridas saem em
+  `contaminatedSpans`; a detecção roda sobre o payload inteiro e a janela é aplicada depois,
+  senão pedir só a lacuna faria a evidência sumir.
+  **A corrida é crescida, e isso veio do review:** a primeira versão era `[min, max]`, que
+  invocava continuidade como justificativa sem testar continuidade em lugar nenhum — duas
+  importações com um ano de distância viravam uma faixa de um ano. Duas paredes param uma
+  corrida: um **mês limpo** (coortes julgáveis que passaram e nenhuma reprovada própria — uma
+  coorte saudável de 200 pessoas é evidência *contra* a escrita) e uma **lacuna maior que seis
+  meses**. E a string de motivo dizia que *todas* as julgáveis do intervalo tinham sido
+  reprovadas, o que o código nunca checava e em produção é falso — `2025-08 / java_offline`
+  passa dentro de um mês confirmado. Diz "21 de 22" agora, com a base contada. A leitura inteira
+  está fixada em `retention-production-shape.spec.ts`.
   **O buraco deixado de propósito:** coorte pequena a 100% **fora** de intervalo provado
   continua publicando — onze jogadores que ficam não provam nada sozinhos, que é a razão de o
   piso existir.

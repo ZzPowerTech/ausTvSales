@@ -870,17 +870,43 @@ linha de SQL.
 >
 > **Corrigido:** o veredito passou a ser herdado por vizinhança (`contaminated_span`). Uma
 > coorte pequena demais para ser julgada sozinha é suprimida quando (a) mostra a mesma forma
-> de ~100% em todos os horizontes **e** (b) registra dentro do intervalo entre o primeiro e o
-> último mês onde alguma coorte grande o bastante foi reprovada por evidência própria. Os
-> meses *sem* evidência dentro do intervalo entram — em produção, 2024-09 a 2025-01 são cinco
-> meses seguidos sem uma única coorte de 20, quinze coortes, todas a 100%. Lacuna significa
-> "ninguém aqui era grande o bastante para testar", não "este mês está limpo".
+> de ~100% em todos os horizontes **e** (b) registra dentro de uma **corrida** de meses
+> contaminados. Os meses *sem* evidência dentro da corrida entram — em produção, 2024-09 a
+> 2025-01 são cinco meses seguidos sem uma única coorte de 20, quinze coortes, todas a 100%.
+> Lacuna significa "ninguém aqui era grande o bastante para testar", não "este mês está limpo".
 >
-> Só o requisito de **tamanho** é relaxado: uma coorte com curva real dentro do intervalo
+> **A corrida é crescida, não é o intervalo entre os extremos** — e essa distinção veio do
+> review, porque a primeira versão *era* `[min, max]`. Ela invocava continuidade como
+> justificativa e não testava continuidade em lugar nenhum: duas importações com um ano de
+> distância viravam uma faixa de um ano, e uma coorte a onze meses da evidência mais próxima
+> em qualquer direção era suprimida por ela. É o mesmo defeito que o teto de dois dias do
+> detector de carimbo existe para evitar, um nível acima. Duas paredes param uma corrida:
+>
+> - **um mês limpo** — aquele cujas coortes julgáveis *passaram* e que não tem coorte
+>   reprovada própria. Uma coorte saudável de 200 pessoas é evidência **contra** uma escrita
+>   cobrindo aquele mês, e a inferência não atravessa isso;
+> - **uma lacuna maior que seis meses** sem evidência. Seis é escolha, não mecanismo, e está
+>   marcada como tal no código: a produção precisa de cinco, e seis é o menor número redondo
+>   que cobre o único caso já observado com um mês de folga.
+>
+> Só o requisito de **tamanho** é relaxado: uma coorte com curva real dentro da corrida
 > continua publicando. E a inferência é rotulada como inferência — motivo próprio, separado do
-> `implausible_survival` que julga por evidência direta —, com o intervalo publicado em
-> `contaminatedSpan` para poder ser conferido. A detecção roda sobre o **payload inteiro** e a
-> janela é aplicada depois: pedir só `2024-09..2025-01` não pode fazer a evidência sumir.
+> `implausible_survival` que julga por evidência direta —, com as corridas publicadas em
+> `contaminatedSpans` para poderem ser conferidas. A detecção roda sobre o **payload inteiro**
+> e a janela é aplicada depois: pedir só `2024-09..2025-01` não pode fazer a evidência sumir.
+>
+> **Erro de método registrado, do mesmo review:** a string de motivo entregue ao leitor dizia
+> que *"TODAS"* as coortes julgáveis do intervalo tinham sido reprovadas — e o código nunca
+> olhava as que passaram. Em produção não é verdade: `2025-08 / java_offline` é julgável, tem
+> 30 jogadores e **passa** (D30 96,7%), dentro de um mês confirmado pelas outras duas
+> plataformas. O texto agora diz "21 de 22" porque a base passou a ser contada. Afirmar
+> completude que ninguém mediu é a mesma família de erro que publicar percentual sem `n`, só
+> que na prosa em vez de no número — e prosa também viaja no corpo HTTP e no Discord.
+>
+> A leitura de produção inteira está fixada em teste
+> (`retention-production-shape.spec.ts`): as 45 coortes com os tamanhos verbatim, uma corrida
+> só, 21 de 22 julgáveis reprovadas, 23 coortes (327 jogadores) suprimidas por herança, e
+> `2025-08 / java_offline` como a única que ainda publica.
 >
 > **O buraco que fica de propósito:** uma coorte pequena a 100% **fora** de qualquer intervalo
 > provado continua publicando. Onze jogadores que ficam não provam nada sozinhos, que é a

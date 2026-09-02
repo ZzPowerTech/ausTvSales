@@ -224,14 +224,17 @@ describe('RetentionService', () => {
 
       const report = await service.report('2024-09', '2024-09');
 
-      expect(report.contaminatedSpan).toMatchObject({
-        from: '2024-08',
-        to: '2024-10',
-        confirmedMonths: ['2024-08', '2024-10'],
-        confirmedCohorts: 2,
-        inheritedCohorts: 1,
-        inheritedPlayers: 11,
-      });
+      expect(report.contaminatedSpans).toEqual([
+        expect.objectContaining({
+          from: '2024-08',
+          to: '2024-10',
+          confirmedMonths: ['2024-08', '2024-10'],
+          confirmedCohorts: 2,
+          judgedCohorts: 2,
+          inheritedCohorts: 1,
+          inheritedPlayers: 11,
+        }),
+      ]);
     });
 
     it('omits the span entirely when nothing was proven', async () => {
@@ -250,7 +253,7 @@ describe('RetentionService', () => {
 
       const report = await service.report('2024-08', '2024-08');
 
-      expect(report.contaminatedSpan).toBeUndefined();
+      expect(report.contaminatedSpans).toEqual([]);
     });
   });
 

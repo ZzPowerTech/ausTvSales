@@ -56,6 +56,7 @@ function report(over: Partial<WeeklyReport> = {}): WeeklyReport {
       to: '2026-08',
       cohorts: [cohort()],
       stampDays: [],
+      contaminatedSpans: [],
       source: {
         name: 'plan_retention',
         ok: true,
@@ -98,30 +99,92 @@ describe('renderWeeklyReport', () => {
     expect(text).toContain('D7 33,3% (n=42)');
   });
 
-  it('says WHY a cohort came back blank when no stamp day explains it', () => {
-    // The production case: `stampDays` is empty and 21 of 45 cohorts are
-    // suppressed anyway. Without this line the weekly report is a column of
-    // blanks with the only available explanation not applying.
-    const text = renderWeeklyReport(
-      report({
-        retention: {
-          ...report().retention,
-          stampDays: [],
-          contaminatedSpan: {
-            from: '2024-06',
-            to: '2025-08',
-            confirmedMonths: ['2024-06', '2025-08'],
-            confirmedCohorts: 21,
-            inheritedCohorts: 23,
-            inheritedPlayers: 331,
-          },
-        },
-      }),
-    );
+  describe('a cohort that came back blank says why', () => {
+    /** A cohort with every horizon suppressed by the span inheritance. */
+    function blankCohort(): CohortRetention {
+      return cohort({
+        cohort: '2025-06',
+        size: 12,
+        measures: (['D1', 'D7', 'D30'] as const).map((horizon) => ({
+          horizon,
+          percent: null,
+          n: 12,
+          survived: null,
+          reason: 'contaminated_span' as const,
+          unavailableReason: 'Faixa de importacao.',
+        })),
+      });
+    }
 
-    expect(text).toContain('2024-06..2025-08');
-    expect(text).toContain('23');
-    expect(text).toContain('331 jogadores');
+    const span = {
+      from: '2024-06',
+      to: '2025-08',
+      confirmedMonths: ['2024-06', '2025-08'],
+      confirmedCohorts: 21,
+      judgedCohorts: 22,
+      inheritedCohorts: 23,
+      inheritedPlayers: 327,
+    };
+
+    it('names the run when a rendered cohort actually lost its numbers', () => {
+      // The production case: `stampDays` is empty and the cohorts are suppressed
+      // anyway, so the only explanation the report used to be able to print did
+      // not apply to the thing the reader was looking at.
+      const text = renderWeeklyReport(
+        report({
+          retention: {
+            ...report().retention,
+            from: '2025-06',
+            to: '2025-06',
+            cohorts: [blankCohort()],
+            stampDays: [],
+            contaminatedSpans: [span],
+          },
+        }),
+      );
+
+      expect(text).toContain('1 de 1 coorte(s) desta janela');
+      expect(text).toContain('2024-06..2025-08');
+    });
+
+    it('stays silent when the run has nothing to do with the cohorts shown', () => {
+      // THE regression to hold. The runs are dataset-wide and this section shows
+      // the last three months, so in production a run is permanently present and
+      // permanently irrelevant here. An ungated line would put the same warning
+      // in the channel every week for ever, beside cohorts that all have their
+      // numbers — a standing false note, which is how an alert channel goes deaf.
+      const text = renderWeeklyReport(
+        report({
+          retention: {
+            ...report().retention,
+            stampDays: [],
+            contaminatedSpans: [span],
+          },
+        }),
+      );
+
+      expect(text).not.toContain('artefato de importacao');
+      expect(text).not.toContain('2024-06..2025-08');
+    });
+
+    it('omits the run when none of them overlaps the window', () => {
+      // The cohort is blank, so the reader is owed the sentence — but naming a
+      // run that ended a year before the window would answer a question nobody
+      // asked with a date that explains nothing.
+      const text = renderWeeklyReport(
+        report({
+          retention: {
+            ...report().retention,
+            cohorts: [blankCohort()],
+            stampDays: [],
+            contaminatedSpans: [{ ...span, from: '2020-01', to: '2020-02' }],
+          },
+        }),
+      );
+
+      expect(text).toContain('1 de 1 coorte(s) desta janela');
+      expect(text).not.toContain('2020-01');
+    });
   });
 
   it('prints the retention label every week, not once in a docblock', () => {

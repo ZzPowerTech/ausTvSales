@@ -52,6 +52,7 @@ function emptyRetention(): RetentionReport {
     evaluatedAt: '2026-09-01T00:00:00.000Z',
     minimumCohortSize: 30,
     stampDays: [],
+    contaminatedSpans: [],
     cohorts: [],
     source: {
       name: 'plan_retention',
@@ -276,5 +277,44 @@ describe('WeeklyReportBuilder', () => {
     );
 
     expect(report.retention.semantics).toBe('intervalo de sobrevivencia');
+  });
+
+  it('carries the contaminated runs through to the section', async () => {
+    // The only wire between `RetentionReport` and `RetentionSection`, and it had
+    // no test: the renderer spec injects the field into a hand-built report, so
+    // deleting the line here left the whole suite green while the real weekly
+    // report lost the one sentence that explains a page of blanks.
+    const spans = [
+      {
+        from: '2024-06',
+        to: '2025-08',
+        confirmedMonths: ['2024-06', '2025-08'],
+        confirmedCohorts: 21,
+        judgedCohorts: 22,
+        inheritedCohorts: 23,
+        inheritedPlayers: 331,
+      },
+    ];
+    const funnel = {
+      series: jest
+        .fn()
+        .mockResolvedValue(series(WEEK.map((d) => day(d, 10, 4, 1)))),
+    } as unknown as FunnelService;
+    const retention = {
+      report: jest
+        .fn()
+        .mockResolvedValue({ ...emptyRetention(), contaminatedSpans: spans }),
+    } as unknown as RetentionService;
+    const health = {
+      summary: jest.fn().mockResolvedValue(summary()),
+    } as unknown as InstrumentationHealthService;
+
+    const report = await new WeeklyReportBuilder(
+      funnel,
+      retention,
+      health,
+    ).build('2026-08-31');
+
+    expect(report.retention.contaminatedSpans).toEqual(spans);
   });
 });

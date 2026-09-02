@@ -352,10 +352,14 @@ export interface RetentionReport {
   /** Days detected as bulk-import stamps. Empty is the healthy case. */
   stampDays: StampDay[];
   /**
-   * The span of registration months proven contaminated, or absent when none
-   * was. Absent is the healthy case.
+   * Runs of registration months carrying the import artefact. Empty is healthy.
+   *
+   * A list and not a single span: the walls that bound a run (a clean month, a
+   * gap too long) can split one dataset into several, and collapsing them into
+   * one interval would re-introduce exactly the unbounded reach the walls exist
+   * to remove.
    */
-  contaminatedSpan?: ContaminatedSpan;
+  contaminatedSpans: ContaminatedSpan[];
   cohorts: CohortRetention[];
   /**
    * Set when the requested window falls wholly outside what the source covers.
@@ -368,27 +372,52 @@ export interface RetentionReport {
 }
 
 /**
- * A run of registration months proven to carry the bulk-import artefact.
+ * A run of registration months carrying the bulk-import artefact.
  *
- * `from`..`to` is the closed interval between the first and the last month
- * holding a cohort that {@link 'implausible_survival'} judged on its own
- * evidence. Months **inside** the interval with no judgeable cohort are part of
- * the span: the gap means "nobody here was big enough to test", not "this month
- * is clean", and reading it as clean is what published fifteen consecutive
- * cohorts at 100%.
+ * ## What bounds it, and why it is bounded at all
+ *
+ * `from`..`to` is a run **grown** from the months holding a cohort that
+ * {@link 'implausible_survival'} judged on its own evidence — not simply the
+ * interval between the first and the last of them. The difference is the whole
+ * safety of the mechanism: `[min, max]` is unbounded extrapolation, and a second
+ * import a year after the first would silently swallow everything between two
+ * unrelated events. It is the same failure the stamp detector's two-day cap
+ * exists to prevent, one level up.
+ *
+ * A run stops at either of two walls:
+ *
+ * - **a clean month** — one whose judgeable cohorts all *passed* and which holds
+ *   no failing cohort of its own. A month with a healthy 200-player cohort is
+ *   evidence *against* a write covering it, and inference must not cross it.
+ * - **a gap too long** — more consecutive months without evidence than the
+ *   detector will bridge.
+ *
+ * Months inside the run with no judgeable cohort **are** part of it. A gap means
+ * "nobody here was big enough to test", not "this month is clean", and reading
+ * the gap as clean is what published fifteen consecutive cohorts at 100%.
  *
  * Published in the report for the same reason `stampDays` is: a detector that
  * blanks half a report has to hand over the evidence it decided on.
  */
 export interface ConfirmedSpan {
-  /** First month with a cohort judged implausible on its own. `YYYY-MM`. */
+  /** First month of the run. `YYYY-MM`. */
   from: string;
-  /** Last such month. `YYYY-MM`. */
+  /** Last month of the run. `YYYY-MM`. */
   to: string;
-  /** Every month that carried its own evidence, in order. Gaps are not listed. */
+  /** Every month in the run that carried its own evidence. Gaps are not listed. */
   confirmedMonths: string[];
-  /** Cohorts judged implausible on their own evidence. */
+  /** Cohorts inside the run judged implausible on their own evidence. */
   confirmedCohorts: number;
+  /**
+   * Cohorts inside the run that were large enough to be judged at all.
+   *
+   * The base of `confirmedCohorts`, and it is **not** always equal to it: a
+   * month can hold a failing cohort and a passing one at once, which makes the
+   * month evidence without making every cohort in it evidence. Published so the
+   * suppression reason can say "21 of 22" instead of claiming a completeness
+   * nobody measured.
+   */
+  judgedCohorts: number;
 }
 
 /** A {@link ConfirmedSpan} plus what inheriting it actually suppressed. */
@@ -396,10 +425,17 @@ export interface ContaminatedSpan extends ConfirmedSpan {
   /**
    * Cohorts suppressed **by inheritance** — too small to judge, right shape,
    * inside the span. Counted across the whole dataset, not the request window,
-   * because the span is a property of the dataset.
+   * because the span is a property of the dataset and not of the question asked.
    */
   inheritedCohorts: number;
-  /** Players in those cohorts. The base of the decision. */
+  /**
+   * Players in those cohorts, dataset-wide like `inheritedCohorts`.
+   *
+   * The base of the decision. Note that none of the four counts on this type is
+   * restricted to the cohorts a given response renders — a request filtered to
+   * one platform and three months still reports the span over the whole dataset,
+   * because a span narrowed to the question would stop being checkable.
+   */
   inheritedPlayers: number;
 }
 
