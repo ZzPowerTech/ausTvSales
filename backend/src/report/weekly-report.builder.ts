@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { buildBucket, type RawCounts } from '../funnel/funnel-math';
+import {
+  buildBucket,
+  STEP_REASON_FALLBACK,
+  type RawCounts,
+} from '../funnel/funnel-math';
 import { FunnelService } from '../funnel/funnel.service';
 import { FunnelGranularity, FunnelStep } from '../funnel/funnel.types';
 import type { StepCount } from '../funnel/funnel.types';
@@ -148,7 +152,15 @@ function rollUp(days: readonly StepCount[][]): {
         // First reason wins: they are the same sentence on every uncovered day
         // in practice, and quoting seven identical ones would only crowd the
         // message.
-        if (!reasons.has(count.step)) {
+        //
+        // The generic fallback is deliberately NOT collected. It carries no
+        // information the roll-up does not already have, and appending it to the
+        // roll-up's own sentence produced a line that blamed a missing source
+        // and described an incomplete week at once.
+        if (
+          !reasons.has(count.step) &&
+          count.unavailableReason !== STEP_REASON_FALLBACK
+        ) {
           reasons.set(count.step, count.unavailableReason);
         }
         continue;
@@ -162,13 +174,10 @@ function rollUp(days: readonly StepCount[][]): {
   const total = (step: FunnelStep): number | null =>
     covered.get(step) === ofDays && ofDays > 0 ? (sums.get(step) ?? 0) : null;
 
-  const survivalReason =
-    total(FunnelStep.Survival) === null
-      ? partialReason(
-          reasons.get(FunnelStep.Survival),
-          covered.get(FunnelStep.Survival) ?? 0,
-          ofDays,
-        )
+  /** The reason for a step that has no weekly total, or `undefined` when it has. */
+  const reasonFor = (step: FunnelStep): string | undefined =>
+    total(step) === null
+      ? partialReason(reasons.get(step), covered.get(step) ?? 0, ofDays)
       : undefined;
 
   return {
@@ -176,9 +185,17 @@ function rollUp(days: readonly StepCount[][]): {
       // No source for the proxy's population; `buildBucket` attaches the reason.
       network: null,
       survival: total(FunnelStep.Survival),
-      survivalUnavailableReason: survivalReason,
+      survivalUnavailableReason: reasonFor(FunnelStep.Survival),
       tutorialEntered: total(FunnelStep.TutorialEntered),
+      // Computed per step and not only for `survival`: the tutorial steps used
+      // to fall through to the generic "sem fonte para este degrau", which
+      // blames a healthy ETL for an incomplete week — and says so on the same
+      // line as the coverage note contradicting it.
+      tutorialEnteredUnavailableReason: reasonFor(FunnelStep.TutorialEntered),
       tutorialCompleted: total(FunnelStep.TutorialCompleted),
+      tutorialCompletedUnavailableReason: reasonFor(
+        FunnelStep.TutorialCompleted,
+      ),
     },
     coverage: [
       FunnelStep.Network,

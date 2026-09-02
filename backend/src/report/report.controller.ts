@@ -10,23 +10,15 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { Throttle } from '@nestjs/throttler';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { DashboardThrottle } from '../config/throttling';
+import {
+  DashboardThrottle,
+  ManualRunThrottle,
+  MANUAL_RUN_THROTTLE_LIMIT,
+} from '../config/throttling';
 import { RecentReportsQueryDto } from './dto/recent-reports-query.dto';
 import { WeeklyReportService } from './weekly-report.service';
 import type { WeeklyReportRecord } from './weekly-report.types';
-
-/**
- * Manual runs allowed per hour, per caller.
- *
- * Each run queries the Plan on the game machine and posts to a Discord channel.
- * Six an hour is generous for someone checking a report by hand and low enough
- * that a stuck retry loop in a browser tab cannot turn the channel into a flood
- * or the game VPS into a load test.
- */
-const MANUAL_RUN_TTL_MS = 3_600_000;
-const MANUAL_RUN_LIMIT = 6;
 
 /**
  * Reading and triggering the weekly report (story S9.2).
@@ -100,17 +92,19 @@ export class ReportController {
   }
 
   @Post('weekly/run')
-  @Throttle({
-    default: { ttl: MANUAL_RUN_TTL_MS, limit: MANUAL_RUN_LIMIT },
-  })
+  // `ManualRunThrottle` and not a bare `@Throttle`: the guard is not global in
+  // this app, so the decorator alone is metadata that enforces nothing — which
+  // is what shipped here first, on the one route with outbound side effects.
+  @ManualRunThrottle()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Gera, persiste e entrega um relatorio semanal agora',
     description:
       'Faz exatamente o que o job agendado faz, inclusive publicar no canal — ' +
       'e o que atende o DoD da historia ("um relatorio real gerado e ' +
-      'conferido a mao"). Limitado a 6 execucoes por hora, porque cada uma ' +
-      'consulta o Plan na maquina do jogo e manda uma mensagem no Discord.',
+      `conferido a mao"). Limitado a ${MANUAL_RUN_THROTTLE_LIMIT} execucoes por ` +
+      'hora, porque cada uma consulta o Plan na maquina do jogo e manda uma ' +
+      'mensagem no Discord.',
   })
   @Header('Cache-Control', 'no-store')
   run(): Promise<WeeklyReportRecord> {

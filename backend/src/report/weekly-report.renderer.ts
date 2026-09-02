@@ -1,4 +1,5 @@
 import type { Conversion, StepCount } from '../funnel/funnel.types';
+import { escapeMarkdown } from '../instrumentation/discord-alerter';
 import type {
   CohortRetention,
   RetentionMeasure,
@@ -235,8 +236,27 @@ function percent(value: number): string {
   return `${value.toFixed(1).replace('.', ',')}%`;
 }
 
+/**
+ * A check name, rendered so it cannot break the message.
+ *
+ * The values are persisted check names, and a per-target check appends the
+ * **server name from Plan's own catalogue** — free-form text this system does
+ * not control. A backtick in it closes the inline code span, and the rest of the
+ * health section, including the line that says the measurement cycle is off, can
+ * disappear into a spoiler or a fence.
+ *
+ * Two cases, because they need different answers:
+ *
+ * - **No backtick** — a code span, unescaped. Markdown is not interpreted inside
+ *   one, so escaping there would only make ordinary identifiers ugly:
+ *   `funnel.tutorial_entry_rate` would render with visible backslashes.
+ * - **A backtick** — no span at all, and `escapeMarkdown` on the whole value.
+ *   Discord does not honour a backslash-escaped backtick *inside* a span, so
+ *   there is nothing to escape it with; dropping the span is what keeps the
+ *   value intact and the message whole.
+ */
 function code(name: string): string {
-  return `\`${name}\``;
+  return name.includes('`') ? escapeMarkdown(name) : `\`${name}\``;
 }
 
 /**

@@ -845,7 +845,7 @@ jogo.**
 > |---|---|
 > | 1. Funil, retenção por coorte e plataforma, saúde da instrumentação | ✅ as três seções, cada uma degradando por conta própria |
 > | 2. `n` ao lado de cada percentual | ✅ imposto pelo tipo, não pelo cuidado do renderer |
-> | 3. Falha do job avisa no canal | ✅ linha `error` persistida **e** aviso vermelho publicado |
+> | 3. Falha do job avisa no canal | ✅ aviso publicado **mesmo quando o banco cai junto** — ver abaixo |
 > | 4. Versão gerada persistida | ✅ payload estruturado + o texto exato que foi enviado |
 >
 > ### O rollup semanal recusa uma semana parcial
@@ -860,6 +860,19 @@ jogo.**
 > estruturalmente menor que os outros seis, e toda comparação semana-a-semana leria como queda —
 > errado na mesma direção toda semana, que é o tipo mais difícil de notar.
 >
+> **E o motivo é por degrau**, o que não era. Os degraus de tutorial caíam no texto genérico
+> *"sem fonte para este degrau"*, que culpa um ETL saudável por uma semana incompleta — e o
+> imprimia na mesma linha que a nota `6/7 dias` contradizendo-o. Achado do code review.
+>
+> ### Markdown de terceiro é neutralizado no corpo da mensagem
+>
+> Nome de check por alvo carrega o nome do servidor vindo do **catálogo do Plan**, texto livre
+> que este sistema não controla. Uma crase nele fecha o code span, e o resto da seção de saúde
+> — inclusive a linha que diz que o ciclo de checks está desligado — some dentro de um spoiler
+> ou de um fence. O `DiscordAlerter` já tinha aprendido isso; este renderer não. Quando há
+> crase, o valor sai escapado e **sem** code span: dentro de um span não existe com o que
+> escapar uma crase.
+>
 > ### Webhook próprio, sem fallback para o de alerta
 >
 > `DISCORD_REPORT_WEBHOOK_URL` é variável separada e **não** cai no `DISCORD_ALERT_WEBHOOK_URL`
@@ -867,12 +880,33 @@ jogo.**
 > alerta até ninguém mais ler — que é como um canal do Discord vira mudo, e este épico já tem
 > uma história sobre isso. Sem webhook o relatório ainda é gerado e persistido, e o boot avisa.
 >
+> ### 🔴 O critério 3 era inalcançável para a única falha que acontece de verdade
+>
+> Descoberto no code review. Rastreando o que pode fazer `builder.build()` estourar: o funil
+> engole toda falha de fonte e a retenção transforma toda falha em rótulo fechado. A única
+> dependência que **rejeita** é o read model de saúde — ou seja, o **nosso próprio Postgres**.
+>
+> Com o `persist` sem `try/catch` próprio, essa mesma falha fazia o `recordFailure` estourar e
+> o `publishFailure` nunca era chamado. Resultado: sem linha, sem aviso vermelho, uma linha de
+> log — e ausência de linha é **definida neste módulo** como "o agendador não disparou", o que
+> seria falso. O modo de falha que a história existe para impedir, reproduzido pelo módulo
+> construído para impedi-lo.
+>
+> Agora o `persist` tem catch próprio e o aviso vai ao canal com ou sem linha gravada. O canal
+> é a parte que não pode depender do banco estar de pé.
+>
 > ### `POST /reports/weekly/run` existe por causa do DoD
 >
 > O DoD da S9 pede *"um relatório real gerado e conferido à mão"*. Esperar uma segunda-feira
 > faria da própria conferência uma atividade de cadência semanal, e a história deste épico diz
 > que o que só acontece por agendamento é o que nunca acontece. Limitado a 6 execuções por hora:
 > cada uma consulta o Plan na máquina do jogo e manda mensagem no canal.
+>
+> 🔴 **E esse limite era inerte.** `@Throttle` sozinho é metadado; o `ThrottlerGuard` não é
+> `APP_GUARD` neste app de propósito. A rota compilava, documentava-se como limitada e não
+> limitava nada — na única rota com efeito colateral externo. Virou `@ManualRunThrottle()`,
+> que empacota guard e perfil como o `@DashboardThrottle()` faz, e o e2e assere os cabeçalhos
+> de rate limit em vez de confiar no decorador.
 >
 > ### A falha que este módulo **não** consegue anunciar
 >

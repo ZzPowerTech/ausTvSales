@@ -59,6 +59,11 @@ function emptyRetention(): RetentionReport {
       asOf: '2026-09-01T00:00:00.000Z',
       dataThrough: '2026-08-31',
       rows: 0,
+      parsed: 0,
+      dropped: 0,
+      dataFrom: null,
+      stale: false,
+      ageMs: null,
     },
   };
 }
@@ -217,6 +222,22 @@ describe('WeeklyReportBuilder', () => {
       // "the source is out" and "the week is incomplete" must not read alike.
       expect(reasonOf(partialReason)).toContain('6 dos 7 dias');
       expect(reasonOf(noneReason)).not.toContain('dos 7 dias');
+    });
+
+    it('gives the tutorial steps their own reason, not the generic one', async () => {
+      // The generic fallback reads "sem fonte para este degrau no periodo",
+      // which blames a healthy ETL for an incomplete week — printed on the same
+      // line as a `6/7 dias` coverage note contradicting it.
+      const buckets = WEEK.map((d, i) =>
+        i === 0 ? day(d, 10, null, 1) : day(d, 10, 4, 1),
+      );
+
+      const report = await builderWith(buckets).build('2026-08-31');
+
+      const entered = countOf(report.funnel.bucket, FunnelStep.TutorialEntered);
+      expect(entered.value).toBeNull();
+      expect(reasonOf(entered)).toContain('6 dos 7 dias');
+      expect(reasonOf(entered)).not.toContain('sem fonte para este degrau');
     });
 
     it('keeps the rede step null in the weekly roll-up too', async () => {

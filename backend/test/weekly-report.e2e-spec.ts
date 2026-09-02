@@ -44,6 +44,44 @@ describe('Weekly report (e2e)', () => {
     });
   });
 
+  describe('the manual run is actually rate limited', () => {
+    it('carries the rate-limit headers, so the guard is really applied', async () => {
+      // `@Throttle` alone is metadata; `ThrottlerGuard` is deliberately not an
+      // APP_GUARD in this app. The first version of this route had the
+      // decorator without the guard — it compiled, it documented itself as
+      // limited to six an hour, and it enforced nothing, on the one route that
+      // reaches the game machine and posts to Discord.
+      //
+      // The headers are the observable proof the guard ran, which is the same
+      // shape `throttling.e2e-spec.ts` already uses.
+      const response = await request(app.getHttpServer())
+        .post('/reports/weekly/run')
+        .set('Cookie', authCookie)
+        .expect(201);
+
+      expect(response.headers['x-ratelimit-limit']).toBe('6');
+    });
+  });
+
+  describe('the manual run is actually rate limited', () => {
+    it('carries the rate-limit headers, so the guard is really applied', async () => {
+      // `@Throttle` alone is metadata; `ThrottlerGuard` is deliberately not an
+      // APP_GUARD in this app. The first version of this route had the
+      // decorator without the guard — it compiled, it documented itself as
+      // limited to six an hour, and it enforced nothing, on the one route that
+      // reaches the game machine and posts to Discord.
+      //
+      // The headers are the observable proof the guard ran, which is the same
+      // shape `throttling.e2e-spec.ts` already uses.
+      const response = await request(app.getHttpServer())
+        .post('/reports/weekly/run')
+        .set('Cookie', authCookie)
+        .expect(201);
+
+      expect(response.headers['x-ratelimit-limit']).toBe('6');
+    });
+  });
+
   describe('generating a report by hand', () => {
     let reportId: number;
 

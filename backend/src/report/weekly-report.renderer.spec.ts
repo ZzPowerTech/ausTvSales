@@ -10,7 +10,7 @@ function cohort(over: Partial<CohortRetention> = {}): CohortRetention {
     platform: Platform.JavaPremium,
     size: 42,
     belowMinimum: false,
-    contamination: { share: 0, n: 0, suspect: false },
+    contamination: { share: 0, n: 0, suspect: false, detectedBy: null },
     measures: [
       { horizon: 'D1', percent: 61.9, n: 42, survived: 26 },
       { horizon: 'D7', percent: 33.3, n: 42, survived: 14 },
@@ -62,6 +62,11 @@ function report(over: Partial<WeeklyReport> = {}): WeeklyReport {
         asOf: null,
         dataThrough: '2026-08-31',
         rows: 5565,
+        parsed: 0,
+        dropped: 0,
+        dataFrom: null,
+        stale: false,
+        ageMs: null,
       },
     },
     health: {
@@ -143,6 +148,11 @@ describe('renderWeeklyReport', () => {
             failure: 'unreachable',
             dataThrough: null,
             rows: null,
+            parsed: 0,
+            dropped: 0,
+            dataFrom: null,
+            stale: false,
+            ageMs: null,
           },
         },
       }),
@@ -161,7 +171,12 @@ describe('renderWeeklyReport', () => {
             cohort({ size: 4, belowMinimum: true }),
             cohort({
               cohort: '2026-06',
-              contamination: { share: 0.8, n: 40, suspect: true },
+              contamination: {
+                share: 0.8,
+                n: 40,
+                suspect: true,
+                detectedBy: 'population_stamp',
+              },
             }),
           ],
         },
@@ -194,6 +209,28 @@ describe('renderWeeklyReport', () => {
     expect(text).toContain(
       'Pontos cegos aceitos: `funnel.network_to_survival`',
     );
+  });
+
+  it('escapes markdown in a check name that came from Plan', () => {
+    // Per-target check names append the server name from Plan's own catalogue —
+    // free-form text this system does not control. A backtick closes the inline
+    // code span and can swallow the rest of the health section, including the
+    // line saying the measurement cycle is off.
+    const base = report();
+    const text = renderWeeklyReport({
+      ...base,
+      health: {
+        summary: {
+          ...base.health.summary,
+          failing: ['plan.collection_alive:Surv`ival'],
+        },
+      },
+    });
+
+    // No code span, and the backtick escaped: the value survives and the
+    // message cannot be swallowed by an unbalanced span.
+    expect(text).toContain('plan.collection\\_alive:Surv\\`ival');
+    expect(text).not.toContain('`plan.collection_alive:Surv`');
   });
 
   it('stays inside the Discord embed description limit', () => {

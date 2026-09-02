@@ -43,8 +43,13 @@ export class WeeklyReportScheduler implements OnModuleInit {
     config: ConfigService,
   ) {
     this.enabled = config.get<boolean>('WEEKLY_REPORT_ENABLED') === true;
+    // `?? DEFAULT_CRON` and not `|| DEFAULT_CRON`: an unset variable takes the
+    // default, but `"   "` is a value somebody typed, and `.env.example` says
+    // an invalid expression leaves the job unscheduled rather than silently
+    // running at an hour nobody chose. A whitespace string reaches `CronJob`,
+    // which rejects it, which is the documented behaviour.
     this.cron =
-      config.get<string>('WEEKLY_REPORT_CRON')?.trim() || DEFAULT_CRON;
+      config.get<string>('WEEKLY_REPORT_CRON')?.trim() ?? DEFAULT_CRON;
   }
 
   onModuleInit(): void {

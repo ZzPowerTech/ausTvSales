@@ -124,6 +124,20 @@ export class WeeklyReportPublisher implements OnModuleInit {
           continue;
         }
 
+        if (response.status === 400) {
+          // Named apart from the other statuses because it is the one this
+          // module causes. A 400 does not heal next week: the same report
+          // rebuilds the same oversized or malformed payload and is refused
+          // again. If this line appears, the renderer has a hole in it.
+          this.logger.error(
+            'Discord recusou o relatorio (HTTP 400) — a mensagem estourou ' +
+              'algum limite de formato. Isso e defeito deste modulo, nao falha ' +
+              'do Discord, e vai se repetir toda semana ate ser corrigido. O ' +
+              'relatorio ficou persistido em /reports/weekly.',
+          );
+          return false;
+        }
+
         // Status only: the body can echo the payload, and the URL is a secret.
         this.logger.error(
           `Falha ao entregar o relatorio semanal: HTTP ${response.status}. ` +
@@ -131,9 +145,15 @@ export class WeeklyReportPublisher implements OnModuleInit {
         );
         return false;
       } catch (error) {
+        // The message is NOT interpolated: Node renders an unparseable URL as
+        // "Failed to parse URL from <the url>", and the URL is the credential.
+        // The class promises it never logs the URL, so it logs the error's shape
+        // and not its text.
         this.logger.error(
-          'Falha ao entregar o relatorio semanal',
-          error instanceof Error ? error.message : String(error),
+          'Falha ao entregar o relatorio semanal: ' +
+            `${error instanceof Error ? error.name : typeof error} ` +
+            '(mensagem omitida — ela pode conter a URL do webhook, que e a ' +
+            'credencial)',
         );
         return false;
       }

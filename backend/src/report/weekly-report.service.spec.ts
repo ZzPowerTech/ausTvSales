@@ -26,6 +26,11 @@ function report(): WeeklyReport {
         asOf: null,
         dataThrough: null,
         rows: 0,
+        parsed: 0,
+        dropped: 0,
+        dataFrom: null,
+        stale: false,
+        ageMs: null,
       },
     },
     health: {
@@ -153,6 +158,48 @@ describe('WeeklyReportService', () => {
       const stored = firstArg<{ rendered: string }>(h.recordSuccess, 0);
       const sent = firstArg<string>(h.publish, 1);
       expect(stored.rendered).toBe(sent);
+    });
+  });
+
+  describe('the channel does not depend on the database being up', () => {
+    it('announces the failure even when the row cannot be written', async () => {
+      // The only thing that can make `build()` throw is our own Postgres — the
+      // funnel and the retention module both swallow their source failures. So
+      // with the persist unguarded, that same failure made `recordFailure`
+      // throw and `publishFailure` was never reached: no row, no red embed, one
+      // log line. And a missing row is DEFINED in this module as "the scheduler
+      // never fired", which would have been false.
+      const h = harness({
+        build: jest.fn().mockRejectedValue(new Error('connection terminated')),
+      });
+      h.recordFailure.mockRejectedValue(new Error('connection terminated'));
+
+      const result = await h.service.run('2026-08-31');
+
+      expect(h.publishFailure).toHaveBeenCalled();
+      expect(result.status).toBe('error');
+      // A synthetic id, so nobody mistakes this for a stored report.
+      expect(result.id).toBe(-1);
+      expect(result.detail).toContain('nao existe linha');
+    });
+
+    it('still delivers a successful report when the row cannot be written', async () => {
+      const h = harness();
+      h.recordSuccess.mockRejectedValue(new Error('disk full'));
+
+      const result = await h.service.run('2026-08-31');
+
+      expect(h.publish).toHaveBeenCalled();
+      expect(result.id).toBe(-1);
+    });
+
+    it('does not fail the run when only the delivery stamp cannot be written', async () => {
+      const h = harness();
+      h.markDelivered.mockRejectedValue(new Error('disk full'));
+
+      const result = await h.service.run('2026-08-31');
+
+      expect(result.status).toBe('ok');
     });
   });
 

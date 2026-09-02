@@ -36,7 +36,19 @@ export interface RawCounts {
    */
   survivalUnavailableReason?: string;
   tutorialEntered: number | null;
+  /**
+   * Why `tutorialEntered` is `null` in **this** bucket, when it is.
+   *
+   * Added for the weekly roll-up (story S9.2), and the gap it closes is a false
+   * sentence rather than a missing one: without it the default read *"sem fonte
+   * para este degrau no periodo"*, so a week that was merely **incomplete** —
+   * six of seven days present, the ETL fine — blamed a missing source, on the
+   * same line as a `6/7 dias` coverage note contradicting it.
+   */
+  tutorialEnteredUnavailableReason?: string;
   tutorialCompleted: number | null;
+  /** Same, for the completion step. */
+  tutorialCompletedUnavailableReason?: string;
 }
 
 /**
@@ -81,17 +93,36 @@ function toStepCounts(raw: RawCounts): StepCount[] {
   return [
     step(FunnelStep.Network, raw.network, NETWORK_STEP_UNAVAILABLE),
     step(FunnelStep.Survival, raw.survival, raw.survivalUnavailableReason),
-    step(FunnelStep.TutorialEntered, raw.tutorialEntered),
-    step(FunnelStep.TutorialCompleted, raw.tutorialCompleted),
+    step(
+      FunnelStep.TutorialEntered,
+      raw.tutorialEntered,
+      raw.tutorialEnteredUnavailableReason,
+    ),
+    step(
+      FunnelStep.TutorialCompleted,
+      raw.tutorialCompleted,
+      raw.tutorialCompletedUnavailableReason,
+    ),
   ];
 }
+
+/**
+ * What a step says when nothing more specific is known.
+ *
+ * Exported so a consumer can tell "this is the fallback" from "somebody
+ * explained this". The weekly roll-up needs the distinction: it composes its own
+ * sentence about an incomplete week, and appending this one to it produced a
+ * line that blamed a missing source and described an incomplete week at the same
+ * time — contradicting itself, next to a coverage note contradicting both.
+ */
+export const STEP_REASON_FALLBACK = 'sem fonte para este degrau no periodo';
 
 function step(
   name: FunnelStep,
   value: number | null,
   reason: string | undefined = undefined,
 ): StepCount {
-  const explanation = reason ?? 'sem fonte para este degrau no periodo';
+  const explanation = reason ?? STEP_REASON_FALLBACK;
   return value === null
     ? { step: name, value: null, unavailableReason: explanation }
     : { step: name, value };
