@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
@@ -260,8 +261,45 @@ describe('health_checks (e2e)', () => {
       ]);
       await store.markAlerted([row.id]);
 
-      // Janela de um milissegundo: a mensagem acabou de sair e ja esta fora.
-      await expect(store.alertsInWindow(check, 1)).resolves.toEqual(new Map());
+      // A mensagem e envelhecida A MAO, e essa e a correcao: a versao anterior
+      // marcava a linha e consultava com uma janela de UM MILISSEGUNDO, contando
+      // com que o proprio round trip ate o banco demorasse mais que isso. Num
+      // runner rapido nao demora — a query passou a cair dentro da janela e o
+      // teste falhou em CI, verde em toda maquina onde foi escrito.
+      //
+      // Uma janela sub-milissegundo nao testa a regra de janela; testa a
+      // velocidade da maquina. Com o `alerted_at` empurrado uma hora para tras e
+      // uma janela de um minuto, a margem passa de microssegundos para 59
+      // minutos, e o que sobra sendo exercitado e a comparacao — que era o
+      // assunto.
+      await db
+        .update(schema.healthChecks)
+        .set({ alertedAt: new Date(Date.now() - 60 * 60 * 1000) })
+        .where(eq(schema.healthChecks.id, row.id));
+
+      await expect(store.alertsInWindow(check, 60_000)).resolves.toEqual(
+        new Map(),
+      );
+    });
+
+    it('conta o que caiu dentro da janela, para a borda nao passar por acaso', async () => {
+      // O par do teste acima. Sem ele, um `alertsInWindow` que devolvesse mapa
+      // vazio para tudo passaria nos dois — e "ignora o que expirou" seria
+      // indistinguivel de "nunca conta nada".
+      const check = scopedCheckName(HealthCheckName.OrphanInstance, 'fresh');
+      const [row] = await store.record([
+        { checkName: check, status: 'breached', detail: { summary: 'novo' } },
+      ]);
+      await store.markAlerted([row.id]);
+
+      await db
+        .update(schema.healthChecks)
+        .set({ alertedAt: new Date(Date.now() - 30 * 60 * 1000) })
+        .where(eq(schema.healthChecks.id, row.id));
+
+      await expect(
+        store.alertsInWindow(check, 60 * 60 * 1000),
+      ).resolves.toEqual(new Map([['breached', 1]]));
     });
 
     it('devolve zero para um check que nunca falou', async () => {
