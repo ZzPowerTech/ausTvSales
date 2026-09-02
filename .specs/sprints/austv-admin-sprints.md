@@ -1096,11 +1096,14 @@ Dois padrões que valem registrar como método, não como incidente:
       **não é produzível fora da produção**: exige rodar o ETL contra o MySQL do PlayerPoints na
       máquina do jogo. O que a sessão pôde fazer foi instrumentar o ETL para *medir e persistir* o
       próprio tempo, de modo que a primeira execução real produza a evidência. Ver o bloco da S9.1
-- [~] **Um relatório real gerado e conferido à mão** — o gatilho existe
-      (`POST /reports/weekly/run`) e o caminho inteiro é exercitado no e2e contra Postgres real,
-      com **todas** as fontes ausentes: o run é persistido, o corpo nomeia cada falha e nada vira
-      zero. O que falta é o run em **produção**, com Plan alcançável e webhook configurado, e a
-      conferência humana do texto que chega no canal. É item de dono
+- [x] **Um relatório real gerado e conferido à mão** — ✅ **2026-09-02 22:05**. O
+      `POST /reports/weekly/run` devolveu `id: 1`, `status: "ok"`, **`delivered: true`**, e o dono
+      leu o texto no canal. O relatório da janela `2026-08-26..2026-09-01` publicou o funil com
+      `survival: 59`, `tutorial_entrou: 8` (13,6%) e `tutorial_concluiu: 1` (12,5%), a retenção
+      por coorte com a marca de base pequena por horizonte, e a saúde em `degraded` com o ponto
+      cego nomeado. **A degradação honesta foi observada em produção**, não só em e2e: o degrau
+      `rede` saiu sem número com o motivo por extenso, e nada virou zero.
+      Detalhe da leitura no [`HANDOFF.md`](../features/austv-admin/HANDOFF.md)
 
 **[CORTE]** S9.1.
 
