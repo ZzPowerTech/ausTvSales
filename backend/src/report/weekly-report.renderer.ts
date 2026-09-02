@@ -116,7 +116,8 @@ function funnelLines(report: WeeklyReport): string[] {
 }
 
 function retentionLines(report: WeeklyReport): string[] {
-  const { cohorts, source, from, to, stampDays } = report.retention;
+  const { cohorts, source, from, to, stampDays, contaminatedSpans } =
+    report.retention;
 
   const lines = [
     `__Retencao por coorte — ${from} a ${to}__`,
@@ -152,6 +153,41 @@ function retentionLines(report: WeeklyReport): string[] {
       `⚠️ Carimbo de importacao detectado em ${stampDays
         .map((stamp) => `${stamp.day} (n=${stamp.n}/${stamp.population})`)
         .join(', ')} — coortes contaminadas saem sem numero, com o motivo.`,
+    );
+  }
+
+  // Gated on the cohorts ACTUALLY RENDERED, never on a span existing.
+  //
+  // The spans are dataset-wide and the weekly window is the last three months,
+  // so in production a span (`2024-06..2025-08`) is permanently present and
+  // permanently irrelevant to what this section prints. The first version of
+  // this line was ungated, which would have shipped the same warning to the
+  // channel every week for ever, beside three months of cohorts that all have
+  // their numbers — a standing false note in an alert channel, which is how this
+  // project has already recorded that a channel goes deaf.
+  const blanked = cohorts.filter((cohort) =>
+    cohort.measures.some(
+      (m) =>
+        m.percent === null &&
+        (m.reason === 'contaminated_span' ||
+          m.reason === 'implausible_survival'),
+    ),
+  );
+
+  if (blanked.length > 0) {
+    const overlapping = contaminatedSpans.filter(
+      (span) => span.from <= to && span.to >= from,
+    );
+
+    lines.push(
+      '',
+      `⚠️ ${blanked.length} de ${cohorts.length} coorte(s) desta janela sairam ` +
+        'sem numero por artefato de importacao — a base de cada uma fica' +
+        (overlapping.length === 0
+          ? '.'
+          : `. Faixa: ${overlapping
+              .map((span) => `\`${span.from}..${span.to}\``)
+              .join(', ')}.`),
     );
   }
 

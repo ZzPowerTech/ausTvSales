@@ -10,9 +10,10 @@ import {
   type RetentionPlayer,
 } from './plan-retention';
 import {
+  applyContaminatedSpans,
   buildCohorts,
+  detectContaminatedSpans,
   detectStampDays,
-  toSaoPauloMonth,
 } from './retention-math';
 import {
   RETENTION_HORIZON_DAYS,
@@ -20,6 +21,7 @@ import {
   horizonLabel,
   type CohortPlatformFilter,
   type CohortRetention,
+  type ContaminatedSpan,
   type RetentionReport,
   type RetentionSourceFailure,
   type RetentionSourceState,
@@ -154,20 +156,30 @@ export class RetentionService {
       this.stampDayMinPopulation,
     );
 
-    const inWindow = players.filter((player) => {
-      const month = toSaoPauloMonth(player.registeredAt);
-      return month !== null && month >= fromMonth && month <= toMonth;
-    });
-
-    const cohorts = buildCohorts(inWindow, {
+    // Cohorts are built over the WHOLE payload and the window is applied to the
+    // result, not to the players. Filtering first is equivalent for every number
+    // in a cohort — the grouping is by month and nothing crosses cohorts — but
+    // it is NOT equivalent for the artefact detectors, which reason about the
+    // dataset. `2024-09..2025-01` contains no cohort large enough to judge, and
+    // judging that window in isolation publishes fifteen cohorts at 100%.
+    const all = buildCohorts(players, {
       evaluatedAt,
       dataThrough: latestEpoch(players),
       stampDays,
       minimumCohortSize: this.minimumCohortSize,
       contaminationMax: this.contaminationMax,
-    }).filter((cohort) => platform === 'all' || cohort.platform === platform);
+    });
 
-    this.warnOnSuppression(cohorts, stampDays);
+    const spanned = applyContaminatedSpans(all, detectContaminatedSpans(all));
+
+    const cohorts = spanned.cohorts.filter(
+      (cohort) =>
+        cohort.cohort >= fromMonth &&
+        cohort.cohort <= toMonth &&
+        (platform === 'all' || cohort.platform === platform),
+    );
+
+    this.warnOnSuppression(cohorts, stampDays, spanned.spans);
 
     return {
       semantics: RETENTION_SEMANTICS,
@@ -176,6 +188,7 @@ export class RetentionService {
       evaluatedAt: new Date(evaluatedAt).toISOString(),
       minimumCohortSize: this.minimumCohortSize,
       stampDays,
+      contaminatedSpans: spanned.spans,
       cohorts,
       ...this.coverageWarning(loaded.state, fromMonth, toMonth, cohorts.length),
       source: loaded.state,
@@ -338,6 +351,7 @@ export class RetentionService {
       evaluatedAt: new Date(evaluatedAt).toISOString(),
       minimumCohortSize: this.minimumCohortSize,
       stampDays: [],
+      contaminatedSpans: [],
       cohorts: [],
       source,
     };
@@ -354,14 +368,38 @@ export class RetentionService {
   private warnOnSuppression(
     cohorts: readonly CohortRetention[],
     stampDays: readonly StampDay[],
+    spans: readonly ContaminatedSpan[],
   ): void {
+    // Logged whenever a span exists, not only when it suppressed something. A
+    // span with zero inherited cohorts is still the detector saying "this range
+    // of the dataset is an import", which is worth knowing even on the reads
+    // where nothing small happened to fall inside it.
+    //
+    // The two warnings this method emits have DIFFERENT SCOPES, and the words
+    // "no dataset" below are what keeps them apart: a span is a property of the
+    // whole payload and its counts never shrink to the window, while the stamp
+    // warning underneath counts the cohorts actually being returned. Two numbers
+    // in one log with no scope on either is how a reader concludes the wrong
+    // thing from a line that is technically true.
+    for (const span of spans) {
+      this.logger.warn(
+        `Faixa contaminada ${span.from}..${span.to} (contagens do dataset ` +
+          `inteiro, nao desta janela): ${span.confirmedCohorts} de ` +
+          `${span.judgedCohorts} coorte(s) julgaveis reprovadas por evidencia ` +
+          `propria em ${span.confirmedMonths.length} mes(es), e mais ` +
+          `${span.inheritedCohorts} coorte(s) (${span.inheritedPlayers} ` +
+          'jogadores) suprimidas por heranca — pequenas demais para julgar ' +
+          'sozinhas, mesma forma de ~100%, dentro da faixa.',
+      );
+    }
+
     const suppressed = cohorts.filter((cohort) => cohort.contamination.suspect);
     if (suppressed.length === 0) {
       return;
     }
 
     this.logger.warn(
-      `${suppressed.length} de ${cohorts.length} coortes tiveram ` +
+      `Nesta janela, ${suppressed.length} de ${cohorts.length} coortes tiveram ` +
         `${RETENTION_HORIZON_DAYS.map(horizonLabel).join('/')} suprimidos por ` +
         `carimbo de importacao (limiar ${this.contaminationMax}). Dias ` +
         `detectados: ${

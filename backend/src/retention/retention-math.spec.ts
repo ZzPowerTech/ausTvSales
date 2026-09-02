@@ -1,12 +1,18 @@
 import { Platform } from '../instrumentation/platform';
 import type { RetentionPlayer } from './plan-retention';
 import {
+  applyContaminatedSpans,
   buildCohorts,
+  detectContaminatedSpans,
   detectStampDays,
   toSaoPauloMonth,
 } from './retention-math';
 import type { CohortOptions } from './retention-math';
-import type { RetentionMeasure, StampDay } from './retention.types';
+import type {
+  CohortRetention,
+  RetentionMeasure,
+  StampDay,
+} from './retention.types';
 
 const MS_PER_DAY = 86_400_000;
 
@@ -21,6 +27,11 @@ function premium(suffix: number): string {
 /** Floodgate prefix → bedrock. */
 function bedrock(suffix: number): string {
   return `00000000-0000-0000-0009-${String(suffix).padStart(12, '0')}`;
+}
+
+/** Version nibble 3 → java_offline. A third platform, for three-cohort months. */
+function offline(suffix: number): string {
+  return `11111111-1111-3111-8111-${String(suffix).padStart(12, '0')}`;
 }
 
 function player(
@@ -523,5 +534,296 @@ describe('buildCohorts', () => {
 
       expect(d1).toMatchObject({ percent: 0, n: 1, survived: 0 });
     });
+  });
+});
+
+describe('the contaminated span', () => {
+  /**
+   * `size` players registered on the first of `month`, `survivors` of whom are
+   * still seen long afterwards.
+   *
+   * A non-survivor is last seen on the day they registered, so they fail every
+   * horizon; `survivors === size` therefore produces the artefact's exact
+   * signature — 100% at D1, D7 and D30 alike.
+   */
+  function cohortOf(
+    make: (n: number) => string,
+    month: string,
+    size: number,
+    survivors: number,
+    seed: number,
+  ): RetentionPlayer[] {
+    return Array.from({ length: size }, (_, i) =>
+      player(
+        make(seed + i),
+        `${month}-01`,
+        i < survivors ? '2026-07-01' : `${month}-01`,
+      ),
+    );
+  }
+
+  function run(players: RetentionPlayer[]) {
+    const all = buildCohorts(players, options());
+    return applyContaminatedSpans(all, detectContaminatedSpans(all));
+  }
+
+  function find(
+    cohorts: readonly CohortRetention[],
+    cohort: string,
+    platform: Platform,
+  ): CohortRetention {
+    const found = cohorts.find(
+      (c) => c.cohort === cohort && c.platform === platform,
+    );
+    if (found === undefined) {
+      throw new Error(`cohort ${cohort}/${platform} missing`);
+    }
+    return found;
+  }
+
+  function reasonsOf(
+    cohorts: readonly CohortRetention[],
+    cohort: string,
+    platform: Platform,
+  ): (string | null)[] {
+    return find(cohorts, cohort, platform).measures.map((m) =>
+      m.percent === null ? m.reason : null,
+    );
+  }
+
+  it('suppresses a cohort too small to judge beside one that was judged', () => {
+    // The production shape, minimised: 25 players is enough for the
+    // implausibility guard to speak, 12 is not, and both read 100% everywhere.
+    // Before this pass the second one published `D30: 100%` over twelve people.
+    const { cohorts, spans } = run([
+      ...cohortOf(premium, '2025-01', 25, 25, 100),
+      ...cohortOf(bedrock, '2025-01', 12, 12, 200),
+    ]);
+
+    expect(spans).toEqual([
+      expect.objectContaining({
+        from: '2025-01',
+        to: '2025-01',
+        confirmedCohorts: 1,
+        judgedCohorts: 1,
+        inheritedCohorts: 1,
+        inheritedPlayers: 12,
+      }),
+    ]);
+    expect(reasonsOf(cohorts, '2025-01', 'java_premium')).toEqual([
+      'implausible_survival',
+      'implausible_survival',
+      'implausible_survival',
+    ]);
+    expect(reasonsOf(cohorts, '2025-01', 'bedrock')).toEqual([
+      'contaminated_span',
+      'contaminated_span',
+      'contaminated_span',
+    ]);
+  });
+
+  it('reaches the months INSIDE a run that carry no evidence of their own', () => {
+    // This is the case that cost the module fifteen cohorts in production:
+    // 2024-09 through 2025-01 had no cohort of twenty anywhere, so every one of
+    // them escaped and published 100%. A gap is "nobody here was big enough to
+    // test", not "this month is clean".
+    const { cohorts, spans } = run([
+      ...cohortOf(premium, '2024-08', 25, 25, 100),
+      ...cohortOf(bedrock, '2024-09', 11, 11, 200),
+      ...cohortOf(bedrock, '2024-10', 13, 13, 300),
+      ...cohortOf(premium, '2024-11', 22, 22, 400),
+    ]);
+
+    expect(spans).toHaveLength(1);
+    expect(spans[0]).toMatchObject({
+      from: '2024-08',
+      to: '2024-11',
+      confirmedMonths: ['2024-08', '2024-11'],
+      confirmedCohorts: 2,
+      inheritedCohorts: 2,
+      inheritedPlayers: 24,
+    });
+    expect(reasonsOf(cohorts, '2024-09', 'bedrock')[2]).toBe(
+      'contaminated_span',
+    );
+    expect(reasonsOf(cohorts, '2024-10', 'bedrock')[2]).toBe(
+      'contaminated_span',
+    );
+  });
+
+  describe('the walls that stop a run', () => {
+    it('refuses to bridge a gap longer than the cap', () => {
+      // The defect the first version of this shipped: the span was simply
+      // `[min(confirmed), max(confirmed)]`, so two unrelated imports a year
+      // apart made ONE span of a year and swallowed everything between them.
+      // Eleven months from the nearest evidence in either direction is not a
+      // neighbourhood.
+      const { cohorts, spans } = run([
+        ...cohortOf(premium, '2024-06', 25, 25, 100),
+        ...cohortOf(bedrock, '2024-12', 12, 12, 200),
+        ...cohortOf(premium, '2025-06', 25, 25, 300),
+      ]);
+
+      expect(spans.map((span) => [span.from, span.to])).toEqual([
+        ['2024-06', '2024-06'],
+        ['2025-06', '2025-06'],
+      ]);
+      expect(reasonsOf(cohorts, '2024-12', 'bedrock')).toEqual([
+        null,
+        null,
+        null,
+      ]);
+    });
+
+    it('bridges exactly six months and breaks at seven', () => {
+      const six = run([
+        ...cohortOf(premium, '2024-01', 25, 25, 100),
+        ...cohortOf(premium, '2024-08', 25, 25, 300),
+      ]);
+      const seven = run([
+        ...cohortOf(premium, '2024-01', 25, 25, 100),
+        ...cohortOf(premium, '2024-09', 25, 25, 300),
+      ]);
+
+      expect(six.spans.map((span) => [span.from, span.to])).toEqual([
+        ['2024-01', '2024-08'],
+      ]);
+      expect(seven.spans.map((span) => [span.from, span.to])).toEqual([
+        ['2024-01', '2024-01'],
+        ['2024-09', '2024-09'],
+      ]);
+    });
+
+    it('refuses to cross a month whose judgeable cohorts all passed', () => {
+      // A healthy cohort of forty is evidence AGAINST a bulk write covering that
+      // month, and an inference that walks straight through it is not an
+      // inference about a write any more. Without this wall the bedrock cohort
+      // of 2024-07 — the same month as the largest, healthiest cohort in the set
+      // — was suppressed.
+      const { cohorts, spans } = run([
+        ...cohortOf(premium, '2024-06', 25, 25, 100),
+        ...cohortOf(premium, '2024-07', 40, 10, 200),
+        ...cohortOf(bedrock, '2024-07', 12, 12, 300),
+        ...cohortOf(premium, '2024-08', 25, 25, 400),
+      ]);
+
+      expect(spans.map((span) => [span.from, span.to])).toEqual([
+        ['2024-06', '2024-06'],
+        ['2024-08', '2024-08'],
+      ]);
+      expect(reasonsOf(cohorts, '2024-07', 'bedrock')).toEqual([
+        null,
+        null,
+        null,
+      ]);
+    });
+
+    it('does not treat a month as clean when it also holds a failing cohort', () => {
+      // Production 2025-08 is exactly this: `java_offline` passes at 96,7% while
+      // `bedrock` and `java_premium` fail at 100%. A failing cohort settles the
+      // month whatever else it holds — otherwise the artefact's own boundary
+      // month would wall off the artefact.
+      const { spans } = run([
+        ...cohortOf(premium, '2024-06', 25, 25, 100),
+        ...cohortOf(premium, '2024-07', 25, 25, 200),
+        ...cohortOf(bedrock, '2024-07', 30, 20, 300),
+        ...cohortOf(premium, '2024-08', 25, 25, 400),
+      ]);
+
+      expect(spans.map((span) => [span.from, span.to])).toEqual([
+        ['2024-06', '2024-08'],
+      ]);
+    });
+  });
+
+  it('publishes the base of its own claim, not a claim of completeness', () => {
+    // `confirmedCohorts` alone would let the reason say "every judgeable cohort
+    // failed", which is false whenever a month holds a failing cohort and a
+    // healthy one at once. The reason says "1 de 2" because `judgedCohorts` is
+    // counted — the same rule as every other number in this module.
+    const { cohorts, spans } = run([
+      ...cohortOf(premium, '2024-06', 25, 25, 100),
+      ...cohortOf(offline, '2024-06', 30, 20, 200),
+      ...cohortOf(bedrock, '2024-06', 12, 12, 900),
+    ]);
+
+    expect(spans[0]).toMatchObject({ confirmedCohorts: 1, judgedCohorts: 2 });
+
+    const inherited = find(cohorts, '2024-06', 'bedrock');
+    const [d1] = inherited.measures;
+    expect(d1.percent).toBeNull();
+    if (d1.percent === null) {
+      expect(d1.unavailableReason).toContain('1 de 2 coorte(s)');
+    }
+  });
+
+  it('leaves a small 100% cohort alone when it registers outside every run', () => {
+    // The rule is inference from a neighbourhood, and a cohort with no proven
+    // neighbourhood has none to inherit. Publishing it is the deliberate
+    // remaining hole: eleven players all sticking around is not, by itself,
+    // evidence of anything — which is exactly why the size floor exists.
+    const { cohorts, spans } = run([
+      ...cohortOf(premium, '2024-08', 25, 25, 100),
+      ...cohortOf(bedrock, '2025-06', 11, 11, 200),
+    ]);
+
+    expect(spans.map((span) => [span.from, span.to])).toEqual([
+      ['2024-08', '2024-08'],
+    ]);
+    expect(reasonsOf(cohorts, '2025-06', 'bedrock')).toEqual([
+      null,
+      null,
+      null,
+    ]);
+    expect(
+      measureOf(find(cohorts, '2025-06', 'bedrock').measures, 'D30'),
+    ).toMatchObject({ percent: 100, n: 11 });
+  });
+
+  it('never touches a cohort inside a run whose curve looks real', () => {
+    // Only the SIZE requirement is relaxed. A cohort that loses three quarters
+    // of its players is not the artefact, whatever its neighbours did, and
+    // blanking it would be the detector suppressing the healthy data — the
+    // failure the stamp-run cap was already written to avoid.
+    const { cohorts } = run([
+      ...cohortOf(premium, '2024-08', 25, 25, 100),
+      ...cohortOf(bedrock, '2024-09', 40, 10, 200),
+      ...cohortOf(premium, '2024-10', 25, 25, 300),
+    ]);
+
+    expect(reasonsOf(cohorts, '2024-09', 'bedrock')).toEqual([
+      null,
+      null,
+      null,
+    ]);
+    expect(
+      measureOf(find(cohorts, '2024-09', 'bedrock').measures, 'D30'),
+    ).toMatchObject({ percent: 25, n: 40, survived: 10 });
+  });
+
+  it('finds no run at all when nothing carries its own evidence', () => {
+    const players = [
+      ...cohortOf(bedrock, '2024-09', 11, 11, 200),
+      ...cohortOf(bedrock, '2024-10', 13, 13, 300),
+    ];
+    const all = buildCohorts(players, options());
+
+    expect(detectContaminatedSpans(all)).toEqual([]);
+    expect(applyContaminatedSpans(all, []).cohorts).toEqual(all);
+    expect(applyContaminatedSpans(all, []).spans).toEqual([]);
+  });
+
+  it('keeps the base of every horizon it suppresses', () => {
+    // Same rule as everywhere else in this module: the percentage goes, the
+    // denominator stays, so the payload still says how many people the vanished
+    // number was about.
+    const { cohorts } = run([
+      ...cohortOf(premium, '2025-01', 25, 25, 100),
+      ...cohortOf(bedrock, '2025-01', 12, 12, 200),
+    ]);
+
+    const inherited = find(cohorts, '2025-01', 'bedrock');
+    expect(inherited.measures.map((m) => m.n)).toEqual([12, 12, 12]);
+    expect(inherited.size).toBe(12);
   });
 });

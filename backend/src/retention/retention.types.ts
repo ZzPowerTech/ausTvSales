@@ -109,6 +109,32 @@ export const RETENTION_UNAVAILABLE_REASONS = [
    * catches the *shape* of the result however the import spread its timestamps.
    */
   'implausible_survival',
+  /**
+   * The cohort is too small for {@link 'implausible_survival'} to judge it
+   * alone, but it shows the same ~100% shape **and** it registers inside a span
+   * of months where cohorts large enough to be judged all failed that test.
+   *
+   * ## Why this reason had to exist
+   *
+   * The production read of 2026-09-02 over `2024-06..2025-08` returned 45
+   * cohorts. 21 were suppressed as implausible; the other 24 published — and 23
+   * of those published **100% at D1, D7 and D30 alike**. The only thing telling
+   * the two groups apart was cohort size: every suppressed cohort had 20 members
+   * or more, every published one had 19 or fewer. Nothing about the data
+   * decided; the size floor decided, by itself, everything.
+   *
+   * That floor is right in isolation — eleven players all sticking around is not
+   * evidence of anything. It is wrong in a neighbourhood: the artefact is a
+   * property of a bulk **write**, and a write covers a contiguous range of
+   * registrations, so a tiny cohort showing the artefact's exact shape between
+   * two months where the artefact was proven is the artefact, not luck.
+   *
+   * Inference, and labelled as inference — which is why it is its own reason and
+   * not folded into `implausible_survival`. Suppression here never reaches a
+   * cohort with a different shape: only the size requirement is relaxed, and
+   * only inside a region where the artefact stands on its own evidence.
+   */
+  'contaminated_span',
 ] as const;
 
 export type RetentionUnavailableReason =
@@ -325,6 +351,15 @@ export interface RetentionReport {
   minimumCohortSize: number;
   /** Days detected as bulk-import stamps. Empty is the healthy case. */
   stampDays: StampDay[];
+  /**
+   * Runs of registration months carrying the import artefact. Empty is healthy.
+   *
+   * A list and not a single span: the walls that bound a run (a clean month, a
+   * gap too long) can split one dataset into several, and collapsing them into
+   * one interval would re-introduce exactly the unbounded reach the walls exist
+   * to remove.
+   */
+  contaminatedSpans: ContaminatedSpan[];
   cohorts: CohortRetention[];
   /**
    * Set when the requested window falls wholly outside what the source covers.
@@ -334,6 +369,74 @@ export interface RetentionReport {
    */
   coverageWarning?: string;
   source: RetentionSourceState;
+}
+
+/**
+ * A run of registration months carrying the bulk-import artefact.
+ *
+ * ## What bounds it, and why it is bounded at all
+ *
+ * `from`..`to` is a run **grown** from the months holding a cohort that
+ * {@link 'implausible_survival'} judged on its own evidence — not simply the
+ * interval between the first and the last of them. The difference is the whole
+ * safety of the mechanism: `[min, max]` is unbounded extrapolation, and a second
+ * import a year after the first would silently swallow everything between two
+ * unrelated events. It is the same failure the stamp detector's two-day cap
+ * exists to prevent, one level up.
+ *
+ * A run stops at either of two walls:
+ *
+ * - **a clean month** — one whose judgeable cohorts all *passed* and which holds
+ *   no failing cohort of its own. A month with a healthy 200-player cohort is
+ *   evidence *against* a write covering it, and inference must not cross it.
+ * - **a gap too long** — more consecutive months without evidence than the
+ *   detector will bridge.
+ *
+ * Months inside the run with no judgeable cohort **are** part of it. A gap means
+ * "nobody here was big enough to test", not "this month is clean", and reading
+ * the gap as clean is what published fifteen consecutive cohorts at 100%.
+ *
+ * Published in the report for the same reason `stampDays` is: a detector that
+ * blanks half a report has to hand over the evidence it decided on.
+ */
+export interface ConfirmedSpan {
+  /** First month of the run. `YYYY-MM`. */
+  from: string;
+  /** Last month of the run. `YYYY-MM`. */
+  to: string;
+  /** Every month in the run that carried its own evidence. Gaps are not listed. */
+  confirmedMonths: string[];
+  /** Cohorts inside the run judged implausible on their own evidence. */
+  confirmedCohorts: number;
+  /**
+   * Cohorts inside the run that were large enough to be judged at all.
+   *
+   * The base of `confirmedCohorts`, and it is **not** always equal to it: a
+   * month can hold a failing cohort and a passing one at once, which makes the
+   * month evidence without making every cohort in it evidence. Published so the
+   * suppression reason can say "21 of 22" instead of claiming a completeness
+   * nobody measured.
+   */
+  judgedCohorts: number;
+}
+
+/** A {@link ConfirmedSpan} plus what inheriting it actually suppressed. */
+export interface ContaminatedSpan extends ConfirmedSpan {
+  /**
+   * Cohorts suppressed **by inheritance** — too small to judge, right shape,
+   * inside the span. Counted across the whole dataset, not the request window,
+   * because the span is a property of the dataset and not of the question asked.
+   */
+  inheritedCohorts: number;
+  /**
+   * Players in those cohorts, dataset-wide like `inheritedCohorts`.
+   *
+   * The base of the decision. Note that none of the four counts on this type is
+   * restricted to the cohorts a given response renders — a request filtered to
+   * one platform and three months still reports the span over the whole dataset,
+   * because a span narrowed to the question would stop being checkable.
+   */
+  inheritedPlayers: number;
 }
 
 /** Platform filter, or every platform reported separately. */

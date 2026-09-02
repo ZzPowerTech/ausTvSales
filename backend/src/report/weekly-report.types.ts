@@ -3,6 +3,7 @@ import type { FunnelBucket } from '../funnel/funnel.types';
 import type { InstrumentationSummaryDto } from '../health/dto/instrumentation-health.dto';
 import type {
   CohortRetention,
+  ContaminatedSpan,
   RetentionSourceState,
   StampDay,
 } from '../retention/retention.types';
@@ -80,6 +81,20 @@ export interface RetentionSection {
   cohorts: CohortRetention[];
   /** Bulk-import stamps detected in the source population. */
   stampDays: StampDay[];
+  /**
+   * Runs of registration months carrying the import artefact.
+   *
+   * Carried because in this population `stampDays` comes back **empty** while
+   * the artefact is real: the 2026-09-02 read suppressed 21 of 45 cohorts with
+   * no stamp day anywhere. Without this field the weekly report would print a
+   * page of cohorts with no numbers and no reason a reader could see.
+   *
+   * ⚠️ These runs are dataset-wide, and the weekly window is the last three
+   * months — so a run will routinely be present with no bearing whatsoever on
+   * the cohorts rendered. The renderer must gate on the cohorts it is actually
+   * printing, never on this list being non-empty.
+   */
+  contaminatedSpans: ContaminatedSpan[];
   source: RetentionSourceState;
 }
 

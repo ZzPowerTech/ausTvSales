@@ -121,6 +121,7 @@ export class WeeklyReportBuilder {
       to: report.to,
       cohorts: report.cohorts,
       stampDays: report.stampDays,
+      contaminatedSpans: report.contaminatedSpans,
       source: report.source,
     };
   }

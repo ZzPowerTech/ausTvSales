@@ -126,6 +126,12 @@ function toRecord(row: typeof weeklyReports.$inferSelect): WeeklyReportRecord {
     periodFrom: row.periodFrom,
     periodTo: row.periodTo,
     status: row.status,
+    // ⚠️ An unvalidated cast over a JSON column, so a row written by an older
+    // version does not necessarily satisfy the current `WeeklyReport` — rows
+    // from before `contaminatedSpans` existed have no such field, and the type
+    // says they do. Nothing renders from here (the delivered text is served from
+    // `rendered`), so there is no crash path; a consumer reading `payload` off
+    // the recents endpoint is the one that has to expect gaps.
     payload: (row.payload as WeeklyReport | null) ?? null,
     rendered: row.rendered,
     delivered: row.delivered,
