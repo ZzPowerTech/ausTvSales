@@ -88,10 +88,27 @@ documentadas e isoladas em módulo próprio**, sempre em usuário **read-only**:
 
 | # | escopo | tabelas | por quê a API não serve |
 |---|---|---|---|
-| 1 | Coorte histórica (§6.2, S8.2) | `plan_users`, `plan_user_info`, `plan_sessions` | ~~agregação por coorte × plataforma não existe em nenhum endpoint~~ — **premissa derrubada em 2026-08-29**, e **nenhuma justificativa a substitui**. Ver a nota abaixo |
+| ~~1~~ | ~~Coorte histórica (§6.2, S8.2)~~ | ~~`plan_users`, `plan_user_info`, `plan_sessions`~~ | 🔒 **FECHADA em 2026-09-02 pelo dono.** A premissa caiu em 2026-08-29 e nenhuma a substituiu; a S8.2 foi entregue sem ela. Ver a nota abaixo |
 | 2 | **Inventário de instâncias e chegadas de rede (§6.1, S6.3)** — *aprovada em 2026-08-23; **premissa desmentida em 2026-08-26**, corpo lido em 2026-08-29* | **`plan_servers` e `plan_users`** | ~~o Plan não expõe lista de servidores~~ — **falso**: `/v1/networkMetadata` lista as instâncias. Mas o corpo **não traz `plan_version`**, e nenhum outro endpoint traz: `version_divergence` fica, `orphan_instance` pode sair. Justificativa reescrita abaixo. **A parte sobre chegadas de rede foi reavaliada em 2026-08-31, e caiu: `plan_users` guarda o Survival, não a rede** — as linhas passaram a alimentar o degrau `survival` |
 
-#### Exceção 1 — sem justificativa desde 2026-08-29
+#### 🔒 Exceção 1 — FECHADA em 2026-09-02
+
+**Decisão do dono (Murilo, 2026-09-02): a exceção 1 está encerrada.** Ela não autoriza mais
+nada. `plan_user_info` e `plan_sessions` voltam a ser tabelas comuns sob a regra geral do
+ADR-002 — o NestJS fala com `/v1/*` e não com elas.
+
+`plan_users` **continua acessível**, mas pela **exceção 2**, que é outra autorização com
+outro escopo e outra justificativa. Fechar a 1 não mexe no funil nem nos checks de saúde.
+
+**O que isso custa, para o caso de alguém precisar reabrir:** se algum dia for preciso
+publicar retenção como *retorno no dia N* em vez de *intervalo de sobrevivência*, o log de
+sessão volta a ser necessário — e isso exige uma **exceção nova, numerada e justificada por
+escrito**, não a reabertura silenciosa desta. É exatamente a disciplina que este ADR aplicou
+à exceção 2 e que faltou a esta enquanto ela existiu.
+
+---
+
+##### Registro histórico: por que ela existiu e por que caiu
 
 A exceção foi aberta com um único argumento: *"agregação por coorte × plataforma não existe
 em nenhum endpoint"*. O corpo do `/v1/retention` foi lido e traz `registerDate` (coorte) e
@@ -102,10 +119,9 @@ não carrega mais, e a regra que este documento aplica à exceção 2 quatro par
 — *uma exceção que sobrevive porque ninguém reescreveu o motivo é como esta aqui foi
 aberta* — vale igual para esta.
 
-**Estado:** autoriza `plan_users`, `plan_user_info` e `plan_sessions`, e **nenhum código a
-usa** — a S8.2, única história que dependia dela, sai do endpoint. Fechá-la é decisão do
-dono, porque foi ele quem a abriu; até lá ela fica registrada aqui como o que é: uma
-autorização de pé sem motivo de pé.
+**Estado até 2026-09-02:** autorizava `plan_users`, `plan_user_info` e `plan_sessions`, e
+**nenhum código a usava** — a S8.2, única história que dependia dela, saiu do endpoint. Era
+uma autorização de pé sem motivo de pé, e foi fechada assim que o dono a leu.
 
 **Confirmado em 2026-09-01, quando a S8.2 foi entregue:** o módulo `retention` não abre
 conexão MySQL nenhuma e não pede credencial nova. A exceção segue aberta e agora está

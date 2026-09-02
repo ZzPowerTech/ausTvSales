@@ -144,8 +144,12 @@ Suíte: **70 suítes, 863 testes** unitários, mais 5 arquivos de e2e novos cont
 
 **Decisões da S9 que não se reabre sem o dono:**
 
-- **A exceção 1 do ADR-002 continua aberta para ninguém.** A S8.2 saiu do `/v1/retention`: sem
-  SQL, sem MySQL, sem credencial nova. Fechá-la é decisão do dono, porque foi ele quem a abriu.
+- **🔒 A exceção 1 do ADR-002 foi FECHADA em 2026-09-02** pelo dono. A S8.2 saiu do
+  `/v1/retention` — sem SQL, sem MySQL, sem credencial nova — e a exceção não autorizava mais
+  nada. `plan_user_info` e `plan_sessions` voltam à regra geral do ADR-002. **`plan_users`
+  continua acessível pela exceção 2**, que é outra autorização: fechar a 1 não mexe no funil nem
+  nos checks de saúde. Reabrir, se um dia for preciso publicar retorno-no-dia-N, exige exceção
+  nova e justificada por escrito.
 - **A retenção publica INTERVALO DE SOBREVIVÊNCIA, não retorno no dia N**, e o rótulo viaja no
   campo `semantics` de toda resposta. As duas leituras são perguntas diferentes.
 - **A metade de E2 que cruza gasto com posição no funil não foi entregue.** Ela exige posição
