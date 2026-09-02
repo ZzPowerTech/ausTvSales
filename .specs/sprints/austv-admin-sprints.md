@@ -814,8 +814,56 @@ falta de pré-requisito** — a mesma distinção que o `HANDOFF.md` pede que se
 Substitui o `ausPlanBridge`, adiado pelo ADR-007. **Nenhum Java, nada implantado no servidor de
 jogo.**
 
-1. **E1 e E2 saem do `ausTvSales` sozinho** — receita por plataforma e coorte, tempo até o primeiro
-   gasto, gasto por posição no funil. **Nenhuma dependência de PlayerPoints** (R3 resolvido:
+> ## Entregue em duas fatias, e a divisão é por credencial
+>
+> | fatia | PR | o que exige do ambiente |
+> |---|---|---|
+> | **Receita — E1 + a metade entregável de E2** | `feat/api-economy-revenue` | **nada novo**: usa o `PLAN_BASE_URL` que já existe |
+> | **Social — E3 + E4** | `feat/api-economy-social` | conta **read-only nova** no MySQL do PlayerPoints, na máquina do jogo |
+>
+> A linha divisória não é tamanho, é o que trava o deploy. A receita por plataforma é o número
+> que o spec diz que **nenhuma decisão sobre Bedrock deveria ser tomada sem** — e ela sai do
+> próprio `sales`, sem ETL nenhum, porque a plataforma vem do uuid da venda (ADR-003). Prendê-la
+> atrás de uma credencial que ainda não existe seria segurar o número mais urgente da camada
+> pelo mais lento.
+>
+> ### O que a fatia de receita entrega
+>
+> - **E1** — `GET /economy/revenue`: receita por plataforma (sem ETL) e por coorte de registro
+>   (com ETL), `share` sempre com `n`, cobertura de coorte publicada mesmo quando é 100%.
+> - **E2, primeira metade** — `GET /economy/first-spend`: tempo até o primeiro gasto por coorte ×
+>   plataforma, com o denominador sendo a **coorte** e não os compradores.
+> - **A dimensão `player` do ADR-008**, preenchida por ETL noturno sobre o `/v1/retention` — sem
+>   credencial nova, sem MySQL, sem abrir a exceção 1 do ADR-002.
+> - **Dinheiro nunca vira float**: a re-agregação acontece em centavos inteiros (`bigint`) e volta
+>   a string decimal. O `PROJECT.md` §2.5 já exigia isso; aqui era preciso *somar*, não só
+>   repassar.
+> - **`historical_import` fora de todo número, e republicado ao lado.** Essas linhas têm preço
+>   migrado e nenhum timestamp real por evento, então não podem ser atribuídas a uma janela nem
+>   comparadas com uma data de registro. Excluir em silêncio faria estes números divergirem dos
+>   endpoints de analytics por um motivo invisível.
+>
+> ### 🔴 A metade de E2 que NÃO foi entregue, e por quê
+>
+> *"Gasto por posição no funil"* — *"quem conclui o tutorial gasta mais? Quem trava no passo 03
+> gasta alguma coisa?"* — precisa da posição no tutorial **de um jogador individual**, e nenhuma
+> fonte deste sistema guarda isso.
+>
+> O `tutorial_daily` é agregado em `(dia, plataforma)` por decisão registrada da S8.0, tomada
+> justamente para não trazer identidade de jogador do jogo para este banco numa pergunta que se
+> responde contando. Essa decisão está certa para o funil **e é exatamente o que bloqueia esta
+> métrica**; as duas coisas não podem valer ao mesmo tempo.
+>
+> Entregar exige persistir posição **por jogador**, o que alarga a superfície de dado pessoal que
+> a §8 do spec governa — e isso é **decisão do dono, não desta sessão**. O custo de errar é
+> assimétrico: métrica se adiciona na sprint seguinte, dado pessoal gravado não se desgrava.
+>
+> O caminho, para a decisão sair barata: uma tabela por `player_uuid` com a quest mais avançada
+> alcançada, escrita pelo próprio ETL da S8.0 — que já lê esse dado e o descarta. O endpoint
+> publica `byFunnelPosition: null` com esse motivo por extenso, em vez de omitir o campo.
+
+1. [~] **E1 e E2 saem do `ausTvSales` sozinho** — receita por plataforma e coorte, tempo até o primeiro
+   gasto, ~~gasto por posição no funil~~ (ver o bloco acima). **Nenhuma dependência de PlayerPoints** (R3 resolvido:
    analytics apenas, sem reconciliação)
 2. **ETL noturno apenas das linhas `PAY_SENDER`/`PAY_RECEIVER`** (1.332 de 6.664) para o
    PostgreSQL, em usuário read-only na origem. Tabela sem índice — nada roda ao vivo no MySQL do

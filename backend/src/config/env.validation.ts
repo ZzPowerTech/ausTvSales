@@ -577,6 +577,36 @@ export class EnvironmentVariables {
   @MinLength(1, { message: 'WEEKLY_REPORT_CRON must not be empty when set' })
   WEEKLY_REPORT_CRON?: string;
 
+  // --- Dimensao de jogador (AusTV Admin S9.1, ADR-008) ---
+  //
+  // Sem credencial nova: o ETL le o mesmo `/v1/retention` da S8.2 pelo
+  // `PLAN_BASE_URL` que ja existe. O que ele traz para o PostgreSQL e a data de
+  // registro por jogador, que e o eixo de COORTE da camada de economia — o
+  // ADR-008 proibe cruzar `sales` (aqui) com o Plan (la) em memoria.
+
+  // Chave geral do ETL. Desligado, a receita por PLATAFORMA continua saindo
+  // (ela deriva do proprio uuid da venda, ADR-003), mas toda leitura por coorte
+  // reporta `never_synced` e o tempo ate o primeiro gasto nao sai.
+  //
+  // ⚠️ Desligado por padrao, e o boot avisa em frase inteira. Em 2026-09-01 a
+  // validacao de producao descobriu que o ETL do tutorial (S8.0) estava no repo
+  // ha meses e nunca fora configurado na VPS — duas variaveis separavam dois
+  // degraus do funil de jamais terem produzido numero. Este job tem a mesma
+  // forma.
+  @IsOptional()
+  @IsBoolean()
+  PLAYER_DIMENSION_SYNC_ENABLED?: boolean;
+
+  // Quando o ETL roda, em cron, no fuso America/Sao_Paulo. Padrao 03:30 — meia
+  // hora depois do ETL do tutorial, para dois jobs que alcancam a maquina do
+  // jogo nao comecarem juntos. Expressao invalida deixa o job SEM agendar e diz
+  // isso; nunca cai no padrao.
+  @IsOptional()
+  @MinLength(1, {
+    message: 'PLAYER_DIMENSION_SYNC_CRON must not be empty when set',
+  })
+  PLAYER_DIMENSION_SYNC_CRON?: string;
+
   // Express `trust proxy` setting, applied in main.ts so `req.ip` reflects the
   // real client from the Nginx-supplied X-Forwarded-For (and a header forged by a
   // direct client is ignored). A number = trust that many hops; otherwise a

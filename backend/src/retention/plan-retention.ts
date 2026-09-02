@@ -221,8 +221,16 @@ export function toEpochMs(raw: unknown): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
-/** `Z`, `+00`, `-0300`, `-03:00` — any explicit UTC offset at the end. */
-const HAS_TIMEZONE = /(Z|[+-]\d{2}:?\d{2}?)$/i;
+/**
+ * A time of day followed by an explicit UTC offset.
+ *
+ * The time half is not decoration, and leaving it out was a bug: `2026-09-01`
+ * ends in `-01`, which reads as an offset of minus one hour to a pattern that
+ * only looks at the tail. V8 then parses the date-only form as **UTC midnight**,
+ * which is 21:00 BRT of the previous day — the exact silent shift this guard
+ * exists to refuse, let through by the guard itself.
+ */
+const HAS_TIMEZONE = /\d{2}:\d{2}(:\d{2})?(\.\d+)?\s*(Z|[+-]\d{2}(:?\d{2})?)$/i;
 
 /**
  * Canonical dashed UUID, the only form ADR-003 can classify.

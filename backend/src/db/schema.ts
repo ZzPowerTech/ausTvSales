@@ -201,7 +201,18 @@ export const tutorialDaily = pgTable(
   {
     /** Calendar day in America/Sao_Paulo. Bucketed at write time. */
     day: date('day').notNull(),
-    /** `bedrock` | `java_offline` | `java_premium` | `unknown` (ADR-003). */
+    /**
+     * `bedrock` | `java_offline` | `java_premium` | `unknown` (ADR-003).
+     *
+     * Written by the ETL and **read by no query in this application** — the read
+     * paths recompute it from the uuid, so that ADR-003 has exactly one
+     * implementation and it is the TypeScript one. It is kept because an
+     * operator reading this table by hand needs the derived value beside the
+     * uuid, and because the index below leads with `registered_at` anyway.
+     *
+     * No `CHECK` constraint: the only writer is `platformOf`, whose return type
+     * is the union. A constraint would be a second spelling of that rule.
+     */
     platform: text('platform').notNull(),
     /** Players whose earliest tutorial `started-date` fell on this day. */
     entered: integer('entered').notNull(),
@@ -383,6 +394,154 @@ export const weeklyReports = pgTable(
     check(
       'weekly_reports_period_ordered',
       sql`${table.periodFrom} <= ${table.periodTo}`,
+    ),
+  ],
+);
+
+/**
+ * The `player` dimension of ADR-008 (story S9.1, spec §6.4).
+ *
+ * ## Why this table exists, in one sentence
+ *
+ * Sales live in this PostgreSQL and registration dates live in Plan's API, and
+ * ADR-008 forbids correlating two live sources in memory — *"o PostgreSQL do
+ * `ausTvSales` é o único lugar onde dados de fontes diferentes se cruzam"*. So
+ * the registration date has to land here before revenue can be broken down by
+ * cohort at all.
+ *
+ * ## Why it stores a player row when `tutorial_daily` deliberately does not
+ *
+ * The tutorial table is aggregated at `(day, platform)` precisely to keep player
+ * identities out of this database, and the reasoning there is sound: the funnel
+ * question is answered by counting.
+ *
+ * The economy questions are not. *"Quem conclui o tutorial gasta mais?"* and
+ * *"quanto tempo até o primeiro gasto?"* are **joins**, and no aggregate of one
+ * side can answer them. ADR-008 says so explicitly and names the columns: *"E2
+ * exige uma dimensão `player` no Postgres — uuid, platform, first_seen, posição
+ * no funil — alimentada por ETL a partir do Plan. É o que torna o cruzamento
+ * possível."*
+ *
+ * ## The footprint this adds, stated plainly
+ *
+ * It **is** new, and an earlier version of this comment said otherwise by
+ * pointing at `sales.player_uuid` and `players.uuid`. Those hold the uuids of
+ * people who *bought something*. This table lands the uuid of **every
+ * registered player** — ~5.565 — plus two behavioural timestamps each, a whole
+ * population that had never appeared in this database.
+ *
+ * It is permitted: ADR-008 names this dimension by column, and spec §8 allows
+ * *"nenhum dado pessoal além de UUID e valor"* for this layer. Nothing here goes
+ * beyond that — no nickname, no IP, no session. But "permitted" and "not new"
+ * are different claims, and only the first one is true.
+ *
+ * Saying so matters because this same story argues, in `economy.types.ts`, that
+ * per-player tutorial position is the owner's call **on personal-data-footprint
+ * grounds**. Two expansions of the same kind cannot be held to opposite
+ * standards; the difference is that ADR-008 already decided this one and nothing
+ * has decided the other.
+ *
+ * ⚠️ **There is no retention or deletion policy for this table.** Rows are
+ * upserted and never removed. That is a gap for the owner, not a defect of this
+ * story.
+ *
+ * ## Deliberately separate from {@link players}
+ *
+ * `players` is written by the ingest path and carries a nickname snapshot; every
+ * row there is someone who bought something. This table is written by an ETL and
+ * must contain players who **never** bought — otherwise the denominator of
+ * "share of the cohort that ever spent" would be the buyers themselves, and the
+ * answer would always be 100%. Merging the two would also put two writers with
+ * different lifecycles on one table.
+ *
+ * ## Upsert, never delete
+ *
+ * A player who stops appearing in the payload has not stopped existing. The ETL
+ * only inserts and updates; `synced_at` is how a stale row is recognised.
+ */
+export const playerDimension = pgTable(
+  'player_dimension',
+  {
+    uuid: uuid('uuid').primaryKey(),
+    /**
+     * `bedrock` | `java_offline` | `java_premium` | `unknown` (ADR-003).
+     *
+     * Written by the ETL and **read by no query in this application** — the read
+     * paths recompute it from the uuid, so that ADR-003 has exactly one
+     * implementation and it is the TypeScript one. It is kept because an
+     * operator reading this table by hand needs the derived value beside the
+     * uuid, and because the index below leads with `registered_at` anyway.
+     *
+     * No `CHECK` constraint: the only writer is `platformOf`, whose return type
+     * is the union. A constraint would be a second spelling of that rule.
+     */
+    platform: text('platform').notNull(),
+    /** `registerDate` from `/v1/retention`. The cohort axis. */
+    registeredAt: timestamp('registered_at', { withTimezone: true }).notNull(),
+    /**
+     * `lastSeenDate` from `/v1/retention`.
+     *
+     * Not needed by E1 or E2, and stored anyway: E3 compares the D7 of the
+     * players who had social contact against everyone else, and that comparison
+     * needs this column. Fetching it later would mean a second ETL over the same
+     * payload for one field.
+     *
+     * ⚠️ It is a **survival interval** endpoint, not a return-on-day-N one — see
+     * the retention module. Any reader of this column inherits that caveat.
+     */
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull(),
+    /** When the ETL last wrote this row. How a stale row is recognised. */
+    syncedAt: timestamp('synced_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    // The cohort axis: "players who registered in month M", by platform.
+    index('player_dimension_registered_at_idx').on(
+      table.registeredAt,
+      table.platform,
+    ),
+  ],
+);
+
+/**
+ * Provenance of each player-dimension ETL run (story S9.1).
+ *
+ * Same reason `tutorial_syncs` exists: an empty {@link playerDimension} is
+ * indistinguishable from a sync that never ran, and reading the second as the
+ * first turns a collection gap into a reported zero. Every economy read consults
+ * this table before publishing a cohort breakdown.
+ */
+export const playerDimensionSyncs = pgTable(
+  'player_dimension_syncs',
+  {
+    id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+    ranAt: timestamp('ran_at', { withTimezone: true }).notNull().defaultNow(),
+    /** `ok` — the dimension was refreshed. `error` — nothing was written. */
+    status: text('status').notNull().$type<'ok' | 'error'>(),
+    /** Rows the payload carried. Null on a run that never got that far. */
+    rowsRead: integer('rows_read'),
+    /** Rows upserted. */
+    rowsWritten: integer('rows_written'),
+    /** Rows dropped for an unreadable uuid or date. */
+    rowsDropped: integer('rows_dropped'),
+    /**
+     * Wall-clock duration of the run, milliseconds.
+     *
+     * Recorded because the S9 Definition of Done asks for timings proving the
+     * ETL does not cost the game a tick, and a number nobody wrote down is a
+     * number nobody can attach to a PR. This one covers the HTTP path; the
+     * MySQL ETL records its own.
+     */
+    durationMs: integer('duration_ms'),
+    /** Why an `error` run failed, in Portuguese. Never a stack trace. */
+    detail: text('detail'),
+  },
+  (table) => [
+    index('player_dimension_syncs_ran_at_idx').on(table.ranAt.desc()),
+    check(
+      'player_dimension_syncs_status_valid',
+      sql`${table.status} IN ('ok', 'error')`,
     ),
   ],
 );
