@@ -163,22 +163,22 @@ Suíte: **72 suítes, 903 testes** unitários, mais 5 arquivos de e2e novos cont
   trava no passo 03"), com denominador igual a **todo mundo naquela posição**, não a quem
   comprou. **Enquanto a variável não for ligada na VPS o bloco sai `null` com o motivo**, nunca
   uma lista de zeros.
-- **O layout das colunas foi MEDIDO em 2026-09-02; a direção CONTINUA INFERIDA — e eu afirmei o
-  contrário antes de o review derrubar.** O dono leu um pagamento real: o PlayerPoints grava
-  **duas** linhas por transferência e elas **trocam `source` e `receiver` entre si**, com o
-  amount negado. Isso é medido, e é forte: **nenhuma leitura dessas colunas vale para as duas
-  linhas**, então fixar `transaction_type` é pré-requisito para elas significarem qualquer coisa.
-  **O que aquele par NÃO decide é a direção.** Ele é um espelho perfeito, então sobrevive
-  intacto às duas leituras — `receiver` sendo o sujeito da linha (o que faz `source` ser o
-  pagador na `PAY_RECEIVER`, que é o que o feed assume) ou `source` sendo o sujeito, que
-  inverteria todo `from`/`to` e apontaria `funding_many` para quem **recebeu** de muitos. Nem o
-  sinal nem o nome do tipo quebram o empate. *"As colunas trocam"* é consequência da simetria,
-  não evidência contra ela — e eu tratei uma observação de informação zero sobre direção como se
-  fosse a confirmação.
-  **O que resolve, e custa um `SELECT`:** uma linha de tipo **unilateral** (`SET` ou `OFFSET`),
-  que tem uma parte real só. A coluna que carrega o uuid do jogador ali é o sujeito, e a direção
-  sai por dedução. O código já **aposta** nessa leitura (`accountCreations` não seleciona
-  `receiver` de uma linha `SET` *porque ali é o jogador*) — aposta não é medida.
+- **✅ A direção do pagamento foi MEDIDA em 2026-09-02, em duas leituras — e a primeira sozinha
+  não bastava, o que eu só admiti depois do review derrubar.**
+  **Leitura 1 (o par):** o PlayerPoints grava **duas** linhas por transferência e elas **trocam
+  `source` e `receiver` entre si**, com o amount negado. Nenhuma leitura dessas colunas vale para
+  as duas linhas, então fixar `transaction_type` é **pré-requisito** para elas significarem
+  qualquer coisa — e essa armadilha continua de pé para qualquer consulta direta à tabela.
+  **Mas o par é um espelho perfeito e não decide a direção.** Ele sobrevive intacto tanto a
+  `receiver` ser o sujeito quanto a `source` ser. *"As colunas trocam"* é consequência da
+  simetria, com informação zero sobre direção, e eu tratei isso como a confirmação.
+  **Leitura 2 (o que quebrou a simetria):** as linhas `SET` têm uma parte real só, e voltam com
+  **`source = NULL`** e o uuid do jogador em `receiver`. Logo **`receiver` é o sujeito da linha**
+  e `source` é a contraparte, ausente quando não há uma. Na `PAY_RECEIVER`, portanto, `source` é
+  quem pagou e `receiver` é quem foi creditado: **`from`/`to` do feed estão certos** e o
+  `funding_many` conta quantas pessoas distintas **um pagador** pagou, que era o significado
+  pretendido. A aposta que o código já fazia (`accountCreations` não seleciona `receiver` de uma
+  `SET` *porque ali é o jogador*) era a certa — era aposta, virou medida.
   **O E3 não filtrava**, e casava o mesmo jogador nas duas linhas — todo pagamento contado duas
   vezes, em qualquer ponta. **A duplicação era inerte**: as duas contagens só são lidas como
   `> 0` para escolher o grupo de contato, e dobrar preserva o zero. Nenhum número publicado

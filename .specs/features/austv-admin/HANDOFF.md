@@ -1339,25 +1339,34 @@ restaurar**.
    `directionCaveat` do payload.
 
    **🔴 Mas o par não decide a direção, e eu escrevi aqui que decidia.** Ele é um espelho
-   perfeito: sobrevive intacto tanto a `receiver` ser o sujeito da linha (o que faz `source` ser
-   o pagador na `PAY_RECEIVER` — o que o feed assume) quanto a `source` ser o sujeito, que
-   inverteria todo `from`/`to` e apontaria `funding_many` para quem **recebeu** de muitos. Nem o
-   sinal (o `+` está na linha do recebedor sob as duas leituras) nem os nomes dos tipos (as duas
-   concordam que nomeiam o sujeito da linha) quebram o empate.
+   perfeito: sobrevive intacto tanto a `receiver` ser o sujeito da linha quanto a `source` ser.
+   Nem o sinal (o `+` está na linha do recebedor sob as duas leituras) nem os nomes dos tipos
+   quebram o empate.
 
    O erro de método: *"as colunas trocam"* é **consequência** da simetria e carrega informação
    zero sobre direção, e eu o tratei como a confirmação — reescrevendo para "CONFIRMADA" uma
-   ressalva que um moderador lê antes de agir sobre uma marca. Pego pelo review, não por mim, e
-   é a segunda vez neste ciclo que publico uma certeza que a evidência não sustenta.
+   ressalva que um moderador lê antes de agir sobre uma marca. Pego pelo review, não por mim.
 
-   **O que resolve, e custa um `SELECT` em vez de um comando no jogo:** uma linha de tipo
-   **unilateral** — `SET` (a série de chegadas do R1) ou `OFFSET` (o grant administrativo de
-   9.999.999). Elas têm uma parte real só, então a coluna que carrega o uuid do jogador ali é o
-   sujeito, e a direção sai por dedução sem simetria onde se esconder. O código **já aposta**
-   nessa leitura: `PlayerPointsDatabase.accountCreations` deliberadamente não seleciona o
-   `receiver` de uma linha `SET` *porque ali é o jogador*. Aposta não é medida — mas é a
-   corroboração que faltava citar.
-   Alternativa igualmente barata: o dono dizer qual dos dois uuids do par era o dele.
+   **✅ E a simetria foi quebrada no mesmo dia, com o `SELECT` que o review indicou.** As linhas
+   `SET` têm uma parte real só, logo não podem ser simétricas. Em produção:
+
+   ```
+   SET   source=NULL   receiver=4f451aec-e16b-40f4-bcc1-c4da86aca030               amount=0
+   SET   source=NULL   receiver=00000000-0000-0000-0009-01f25c4881fd               amount=0
+   ```
+
+   `source` é **nulo** e o uuid do jogador está em `receiver`. Portanto **`receiver` é o sujeito
+   da linha** — a conta a que o lançamento se aplica — e `source` é a contraparte, ausente quando
+   a ação não tem uma. Levando isso de volta ao par, ele fecha sem sobra: na `PAY_RECEIVER` o
+   sujeito é a conta creditada (`receiver`, `+35`) e `source` é o pagador. **`from`/`to` do feed
+   estão certos**, e `funding_many` conta quantas pessoas distintas **um pagador** pagou.
+
+   A aposta que o código já fazia era a certa — `PlayerPointsDatabase.accountCreations` não
+   seleciona o `receiver` de uma linha `SET` *porque ali é o jogador*. Era aposta; virou medida.
+
+   **O que não caiu junto:** a armadilha do swap. Ela é independente da direção e continua de pé
+   para qualquer consulta direta a `player_payments` — por isso o `directionCaveat` continua
+   viajando no payload mesmo com a direção fechada.
    **Um defeito real caiu junto:** o E3 fazia o join sem filtrar o tipo, então casava o mesmo
    jogador nas duas linhas e contava todo pagamento duas vezes. **A duplicação era inerte** —
    as contagens só são lidas como `> 0` para escolher o grupo, e dobrar preserva o zero —, então

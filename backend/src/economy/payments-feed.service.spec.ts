@@ -123,11 +123,15 @@ describe('PaymentsFeedService', () => {
       expect(report.disclaimer).toContain('site publico');
     });
 
-    it('carries what the direction check found, including the column swap', async () => {
-      // `from`/`to` and `funding_many` all rest on the reading that `receiver`
-      // is the credited account — natural, and never confirmed against a known
-      // payment. Every other caveat in this module travels in the payload; this
-      // one lived only in a source comment while the feed printed it as fact.
+    it('carries both measurements: the column swap and the direction', async () => {
+      // Two reads, both on 2026-09-02. The pair of rows settled the LAYOUT (the
+      // columns swap between the two halves of one payment) and could not settle
+      // the DIRECTION, because a mirror survives either reading. A `SET` row —
+      // one real party, so not symmetric — settled that: `source` comes back
+      // null with the player in `receiver`, making `receiver` the subject.
+      //
+      // The swap still travels in the payload after the direction is known,
+      // because the trap it sets for a direct query did not go away.
       const report = await service([payment()]).feed();
 
       // Two separate facts, and the payload has to carry both. MEASURED: the two
@@ -135,17 +139,20 @@ describe('PaymentsFeedService', () => {
       // names mean nothing until the row type is pinned. STILL INFERRED: which
       // of the two columns is the payer — the observed pair is a mirror and
       // survives either reading intact.
-      expect(report.directionCaveat).toContain('MEDIDO');
       expect(report.directionCaveat).toContain('TROCAM');
-      expect(report.directionCaveat).toContain('CONTINUA INFERIDA');
+      expect(report.directionCaveat).toContain('PRE-REQUISITO');
+      expect(report.directionCaveat).toContain('`source = NULL`');
       expect(report.directionCaveat).toContain('funding_many');
+      // The reading is no longer hedged, and the hedge must not survive by
+      // accident in a string a moderator acts on.
+      expect(report.directionCaveat).not.toContain('INFERIDA');
     });
 
     it('carries the direction note even when there is nothing to show', async () => {
       const report = await service([], { last: null }).feed();
 
       expect(report.payments).toBeNull();
-      expect(report.directionCaveat).toContain('CONTINUA INFERIDA');
+      expect(report.directionCaveat).toContain('`source = NULL`');
     });
   });
 

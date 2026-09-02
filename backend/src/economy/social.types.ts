@@ -173,8 +173,8 @@ export interface PaymentsFeedReport {
   /** The rule that governs how this feed may be used. */
   disclaimer: string;
   /**
-   * What the column layout is measured to be, and why `from`, `to` and
-   * `funding_many` still rest on an unconfirmed reading of it.
+   * The measured column layout, and the trap it leaves for anyone querying the
+   * table directly. `from`, `to` and `funding_many` no longer rest on a guess.
    */
   directionCaveat: string;
   sources: EconomySourceState[];
@@ -217,58 +217,65 @@ export interface PaymentsFeedReport {
 export const CANONICAL_PAYMENT_TYPE = 'PAY_RECEIVER';
 
 /**
- * The one caveat a mark can be wrong *about*, rather than merely imprecise.
+ * What the direction is, and how the symmetry was broken.
  *
- * ## What the 2026-09-02 read established, and what it did not
+ * ## The pair alone could not settle it
  *
- * It established that the two rows of one payment **swap** `source` and
- * `receiver` and negate the amount. That is real and it is why
- * {@link CANONICAL_PAYMENT_TYPE} exists.
+ * Read on 2026-09-02, the two rows of one payment **swap** `source` and
+ * `receiver` and negate the amount. That is why {@link CANONICAL_PAYMENT_TYPE}
+ * exists — but it is a perfect mirror, so two opposite readings survived it
+ * intact: `receiver` as the row's **subject** (making `source` the payer on a
+ * `PAY_RECEIVER` row) or `source` as the subject, which inverts every
+ * `from`/`to`. Neither the sign, nor the type names, nor the timestamps break
+ * the tie. "The columns swap" is a *consequence* of the symmetry, not evidence
+ * against it, and an earlier version of this comment mistook one for the other.
  *
- * It did **not** establish the direction, and the first version of this comment
- * claimed it had. The observed pair is a perfect mirror, so two readings survive
- * it intact:
+ * ## A unilateral row broke it
  *
- * - `receiver` is the **subject** of the row and `source` the counterparty — on
- *   a `PAY_RECEIVER` row that makes `source` the payer, which is what this
- *   module assumes;
- * - `source` is the subject and `receiver` the counterparty — which inverts
- *   every `from`/`to` and points `funding_many` at the account that *received*
- *   from many.
+ * `SET` rows have only one real party, so they cannot be symmetric — and read
+ * against production on 2026-09-02 they come back like this:
  *
- * Nothing in the pair breaks the tie. Not the sign (the `+` sits on the
- * receiver's row under both), not the type names (both readings agree those name
- * the row's subject), not the timestamps. "The columns swap" is a consequence of
- * the symmetry, not evidence against it.
+ * ```
+ * SET   source=NULL   receiver=4f451aec-…   amount=0
+ * SET   source=NULL   receiver=00000000-0000-0000-0009-…   amount=0
+ * ```
  *
- * ## What would settle it, and it is a `SELECT`
+ * `source` is **null** and the player's uuid is in `receiver`. So `receiver` is
+ * the account the entry applies to — the subject — and `source` is the
+ * counterparty, absent when the action has none.
  *
- * A row type with only **one** real party — `SET` (the arrivals series) or
- * `OFFSET` (the administrative grant). Whichever column carries the real player
- * uuid there is the subject, and the direction follows by deduction with no
- * symmetry left to hide in. Worth noting that this codebase already bets on the
- * first reading: `PlayerPointsDatabase.accountCreations` declines to select
- * `receiver` from a `SET` row *because that is the player*. A bet is not a
- * measurement, which is exactly why this caveat still travels.
+ * Carry that back to the pair and it resolves with nothing left over: on a
+ * `PAY_RECEIVER` row the subject is the credited account (`receiver`, `+35`) and
+ * `source` is the payer; on the `PAY_SENDER` row the subject is the debited
+ * account (`receiver`, `-35`) and `source` is the recipient. `from`/`to` and
+ * `funding_many` are right, and `funding_many` counts how many distinct people
+ * **one payer** paid, which was the intended meaning.
+ *
+ * The bet this codebase had already made turned out to be the right one:
+ * `PlayerPointsDatabase.accountCreations` declines to select `receiver` from a
+ * `SET` row *because that is the player*. It was an assumption then; it is the
+ * measurement now.
+ *
+ * ## Why this still travels in the payload
+ *
+ * Because the swap does. A moderator or a future query that reads `source` and
+ * `receiver` without pinning `transaction_type` gets two opposite meanings mixed
+ * into one result, and that trap did not go away when the direction was settled.
  */
 
 export const PAYMENT_DIRECTION_CAVEAT =
-  'MEDIDO em 2026-09-02: o PlayerPoints grava DUAS linhas por transferencia e ' +
-  'elas TROCAM `source` e `receiver` entre si, com o amount negado. Logo nenhuma ' +
-  'leitura dessas colunas vale para as duas linhas, e filtrar por ' +
-  '`transaction_type` e pre-requisito para elas significarem qualquer coisa — ' +
-  'quem consultar `player_payments` direto sem filtrar mistura duas leituras ' +
-  'opostas no mesmo resultado. ' +
-  'A DIRECAO, essa, CONTINUA INFERIDA: o par observado e um espelho perfeito, ' +
-  'entao ele e compativel tanto com `receiver` sendo o SUJEITO da linha (o que ' +
-  'faz `source` ser o pagador na `PAY_RECEIVER`, que e o que este feed assume) ' +
-  'quanto com `source` sendo o sujeito, que inverteria tudo. Se estiver ' +
-  'invertida, `from`/`to` estao trocados e `funding_many` aponta para quem ' +
-  'RECEBEU de muitos, nao para quem financiou. O contador de PAY_SENDER x ' +
-  'PAY_RECEIVER do ETL detecta pareamento quebrado, nao direcao invertida. ' +
-  'O que resolve e uma linha de tipo UNILATERAL (`SET` ou `OFFSET`): a coluna ' +
-  'que carrega o uuid do jogador real ali e o sujeito, e a direcao sai por ' +
-  'deducao. Custa um SELECT.';
+  'MEDIDO em 2026-09-02, em duas leituras. Primeira: o PlayerPoints grava DUAS ' +
+  'linhas por transferencia e elas TROCAM `source` e `receiver` entre si, com o ' +
+  'amount negado — logo nenhuma leitura dessas colunas vale para as duas linhas, ' +
+  'e filtrar por `transaction_type` e PRE-REQUISITO para elas significarem ' +
+  'qualquer coisa. Quem consultar `player_payments` direto sem filtrar mistura ' +
+  'duas leituras opostas no mesmo resultado, e essa armadilha continua de pe. ' +
+  'Segunda: as linhas `SET`, que tem uma parte real so, voltam com ' +
+  '`source = NULL` e o uuid do jogador em `receiver`. Isso quebra a simetria do ' +
+  'par — `receiver` e o SUJEITO da linha, `source` e a contraparte. Portanto na ' +
+  '`PAY_RECEIVER` o `source` e quem pagou e o `receiver` e quem foi creditado: ' +
+  '`from`/`to` deste feed estao na direcao certa, e `funding_many` conta quantas ' +
+  'pessoas distintas UM PAGADOR pagou, que era o significado pretendido.';
 
 export const FEED_DISCLAIMER =
   'Marcacao e SINALIZACAO, nunca acusacao automatica: cada marca diz o que foi ' +

@@ -372,11 +372,12 @@ describe('Economy social (e2e)', () => {
         amount: 42,
         flags: [],
       });
-      // Both halves travel with the data: the column swap is measured, the
-      // direction is still inferred, and a moderator needs to know which is
-      // which before acting on a `funding_many`.
-      expect(body.directionCaveat).toContain('MEDIDO');
-      expect(body.directionCaveat).toContain('CONTINUA INFERIDA');
+      // Both measurements travel with the data: the column swap (which is a trap
+      // for any direct query, and outlives the direction being settled) and the
+      // `SET` row that settled the direction itself.
+      expect(body.directionCaveat).toContain('TROCAM');
+      expect(body.directionCaveat).toContain('`source = NULL`');
+      expect(body.directionCaveat).not.toContain('INFERIDA');
     });
 
     it('publishes the arrivals series with its caveat', async () => {

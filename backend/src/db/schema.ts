@@ -591,22 +591,24 @@ export const playerDimensionSyncs = pgTable(
  * would silently delete a payment; inventing a surrogate key per run would
  * duplicate every row every night.
  *
- * ## The columns swap between the two rows — measured. The direction — not.
+ * ## The columns swap between the two rows, and `receiver` is the subject
  *
- * Read against a real payment on 2026-09-02: one transfer produces two rows that
- * **trade** `source` and `receiver` and negate the amount. So no reading of
- * those two columns is true for both rows, and `transaction_type` has to be
- * pinned before either column means anything.
+ * Both measured on 2026-09-02, in two reads.
  *
- * That pair is a perfect mirror, which is why it settles the layout and **not**
- * the direction: it is equally consistent with `receiver` being the row's
- * subject (the reading this system assumes) and with `source` being it, which
- * would invert every `from`/`to`. A row type with a single real party (`SET`,
- * `OFFSET`) is what breaks the symmetry, and has not been read yet.
+ * One transfer produces two rows that **trade** `source` and `receiver` and
+ * negate the amount, so no reading of those two columns is true for both rows:
+ * `transaction_type` has to be pinned before either column means anything.
  *
- * Both types are copied verbatim, so a correction later costs a query and not a
- * re-ETL, and the sync record counts each type separately: if the two counts
- * ever diverge, the pairing assumption is wrong and the number says so.
+ * That pair is a perfect mirror and therefore could not settle *which* column is
+ * the payer. What did: a `SET` row, which has only one real party and so cannot
+ * be symmetric. It comes back `source = NULL` with the player's uuid in
+ * `receiver` — making `receiver` the account the entry applies to and `source`
+ * the counterparty, absent when there is none. On a `PAY_RECEIVER` row that puts
+ * the payer in `source` and the credited account in `receiver`.
+ *
+ * Both types are still copied verbatim, so a correction later costs a query and
+ * not a re-ETL, and the sync record counts each type separately: if the two
+ * counts ever diverge, the pairing assumption is wrong and the number says so.
  */
 export const playerPayments = pgTable(
   'player_payments',
@@ -622,11 +624,13 @@ export const playerPayments = pgTable(
      */
     transactionType: text('transaction_type').notNull(),
     /**
-     * One of the two parties. **Which one flips with `transaction_type`**, and
-     * which way round is the still-unconfirmed direction — see the docblock.
+     * The counterparty. **Which role that is flips with `transaction_type`**: the
+     * payer on a `PAY_RECEIVER` row, the recipient on a `PAY_SENDER` one. Null in
+     * the source for actions with no counterparty (`SET`), which is what
+     * identified it as the counterparty in the first place.
      */
     source: text('source').notNull(),
-    /** The other party. Same flip, same open question. */
+    /** The account the entry applies to — the subject. Same flip, mirrored. */
     receiver: text('receiver').notNull(),
     /**
      * Signed amount, in the game's cash unit. Integer in the source.
