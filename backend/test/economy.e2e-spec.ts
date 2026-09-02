@@ -10,6 +10,8 @@ import {
   playerDimensionSyncs,
   players,
   sales,
+  tutorialPlayerPosition,
+  tutorialSyncs,
 } from '../src/db/schema';
 import { createAuthenticatedApp } from './e2e-utils';
 
@@ -59,7 +61,7 @@ describe('Economy (e2e)', () => {
     // owns before seeding, so the order jest happens to run them in never
     // decides whether a suite passes. `maxWorkers: 1` makes that safe.
     await db.execute(
-      sql`TRUNCATE sales, items, players, categories, player_dimension, player_dimension_syncs RESTART IDENTITY CASCADE`,
+      sql`TRUNCATE sales, items, players, categories, player_dimension, player_dimension_syncs, tutorial_player_position, tutorial_syncs RESTART IDENTITY CASCADE`,
     );
 
     const [category] = await db
@@ -427,11 +429,144 @@ describe('Economy (e2e)', () => {
       });
     });
 
+    it('says the funnel-position half cannot be measured before the ETL wrote it', async () => {
+      // Every environment starts here, and it must read as "cannot measure"
+      // rather than as a list of zeroes — the confusion the epic exists for.
+      const response = await request(app.getHttpServer())
+        .get('/economy/first-spend?from=2026-01&to=2026-02')
+        .set('Cookie', authCookie)
+        .expect(200);
+
+      const body = response.body as {
+        byFunnelPosition: unknown;
+        byFurthestStep: unknown;
+        funnelPositionUnavailableReason: string;
+      };
+
+      expect(body.byFunnelPosition).toBeNull();
+      expect(body.byFurthestStep).toBeNull();
+      expect(body.funnelPositionUnavailableReason).toContain(
+        'TUTORIAL_POSITION_ENABLED',
+      );
+    });
+
     it('rejects a day where a cohort month is expected', async () => {
       await request(app.getHttpServer())
         .get('/economy/first-spend?from=2026-01-15')
         .set('Cookie', authCookie)
         .expect(400);
+    });
+  });
+
+  describe('with the tutorial position written', () => {
+    beforeAll(async () => {
+      await db.insert(tutorialPlayerPosition).values([
+        // Completed the tutorial, and bought.
+        position(PREMIUM, '33tutorial', 32, true),
+        // Stopped at step 3, and bought.
+        position(PREMIUM_2, '03tutorial', 2, false),
+        // Stopped at step 3, never bought. The base of that step is BOTH.
+        position(SILENT, '03tutorial', 2, false),
+      ]);
+
+      await db.insert(tutorialSyncs).values({
+        status: 'ok',
+        filesScanned: 3,
+        filesFailed: 0,
+        playersInTutorial: 3,
+        daysWritten: 1,
+        questsInCatalogue: 33,
+        finalQuestId: '33tutorial',
+        stepOrder: '01tutorial,02tutorial,03tutorial,33tutorial',
+        positionsWritten: 3,
+      });
+    });
+
+    function position(
+      uuid: string,
+      furthestQuestId: string,
+      furthestIndex: number,
+      completedTutorial: boolean,
+    ) {
+      return {
+        playerUuid: uuid,
+        platform: uuid.startsWith('00000000-0000-0000-0009-')
+          ? 'bedrock'
+          : 'java_premium',
+        questsTouched: furthestIndex + 1,
+        questsCompleted: completedTutorial ? furthestIndex + 1 : furthestIndex,
+        furthestQuestId,
+        furthestIndex,
+        completedTutorial,
+        enteredOn: '2026-01-15',
+      };
+    }
+
+    it('answers the question the spec asks, with the base being the position', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/economy/first-spend?from=2026-01&to=2026-02')
+        .set('Cookie', authCookie)
+        .expect(200);
+
+      const body = response.body as {
+        byFunnelPosition: {
+          position: string;
+          players: number;
+          spenders: number;
+          everSpent: { percent: number | null; n: number | null };
+          revenue: string;
+        }[];
+        byFurthestStep: {
+          step: string;
+          players: number;
+          spenders: number;
+          revenue: string;
+        }[];
+        stepOrder: string[];
+      };
+
+      const byPosition = new Map(
+        body.byFunnelPosition.map((p) => [p.position, p]),
+      );
+
+      // PREMIUM completed and bought 60.00 + 7.00 (the late-night sale is
+      // PREMIUM_2's, so it does not land here).
+      expect(byPosition.get('concluiu')).toMatchObject({
+        players: 1,
+        spenders: 1,
+        everSpent: { percent: 100, n: 1 },
+        revenue: '60.00',
+      });
+
+      // Two players stopped at step 3 and one of them bought. The denominator
+      // is both — joining from the buyers would make it 100% by construction.
+      expect(byPosition.get('entrou_nao_concluiu')).toMatchObject({
+        players: 2,
+        spenders: 1,
+        everSpent: { percent: 50, n: 2 },
+      });
+
+      // BEDROCK is in `player_dimension` and not in the position table, so it
+      // has a real base of its own rather than being the silence between the
+      // other two groups.
+      expect(byPosition.get('nao_entrou')).toMatchObject({
+        players: 1,
+        spenders: 1,
+        revenue: '20.00',
+      });
+
+      // The half no grouping can answer: "quem trava no passo 03 gasta alguma
+      // coisa?"
+      const step03 = body.byFurthestStep.find((s) => s.step === '03tutorial');
+      expect(step03).toMatchObject({ players: 2, spenders: 1 });
+
+      // The inferred step order travels, so it can be checked against the game.
+      expect(body.stepOrder).toEqual([
+        '01tutorial',
+        '02tutorial',
+        '03tutorial',
+        '33tutorial',
+      ]);
     });
   });
 });

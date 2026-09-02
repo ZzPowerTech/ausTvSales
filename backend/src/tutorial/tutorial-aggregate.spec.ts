@@ -13,7 +13,13 @@ function catalogueOf(
   finalQuestId = '33tutorial',
 ): TutorialCatalogue {
   const set = new Set(ids);
-  return { ids, has: (id) => set.has(id), finalQuestId };
+  const order = new Map(ids.map((id, index) => [id, index]));
+  return {
+    ids,
+    has: (id) => set.has(id),
+    orderOf: (id) => order.get(id) ?? null,
+    finalQuestId,
+  };
 }
 
 const CATALOGUE = catalogueOf([

@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { and, sql, type SQL } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDB } from '../db/database.module';
-import { playerDimension, sales } from '../db/schema';
+import { playerDimension, sales, tutorialPlayerPosition } from '../db/schema';
 import { platformOf, type Platform } from '../instrumentation/platform';
 import {
   formatCents,
@@ -11,13 +11,18 @@ import {
   toDate,
 } from './economy-math';
 import { PlayerDimensionStore } from './player-dimension.store';
+import { TutorialStore } from '../tutorial/tutorial.store';
 import {
   FUNNEL_POSITION_UNAVAILABLE,
+  FUNNEL_POSITIONS,
   type CohortFirstSpend,
   type CohortRevenue,
   type EconomyRevenueReport,
   type EconomySourceState,
   type FirstSpendReport,
+  type FunnelPosition,
+  type FunnelPositionSpend,
+  type FurthestStepSpend,
   type PlatformRevenue,
   type Share,
 } from './economy.types';
@@ -47,6 +52,16 @@ type FirstSpendRow = {
 };
 
 type ExcludedRow = {
+  sales: number;
+  revenue_cents: string;
+};
+
+/** One player, their tutorial position and their spend. */
+type PositionRow = {
+  entered: boolean;
+  completed_tutorial: boolean;
+  furthest_quest_id: string | null;
+  furthest_index: number | null;
   sales: number;
   revenue_cents: string;
 };
@@ -96,6 +111,7 @@ export class EconomyService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDB,
     private readonly dimension: PlayerDimensionStore,
+    private readonly tutorial: TutorialStore,
   ) {}
 
   /** E1 — revenue by platform and by registration cohort. */
@@ -230,7 +246,10 @@ export class EconomyService {
     fromMonth: string,
     toMonth: string,
   ): Promise<FirstSpendReport> {
-    const dimensionState = await this.dimensionState();
+    const [dimensionState, position] = await Promise.all([
+      this.dimensionState(),
+      this.funnelPosition(),
+    ]);
 
     if (!dimensionState.ok) {
       return {
@@ -238,8 +257,7 @@ export class EconomyService {
         to: toMonth,
         byCohort: null,
         unavailableReason: dimensionReason(dimensionState),
-        byFunnelPosition: null,
-        funnelPositionUnavailableReason: FUNNEL_POSITION_UNAVAILABLE,
+        ...position,
         sources: [{ name: 'sales', ok: true, asOf: null }, dimensionState],
       };
     }
@@ -331,10 +349,202 @@ export class EconomyService {
       from: fromMonth,
       to: toMonth,
       byCohort,
-      byFunnelPosition: null,
-      funnelPositionUnavailableReason: FUNNEL_POSITION_UNAVAILABLE,
+      ...position,
       sources: [{ name: 'sales', ok: true, asOf: null }, dimensionState],
     };
+  }
+
+  /**
+   * The second half of E2 — spend by tutorial position (story S9.3).
+   *
+   * ## Why this reads the whole picture and not just the buyers
+   *
+   * The question is *"quem conclui o tutorial gasta mais?"*, and the denominator
+   * has to be **everyone in that position**, not everyone in that position who
+   * bought. A join the other way round makes every group spend 100% by
+   * construction — the same defect the cohort half of this endpoint was written
+   * to avoid.
+   *
+   * So the query starts from `tutorial_player_position` and LEFT JOINs `sales`.
+   * Players with no tutorial progress at all are absent from that table, and are
+   * counted separately from `player_dimension` so the `nao_entrou` group has a
+   * real base instead of being the silence between the other two.
+   *
+   * ## `null` and not an empty list
+   *
+   * When the position table has never been filled, every group would come back
+   * with zeros — which reads as "nobody in any position ever spent". The whole
+   * block goes `null` with the reason instead.
+   */
+  private async funnelPosition(): Promise<
+    Pick<
+      FirstSpendReport,
+      | 'byFunnelPosition'
+      | 'funnelPositionUnavailableReason'
+      | 'byFurthestStep'
+      | 'stepOrder'
+    >
+  > {
+    let lastSync;
+    try {
+      lastSync = await this.tutorial.lastSuccessfulSync();
+    } catch (error) {
+      this.logger.warn(
+        `Procedencia do tutorial ilegivel: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      lastSync = null;
+    }
+
+    const stepOrder =
+      lastSync?.stepOrder != null && lastSync.stepOrder !== ''
+        ? lastSync.stepOrder.split(',')
+        : null;
+
+    // `positionsWritten` null means the switch was off on the last good run, so
+    // the table is either empty or stale from an older configuration. Either way
+    // it cannot be read as a measurement.
+    if (lastSync === null || lastSync.positionsWritten === null) {
+      return {
+        byFunnelPosition: null,
+        funnelPositionUnavailableReason: FUNNEL_POSITION_UNAVAILABLE,
+        byFurthestStep: null,
+        stepOrder,
+      };
+    }
+
+    const rows = await this.positionRows();
+
+    const byPosition = new Map<
+      FunnelPosition,
+      { players: number; spenders: number; cents: bigint; steps: number[] }
+    >();
+    for (const group of FUNNEL_POSITIONS) {
+      byPosition.set(group, {
+        players: 0,
+        spenders: 0,
+        cents: 0n,
+        steps: [],
+      });
+    }
+
+    const bySteps = new Map<
+      string,
+      { index: number; players: number; spenders: number; cents: bigint }
+    >();
+
+    for (const row of rows) {
+      const group: FunnelPosition =
+        row.entered === false
+          ? 'nao_entrou'
+          : row.completed_tutorial
+            ? 'concluiu'
+            : 'entrou_nao_concluiu';
+
+      const bucket = byPosition.get(group);
+      if (bucket === undefined) {
+        continue;
+      }
+      const cents = toCents(row.revenue_cents);
+      bucket.players += 1;
+      bucket.cents += cents;
+      if (row.sales > 0) {
+        bucket.spenders += 1;
+      }
+      if (row.furthest_index !== null) {
+        bucket.steps.push(row.furthest_index);
+      }
+
+      if (row.furthest_quest_id !== null && row.furthest_index !== null) {
+        const step = bySteps.get(row.furthest_quest_id) ?? {
+          index: row.furthest_index,
+          players: 0,
+          spenders: 0,
+          cents: 0n,
+        };
+        step.players += 1;
+        step.cents += cents;
+        if (row.sales > 0) {
+          step.spenders += 1;
+        }
+        bySteps.set(row.furthest_quest_id, step);
+      }
+    }
+
+    const byFunnelPosition: FunnelPositionSpend[] = FUNNEL_POSITIONS.map(
+      (group) => {
+        const bucket = byPosition.get(group) ?? {
+          players: 0,
+          spenders: 0,
+          cents: 0n,
+          steps: [],
+        };
+        return {
+          position: group,
+          players: bucket.players,
+          spenders: bucket.spenders,
+          everSpent: this.countShare(bucket.spenders, bucket.players),
+          revenue: formatCents(bucket.cents),
+          medianFurthestStep: percentile(bucket.steps, 0.5),
+        };
+      },
+    );
+
+    const byFurthestStep: FurthestStepSpend[] = [...bySteps.entries()]
+      .map(([step, bucket]) => ({
+        step,
+        index: bucket.index,
+        players: bucket.players,
+        spenders: bucket.spenders,
+        everSpent: this.countShare(bucket.spenders, bucket.players),
+        revenue: formatCents(bucket.cents),
+      }))
+      .sort((a, b) => a.index - b.index);
+
+    return { byFunnelPosition, byFurthestStep, stepOrder };
+  }
+
+  /**
+   * Every known player, their tutorial position and what they spent.
+   *
+   * A `FULL JOIN` in spirit: the population is `player_dimension` (everyone the
+   * Plan knows) unioned with `tutorial_player_position` (everyone the Quests
+   * files know). Neither alone is the right denominator — the first misses a
+   * player the Plan never registered, and the second misses everyone who never
+   * touched the tutorial, which is precisely the `nao_entrou` group.
+   */
+  private async positionRows(): Promise<PositionRow[]> {
+    const result = await this.db.execute<PositionRow>(sql`
+      WITH population AS (
+        SELECT ${playerDimension.uuid}::text AS uuid FROM ${playerDimension}
+        UNION
+        SELECT ${tutorialPlayerPosition.playerUuid}::text AS uuid
+          FROM ${tutorialPlayerPosition}
+      )
+      SELECT
+        (${tutorialPlayerPosition.playerUuid} IS NOT NULL) AS entered,
+        coalesce(${tutorialPlayerPosition.completedTutorial}, false)
+          AS completed_tutorial,
+        ${tutorialPlayerPosition.furthestQuestId} AS furthest_quest_id,
+        ${tutorialPlayerPosition.furthestIndex} AS furthest_index,
+        count(${sales.id})::int AS sales,
+        coalesce((sum(${sales.totalPrice}) * 100)::bigint, 0)::text
+          AS revenue_cents
+      FROM population
+      LEFT JOIN ${tutorialPlayerPosition}
+        ON ${tutorialPlayerPosition.playerUuid}::text = population.uuid
+      LEFT JOIN ${sales}
+        ON ${sales.playerUuid}::text = population.uuid
+        AND ${sales.historicalImport} = false
+      GROUP BY population.uuid,
+               ${tutorialPlayerPosition.playerUuid},
+               ${tutorialPlayerPosition.completedTutorial},
+               ${tutorialPlayerPosition.furthestQuestId},
+               ${tutorialPlayerPosition.furthestIndex}
+    `);
+
+    return result.rows;
   }
 
   /**

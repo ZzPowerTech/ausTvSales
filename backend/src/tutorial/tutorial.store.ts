@@ -1,7 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, gte, lte, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDB } from '../db/database.module';
-import { tutorialDaily, tutorialSyncs } from '../db/schema';
+import {
+  tutorialDaily,
+  tutorialPlayerPosition,
+  tutorialSyncs,
+} from '../db/schema';
+import type { TutorialPosition } from './tutorial-position';
 import type { TutorialDayRow } from './tutorial-aggregate';
 
 /**
@@ -35,6 +40,16 @@ export interface TutorialSyncRecord {
   daysWritten: number | null;
   questsInCatalogue: number | null;
   finalQuestId: string | null;
+  /** Resolved step order, comma-separated. Null on runs before story S9.3. */
+  stepOrder: string | null;
+  /**
+   * Rows written to `tutorial_player_position`.
+   *
+   * **Null means the switch was off**, which is not the same as zero. The
+   * economy read consults exactly this: a null says the table cannot be read as
+   * a measurement, while a zero would say the scan genuinely found nobody.
+   */
+  positionsWritten: number | null;
   detail: string | null;
 }
 
@@ -49,6 +64,17 @@ export interface FailedSync {
   finalQuestId?: string;
 }
 
+/** One player's stored tutorial position, as read back. */
+export interface StoredPosition {
+  playerUuid: string;
+  platform: string;
+  questsTouched: number;
+  questsCompleted: number;
+  furthestQuestId: string | null;
+  furthestIndex: number | null;
+  completedTutorial: boolean;
+}
+
 /** What a successful run records, alongside the rows. */
 export interface SuccessfulSync {
   filesScanned: number;
@@ -57,6 +83,15 @@ export interface SuccessfulSync {
   daysWritten: number;
   questsInCatalogue: number;
   finalQuestId: string;
+  /**
+   * The resolved step order, comma-separated.
+   *
+   * Recorded because `furthest_index` is a position in it and that order is
+   * inferred from quest file names, not read from the quests themselves.
+   */
+  stepOrder?: string;
+  /** Rows written to the position table, or null when the switch is off. */
+  positionsWritten?: number | null;
 }
 
 /**
@@ -219,4 +254,67 @@ export class TutorialStore {
     // missing row would be NaN, so the coalesce above is load-bearing.
     return Number(row?.total ?? 0);
   }
+
+  /**
+   * Replace the per-player tutorial positions.
+   *
+   * ## Replaced, and inside one transaction
+   *
+   * Replaced because the source is current state, exactly like `tutorial_daily`:
+   * a player who reset the tutorial has moved backwards, and an accumulating
+   * table would keep claiming they got further than they did.
+   *
+   * In one transaction because the delete comes first, and a failure between the
+   * two halves would leave the table empty — which the economy read would then
+   * publish as "nobody entered the tutorial", the shape this whole epic exists
+   * to make impossible.
+   *
+   * @returns rows written.
+   */
+  async replacePositions(
+    positions: readonly TutorialPosition[],
+  ): Promise<number> {
+    await this.db.transaction(async (tx) => {
+      await tx.delete(tutorialPlayerPosition);
+      for (let i = 0; i < positions.length; i += POSITION_CHUNK_SIZE) {
+        const chunk = positions.slice(i, i + POSITION_CHUNK_SIZE);
+        if (chunk.length === 0) {
+          continue;
+        }
+        await tx.insert(tutorialPlayerPosition).values(
+          chunk.map((position) => ({
+            playerUuid: position.uuid,
+            platform: position.platform,
+            questsTouched: position.questsTouched,
+            questsCompleted: position.questsCompleted,
+            furthestQuestId: position.furthestQuestId,
+            furthestIndex: position.furthestIndex,
+            completedTutorial: position.completedTutorial,
+            enteredOn: position.enteredOn,
+            syncedAt: new Date(),
+          })),
+        );
+      }
+    });
+
+    return positions.length;
+  }
+
+  /** How many players currently have a stored position. */
+  async positionCount(): Promise<number> {
+    const result = await this.db.execute<{ total: number }>(
+      sql`SELECT count(*)::int AS total FROM ${tutorialPlayerPosition}`,
+    );
+    return result.rows[0]?.total ?? 0;
+  }
 }
+
+/**
+ * Rows per insert statement.
+ *
+ * ~11.000 players in the 2026-08-19 baseline, and a single statement with that
+ * many parameter groups would hit the driver's bind-parameter ceiling long
+ * before anything else — surfacing as an opaque protocol error rather than as
+ * "too big".
+ */
+const POSITION_CHUNK_SIZE = 500;

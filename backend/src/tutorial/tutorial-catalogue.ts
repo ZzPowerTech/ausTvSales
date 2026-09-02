@@ -26,10 +26,34 @@ import { basename, extname } from 'node:path';
 
 /** A tutorial catalogue that was successfully read from disk. */
 export interface TutorialCatalogue {
-  /** Every tutorial quest id, in the order the directory listed them. */
+  /**
+   * Every tutorial quest id, in **step order**.
+   *
+   * ⚠️ Until story S9.3 this was "the order the directory listed them", which is
+   * whatever `readdir` returned — filesystem order, not step order. That was
+   * harmless while only {@link TutorialCatalogue.has} was used, and stops being
+   * harmless the moment anything asks *how far* a player got.
+   *
+   * The order is now a **natural sort**: `01tutorial` before `02tutorial` before
+   * `10tutorial`, with the numeric prefix compared as a number so an unpadded
+   * `2tutorial` cannot sort after `10tutorial`.
+   *
+   * ## This is an inference, and it is labelled as one
+   *
+   * The tutorial's real order lives in the quest files' own requirements, which
+   * this module does not parse. What it uses is the **naming convention** —
+   * `01tutorial` … `33tutorial` in the 2026-08-19 baseline — which is strong,
+   * documented, and still a convention. The resolved order is stored with every
+   * sync run so a human can check it against the game rather than trust it.
+   */
   readonly ids: readonly string[];
   /** Whether a quest id from a playerdata file is a tutorial step. */
   has(questId: string): boolean;
+  /**
+   * Zero-based position of a quest in {@link TutorialCatalogue.ids}, or `null`
+   * when it is not a tutorial quest.
+   */
+  orderOf(questId: string): number | null;
   /**
    * The id that marks the tutorial as finished.
    *
@@ -70,7 +94,11 @@ export async function loadTutorialCatalogue(
 
   const ids = entries
     .filter((entry) => extname(entry).toLowerCase() === QUEST_FILE_EXTENSION)
-    .map((entry) => basename(entry, extname(entry)));
+    .map((entry) => basename(entry, extname(entry)))
+    // Sorted, and not left in `readdir` order. See `TutorialCatalogue.ids`:
+    // filesystem order is not step order, and anything that asks how far a
+    // player got needs the second.
+    .sort(byStepOrder);
 
   if (ids.length === 0) {
     throw new Error(
@@ -91,9 +119,44 @@ export async function loadTutorialCatalogue(
     );
   }
 
+  // Built once: `indexOf` on every quest of every one of ~20.000 files would be
+  // quadratic in the catalogue size for no reason.
+  const order = new Map(ids.map((id, index) => [id, index]));
+
   return {
     ids,
     has: (questId: string) => idSet.has(questId),
+    orderOf: (questId: string) => order.get(questId) ?? null,
     finalQuestId,
   };
+}
+
+/**
+ * Natural order of two tutorial quest ids.
+ *
+ * Compares the leading run of digits as a **number**, so `2tutorial` sorts
+ * before `10tutorial` — which a plain string sort gets backwards. Ids without a
+ * numeric prefix fall back to a locale-independent string comparison and sort
+ * after the numbered ones, because a branch like `10tutorial-2` is a step of the
+ * tutorial and a hypothetical `bonus` is not obviously anywhere.
+ */
+export function byStepOrder(left: string, right: string): number {
+  const a = leadingNumber(left);
+  const b = leadingNumber(right);
+
+  if (a !== null && b !== null && a !== b) {
+    return a - b;
+  }
+  if (a !== null && b === null) {
+    return -1;
+  }
+  if (a === null && b !== null) {
+    return 1;
+  }
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function leadingNumber(id: string): number | null {
+  const match = /^\d+/.exec(id);
+  return match === null ? null : Number(match[0]);
 }

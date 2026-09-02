@@ -741,6 +741,26 @@ priorizar Bedrock deveria ser tomada antes desse número.**
 gasta mais? Quem trava no passo 03 gasta alguma coisa? Responde se o tutorial tem retorno
 financeiro ou só custo.
 
+> **Entregue em duas etapas, e a segunda exigiu uma decisão de dado pessoal.** A primeira
+> metade (tempo até o primeiro gasto) saiu na S9.1. A segunda ficou `null` com o motivo, porque
+> "posição no funil" precisa da posição no tutorial **de um jogador individual**, e o
+> `tutorial_daily` é agregado em `(dia, plataforma)` justamente para não trazer identidade de
+> jogador para este banco.
+>
+> **O dono autorizou o alargamento em 2026-09-02**, e ele é o mínimo que responde a pergunta:
+> uma tabela `tutorial_player_position` com uuid, plataforma, quantas quests tocou e concluiu, a
+> mais avançada alcançada e o dia de entrada. Sem nick, sem IP, sem sessão — dentro do
+> *"nenhum dado pessoal além de UUID e valor"* desta seção.
+>
+> Ela tem **switch próprio** (`TUTORIAL_POSITION_ENABLED`), separado do ETL do tutorial: a
+> decisão de footprint merece um interruptor próprio, e um deploy não pode começar a gravar
+> linha de jogador porque a versão mudou.
+>
+> **A ordem dos passos é inferida do nome dos arquivos** (`01tutorial` … `33tutorial`), não lida
+> dos requisitos das quests. A convenção é forte e documentada, e continua sendo convenção — por
+> isso a ordem resolvida é gravada em `tutorial_syncs.step_order` a cada execução e sai no
+> payload, onde dá para conferir contra o jogo em vez de confiar.
+
 **E3 — Contato social nos primeiros minutos.** Pagamento entre jogadores é registro de **contato
 social real** — um dos preditores mais fortes de retenção em jogo multiplayer. Métrica: fração de
 novatos que envia ou recebe pagamento nos primeiros N minutos, e o D7 desse grupo contra o resto.
