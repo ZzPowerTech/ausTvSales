@@ -163,10 +163,23 @@ Suíte: **72 suítes, 901 testes** unitários, mais 5 arquivos de e2e novos cont
   trava no passo 03"), com denominador igual a **todo mundo naquela posição**, não a quem
   comprou. **Enquanto a variável não for ligada na VPS o bloco sai `null` com o motivo**, nunca
   uma lista de zeros.
-- **A direção do pagamento é inferida, não confirmada.** Que `receiver` seja a conta creditada é
-  a leitura natural do schema do PlayerPoints e nunca foi conferida contra um pagamento
-  conhecido. Se estiver invertida, a marca `funding_many` aponta para quem **recebeu** de muitos.
-  O caveat viaja no payload do feed; confirmar custa um comando no jogo.
+- **✅ A direção do pagamento foi CONFIRMADA pelo dono em 2026-09-02, contra um pagamento real —
+  e o que ela revelou é mais do que a resposta.** O `from`/`to` do feed e a marca `funding_many`
+  estão certos: `funding_many` conta quantas pessoas distintas **um pagador** pagou, que era o
+  significado pretendido.
+  **O achado:** o PlayerPoints grava **duas** linhas por transferência e elas **trocam as
+  colunas entre si** — na `PAY_RECEIVER` (amount positivo) `source` é quem pagou e `receiver` é
+  quem foi creditado; na `PAY_SENDER` (amount negativo) é o `receiver` que é o pagador. Não
+  existe leitura de `source`/`receiver` verdadeira para as duas: **o tipo tem de ser fixado antes
+  de as colunas significarem alguma coisa**. O feed já lia só a `PAY_RECEIVER` e por isso estava
+  correto.
+  **O E3 não filtrava**, e casava o mesmo jogador nas duas linhas — todo pagamento contado duas
+  vezes, em qualquer ponta. **A duplicação era inerte**: as duas contagens só são lidas como
+  `> 0` para escolher o grupo de contato, e dobrar preserva o zero. Nenhum número publicado
+  estava errado; o que havia era arma carregada para o dia em que alguma das contagens virasse
+  número publicado. Filtrado, com o `OR` ainda pegando as duas pontas a partir de uma linha só.
+  **Por que nenhum teste pegava:** todas as fixtures de pagamento eram `PAY_RECEIVER`. Com uma
+  linha por pagamento, um join que lê os dois tipos é indistinguível de um que lê o certo.
 
 **Próxima: Sprint 10** — sugestões (modelo, corpus e bot). Sem gate: a S6.1 foi cancelada e a S10
 não depende mais de nada da S6.

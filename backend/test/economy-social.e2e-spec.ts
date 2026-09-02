@@ -188,13 +188,42 @@ describe('Economy social (e2e)', () => {
           amount: 42,
           occurredAt: RECENT,
         }),
+        // The `PAY_SENDER` halves of the first three payments, with `source` and
+        // `receiver` SWAPPED and the amount negated — the shape a real
+        // PlayerPoints log has, confirmed against a live payment on 2026-09-02.
+        //
+        // Every fixture in this file used to be receiver-only, which is why the
+        // double-count went unseen: with only one row per payment, a join that
+        // reads both types is indistinguishable from one that reads the right
+        // one. These three rows are the property that tells them apart.
+        payment({
+          transactionType: 'PAY_SENDER',
+          source: SOCIAL,
+          receiver: 'someone-else',
+          amount: -250,
+          minutesAfter: 5,
+        }),
+        payment({
+          transactionType: 'PAY_SENDER',
+          source: TUTORIAL_ONLY,
+          receiver: 'someone-else',
+          amount: -100,
+          minutesAfter: 5,
+        }),
+        payment({
+          transactionType: 'PAY_SENDER',
+          source: SILENT,
+          receiver: 'someone-else',
+          amount: -300,
+          minutesAfter: 60 * 24,
+        }),
       ]);
 
       await db.insert(playerPaymentSyncs).values({
         status: 'ok',
-        paymentsRead: 6,
-        paymentsWritten: 6,
-        senderRows: 0,
+        paymentsRead: 9,
+        paymentsWritten: 9,
+        senderRows: 3,
         receiverRows: 6,
         creationsRead: 0,
         creationDaysWritten: 0,
@@ -250,6 +279,40 @@ describe('Economy social (e2e)', () => {
         players: 1,
         d7: { percent: 0, n: 1 },
       });
+    });
+
+    it('counts a payment once even though the log records it twice', async () => {
+      // The two ledger rows of one transfer swap `source` and `receiver`, so a
+      // join without the type filter matched the same player on both — every
+      // payment counted twice, whichever end of it the player was on.
+      //
+      // The doubling was inert for these groups (the counts are only read as
+      // `> 0`), so this test does not guard a number that was wrong. It guards
+      // the property, because the day either count is published as a count the
+      // doubling stops being inert.
+      const rows = await db.execute<{ total: number }>(
+        sql`SELECT count(*)::int AS total FROM ${playerPayments}
+             WHERE ${playerPayments.receiver} = ${SOCIAL}
+                OR ${playerPayments.source} = ${SOCIAL}`,
+      );
+      // Both halves of the same payment really are in the table.
+      expect(rows.rows[0].total).toBe(2);
+
+      const response = await request(app.getHttpServer())
+        .get('/economy/social-contact?from=2026-01&to=2026-01')
+        .set('Cookie', authCookie)
+        .expect(200);
+
+      const body = response.body as {
+        groups: { group: string; players: number }[];
+      };
+
+      // One player, in one group, once.
+      expect(body.groups.map((g) => [g.group, g.players]).sort()).toEqual([
+        ['none', 1],
+        ['spontaneous', 1],
+        ['tutorial_only', 1],
+      ]);
     });
 
     it('shows the feed with the thresholds and the disclaimer', async () => {

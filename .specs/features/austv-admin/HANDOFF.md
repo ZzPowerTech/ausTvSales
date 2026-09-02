@@ -1323,8 +1323,27 @@ restaurar**.
    `WEEKLY_REPORT_ENABLED`, mais `DISCORD_REPORT_WEBHOOK_URL`. É a mesma forma do ETL do
    tutorial, que ficou meses no repo sem estar configurado e só apareceu na validação de
    2026-09-01.
-3. **Conferir a direção do pagamento** contra um pagamento conhecido. Um comando no jogo
-   responde, e dela dependem `from`/`to` do feed e a marca `funding_many`.
+3. ✅ **Conferido pelo dono em 2026-09-02, contra um pagamento real.** O `from`/`to` do feed
+   e a marca `funding_many` estão na direção certa — `funding_many` conta quantas pessoas
+   distintas **um pagador** pagou.
+   **O que a verificação revelou, e vale mais que a resposta:** as duas linhas que o
+   PlayerPoints grava por transferência **trocam `source` e `receiver` entre si**. Na
+   `PAY_RECEIVER` (amount `+35`) `source` é o pagador e `receiver` é o creditado; na
+   `PAY_SENDER` (amount `-35`) é o `receiver` que é o pagador. Nenhuma leitura das duas colunas
+   é verdadeira para as duas linhas — **fixar `transaction_type` é pré-requisito para ler
+   `source`/`receiver`**, e quem consultar `player_payments` direto sem isso mistura duas
+   leituras opostas no mesmo resultado. Está registrado no `schema.ts`, na constante
+   `CANONICAL_PAYMENT_TYPE` e no `directionCaveat` que viaja no payload do feed.
+   **Um defeito real caiu junto:** o E3 fazia o join sem filtrar o tipo, então casava o mesmo
+   jogador nas duas linhas e contava todo pagamento duas vezes. **A duplicação era inerte** —
+   as contagens só são lidas como `> 0` para escolher o grupo, e dobrar preserva o zero —, então
+   nenhum número publicado estava errado. Corrigido mesmo assim: o dia em que uma dessas
+   contagens virar número publicado, ela é 2×.
+   **E o motivo de nenhum teste pegar é o mesmo padrão de sempre:** todas as fixtures de
+   pagamento eram `PAY_RECEIVER`. Com uma linha por pagamento, um join que lê os dois tipos é
+   indistinguível de um que lê o certo — a propriedade que separa os dois simplesmente não
+   existia no conjunto de testes. É a segunda vez em dois dias que a lacuna é essa forma:
+   *a fixture não tinha a combinação que expõe o defeito*, e não *faltava um caso*.
 4. ✅ **Feito em 2026-09-02.** A posição no tutorial por jogador foi autorizada pelo dono e
    entregue: `tutorial_player_position`, escrita pelo mesmo ETL, atrás de
    `TUTORIAL_POSITION_ENABLED`. `/economy/first-spend` publica `byFunnelPosition` (três

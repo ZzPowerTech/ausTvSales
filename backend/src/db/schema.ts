@@ -604,13 +604,26 @@ export const playerDimensionSyncs = pgTable(
 export const playerPayments = pgTable(
   'player_payments',
   {
-    /** `PAY_SENDER` or `PAY_RECEIVER`, verbatim from the source. */
+    /**
+     * `PAY_SENDER` or `PAY_RECEIVER`, verbatim from the source.
+     *
+     * ⚠️ **Filter on this before reading `source` or `receiver`.** Each transfer
+     * is logged twice and the two rows SWAP those columns — confirmed against a
+     * real payment on 2026-09-02. A query that ignores the type reads every
+     * payment twice, with the two columns meaning opposite things in the two
+     * halves of its own result.
+     */
     transactionType: text('transaction_type').notNull(),
-    /** The counterparty uuid, as the source records it. */
+    /** Payer on a `PAY_RECEIVER` row; credited account on a `PAY_SENDER` row. */
     source: text('source').notNull(),
-    /** The account the row applies to, as the source records it. */
+    /** Credited account on a `PAY_RECEIVER` row; payer on a `PAY_SENDER` row. */
     receiver: text('receiver').notNull(),
-    /** Signed amount, in the game's cash unit. Integer in the source. */
+    /**
+     * Signed amount, in the game's cash unit. Integer in the source.
+     *
+     * Positive on `PAY_RECEIVER`, negative on `PAY_SENDER` — the sign is what
+     * makes the pair self-consistent despite the swapped columns.
+     */
     amount: integer('amount').notNull(),
     occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
     /** Disambiguates byte-identical rows. See the note above. */

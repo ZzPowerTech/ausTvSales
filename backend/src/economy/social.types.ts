@@ -199,15 +199,46 @@ export interface PaymentsFeedReport {
  * `senderRows`/`receiverRows` counter in the ETL detects a broken **pairing**,
  * not an inverted **direction**: 666/666 is consistent with either.
  */
+/**
+ * The one row type this system reads, and the reason it is the one.
+ *
+ * ## The two rows swap their columns, and that is the whole point
+ *
+ * Confirmed against a real payment on 2026-09-02. PlayerPoints logs each
+ * transfer **twice**, and the pair is not two copies of one description — the
+ * `source` and `receiver` columns trade places between them:
+ *
+ * ```
+ * PAY_RECEIVER  source=<pagador>   receiver=<creditado>  amount=+35
+ * PAY_SENDER    source=<creditado> receiver=<pagador>    amount=-35
+ * ```
+ *
+ * So `receiver` names the credited account on one row and the payer on the
+ * other, and there is no reading of `source`/`receiver` that is true for both.
+ * The type has to be pinned before the columns mean anything.
+ *
+ * `PAY_RECEIVER` is the one pinned, because it is the row a human reads as "the
+ * payment": positive amount, `source` → `receiver` in the direction the money
+ * actually moved.
+ *
+ * ⚠️ Any query over `player_payments` that does **not** filter on this reads
+ * both rows of every payment — doubling counts, and mixing two opposite column
+ * meanings into one result.
+ */
+export const CANONICAL_PAYMENT_TYPE = 'PAY_RECEIVER';
+
 export const PAYMENT_DIRECTION_CAVEAT =
-  'A DIRECAO e inferida, nao confirmada. Que `receiver` seja a conta creditada ' +
-  'e `source` a contraparte e a leitura natural do schema do PlayerPoints e ' +
-  'nunca foi conferida contra um pagamento conhecido. Se estiver invertida, ' +
-  '`from`/`to` estao trocados e a marca `funding_many` aponta para quem ' +
-  'RECEBEU de muitos, nao para quem financiou. O contador de PAY_SENDER x ' +
-  'PAY_RECEIVER do ETL detecta pareamento quebrado, nao direcao invertida: ' +
-  '666/666 e compativel com as duas leituras. Conferir contra um pagamento ' +
-  'conhecido custa um comando no jogo.';
+  'A DIRECAO foi CONFIRMADA em 2026-09-02 contra um pagamento real, e o que ela ' +
+  'revelou vale carregar: o PlayerPoints grava DUAS linhas por transferencia e ' +
+  'elas TROCAM as colunas entre si. Na linha `PAY_RECEIVER` (amount positivo) ' +
+  '`source` e quem pagou e `receiver` e quem foi creditado — e esta e a unica ' +
+  'linha que este feed le, entao `from`/`to` estao na direcao certa. Na linha ' +
+  '`PAY_SENDER` (amount negativo) as colunas aparecem invertidas: e o ' +
+  '`receiver` que e o pagador. A marca `funding_many` conta quantas pessoas ' +
+  'distintas UM PAGADOR pagou, que era o significado pretendido. Quem consultar ' +
+  '`player_payments` direto precisa filtrar por `transaction_type` ANTES de ler ' +
+  '`source`/`receiver`: sem isso, as duas leituras opostas se misturam no mesmo ' +
+  'resultado.';
 
 export const FEED_DISCLAIMER =
   'Marcacao e SINALIZACAO, nunca acusacao automatica: cada marca diz o que foi ' +
