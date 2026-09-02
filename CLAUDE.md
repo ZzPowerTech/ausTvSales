@@ -209,8 +209,11 @@ não depende mais de nada da S6.
   responde outra pergunta. As bases de uma coorte divergem por construção — a maturidade é
   filtrada por jogador —, então uma marca só ao lado de três percentuais erra em dois, do mesmo
   jeito que um `n` só erraria. Marcar e não suprimir, porque amostra pequena suprimida é
-  invisível. **Nenhum teste pegava isto porque nenhuma fixture tinha bases divergentes por
-  horizonte** — todas maturavam os jogadores juntos.
+  invisível. **A primeira explicação que dei para a lacuna de teste estava errada**, e o review a
+  derrubou: fixtures com bases divergentes por horizonte já existiam. O que faltava é mais
+  estreito — nenhuma tinha uma coorte **no ou acima** do mínimo cuja base de horizonte caísse
+  **abaixo** dele; o piso de coorte cobria o caso por acidente. Faltava a combinação, não o
+  eixo de variação. Detalhe e o erro de método no `HANDOFF.md`.
 - **✅ As duas leituras foram feitas em 2026-08-29, e destravaram a S8.2.** O `/v1/retention`
   devolve 5565 linhas com `playerUUID`, `registerDate`, `lastSeenDate`, `playtime` e
   `timeDifference` — coorte e plataforma saem daí, então **a premissa da exceção 1 do ADR-002

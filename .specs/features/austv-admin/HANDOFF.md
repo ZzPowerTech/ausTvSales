@@ -930,9 +930,26 @@ linha de SQL.
 > esconder* é o critério 2 da própria história. No relatório semanal a marca fica ao lado do
 > horizonte (`D30 0,0% (n=5 ⚠️)`), não na linha da coorte, porque é ali que ela é verdadeira.
 >
-> Vale registrar por que nenhum teste pegava isto: **nenhuma fixture tinha bases divergentes
-> por horizonte**. Todas construíam coortes cujos jogadores maturavam juntos, então `n` era o
-> mesmo nos três e a distinção que o defeito explora não existia no conjunto de testes.
+> **Por que nenhum teste pegava isto — e a primeira resposta que dei estava errada.** Eu
+> escrevi que *"nenhuma fixture tinha bases divergentes por horizonte"*. É falso, e o
+> contraexemplo estava no mesmo arquivo desde antes: o teste
+> `'shrinks the base as the horizon grows, within one cohort'` constrói uma coorte com D1 sobre
+> 20 e D30 sobre 10. Divergência de bases já era coberta.
+>
+> A propriedade que de fato faltava é mais estreita: **nenhuma fixture tinha uma coorte no ou
+> acima do mínimo cuja base de horizonte caísse abaixo dele.** Naquele teste a coorte tem 20
+> contra um mínimo de 30, então `cohort.belowMinimum` já saía `true` — o piso de coorte
+> mascarava a lacuna em vez de a lacuna não existir. Precisa das duas condições ao mesmo tempo,
+> e nenhuma fixture as tinha.
+>
+> A lição prática é o oposto da que eu tinha escrito: não faltava um eixo de variação nas
+> fixtures, faltava a **combinação** em que a marca existente cobre o caso por acidente. Quem
+> lesse a versão errada concluiria que bastava adicionar fixtures de bases divergentes — que já
+> estavam lá.
+>
+> E o erro em si é o padrão que este documento existe para registrar: afirmei uma causa para
+> uma lacuna de teste **sem ler a suíte**, num documento cujo propósito declarado é guardar os
+> erros de método. Pego pelo review, não por mim.
 >
 > **Anomalia que vale investigação, não correção:** em 2026-07 o `java_offline` dá D30 = 38,4%
 > (n=151) contra 1,6% (n=62) do bedrock. Vinte e quatro vezes a retenção do bedrock é

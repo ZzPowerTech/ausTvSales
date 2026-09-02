@@ -323,7 +323,7 @@ describe('renderWeeklyReport', () => {
     );
 
     expect(text).toContain('D1 20,0% (n=43)');
-    expect(text).toContain('D30 0,0% (n=5 ⚠️)');
+    expect(text).toContain('D30 0,0% (n=5 ⚠️ base pequena)');
     expect(text).not.toContain('coorte pequena');
   });
 

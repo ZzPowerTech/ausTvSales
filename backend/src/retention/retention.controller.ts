@@ -52,7 +52,7 @@ export class RetentionController {
     description:
       'Intervalo de sobrevivencia, **nao** retorno no dia N — o campo ' +
       '`semantics` da resposta traz o rotulo por extenso, e ele e parte do ' +
-      'contrato. Coortes pequenas vem marcadas (`belowMinimum`), nunca ' +
+      'contrato. Amostra pequena vem marcada em DOIS niveis, e sao perguntas diferentes: `belowMinimum` na coorte diz que a COORTE e pequena, e `belowMinimum` em cada medida diz que a base DAQUELE horizonte e pequena. Uma coorte grande pode publicar um percentual sobre cinco pessoas, entao a marca de coorte sozinha nao qualifica numero nenhum, nunca ' +
       'escondidas; coortes contaminadas por carimbo de importacao vem com ' +
       '`percent: null` e o motivo, nunca com os ~100% que o carimbo produz.',
   })

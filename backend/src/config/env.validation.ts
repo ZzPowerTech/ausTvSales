@@ -489,11 +489,15 @@ export class EnvironmentVariables {
   // `registerDate` e plataforma sai do `playerUUID` (ADR-003). O modulo usa o
   // `PLAN_BASE_URL` que ja existe.
 
-  // Tamanho de coorte abaixo do qual a linha vem MARCADA (`belowMinimum`),
-  // nunca escondida. Esconder amostra pequena e o mesmo erro de omitir o `n`:
-  // sobra so a coorte que por acaso ficou grande, e ruido vira tendencia.
+  // Tamanho abaixo do qual vem MARCADO (`belowMinimum`), nunca escondido.
+  // Esconder amostra pequena e o mesmo erro de omitir o `n`: sobra so a coorte
+  // que por acaso ficou grande, e ruido vira tendencia.
   // 30 e um chute conservador, marcado como tal — nao foi medido contra esta
   // populacao.
+  //
+  // Governa DUAS marcas desde 2026-09-02: o tamanho da COORTE e a base de cada
+  // HORIZONTE. A segunda existe porque a primeira nao qualifica numero nenhum —
+  // uma coorte de 43 publicava `D30: 0%` sobre cinco pessoas sem marca.
   @IsOptional()
   @IsInt()
   @Min(1)

@@ -268,7 +268,8 @@ function suppressImplausible(
   return measures.map((m) => ({
     horizon: m.horizon,
     percent: null,
-    n: m.percent === null ? m.n : m.n,
+    // The base survives suppression, here as everywhere.
+    n: m.n,
     survived: null,
     reason: 'implausible_survival' as const,
     unavailableReason:
