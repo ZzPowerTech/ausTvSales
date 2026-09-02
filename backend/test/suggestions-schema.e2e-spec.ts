@@ -1,10 +1,13 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
 import * as schema from '../src/db/schema';
+import { sanitizeSuggestionText } from '../src/suggestions/suggestion-text';
+import { SuggestionsStore } from '../src/suggestions/suggestions.store';
 import {
   SUGGESTION_STATUSES,
   SUGGESTION_TEXT_MAX_CHARS,
@@ -19,6 +22,22 @@ const ROLLBACK_FILE = join(
   'rollback',
   '0009_suggestions.down.sql',
 );
+
+/**
+ * The rollback script up to (but excluding) its final `COMMIT`.
+ *
+ * The script is written to be run whole by an operator, so it opens and closes
+ * its own transaction. The suite needs everything except that close: it runs the
+ * real statements, asserts against the uncommitted state, and issues its own
+ * `ROLLBACK`. Asserting the trailing `COMMIT` is present keeps this helper from
+ * quietly becoming a no-op if the script ever stops managing its transaction.
+ */
+function rollbackBodyBeforeCommit(): string {
+  const script = readFileSync(ROLLBACK_FILE).toString();
+  const commitAt = script.lastIndexOf('COMMIT;');
+  expect(commitAt).toBeGreaterThan(-1);
+  return script.slice(0, commitAt);
+}
 
 /**
  * Integration test for the `suggestions` schema (story S10.1) against a real
@@ -181,9 +200,49 @@ describe('Suggestions schema (e2e)', () => {
     });
 
     it('rejects text that is empty or only whitespace', async () => {
+      // Regression: the first version of this constraint was `btrim(text)`,
+      // which trims **spaces only**, so a value of a space and a newline
+      // sailed straight through it. Only this assertion against a real
+      // Postgres caught that — the unit tests exercise the sanitizer, which
+      // was never the thing that was wrong.
       await expect(insertRaw({ text: '   \n ' })).rejects.toThrow(
         /suggestions_text_present/,
       );
+      await expect(insertRaw({ text: '\t\r\n' })).rejects.toThrow(
+        /suggestions_text_present/,
+      );
+    });
+
+    it('rejects exactly the characters String.trim() strips', async () => {
+      // The CHECK enumerates a whitespace set in SQL, and enumerating is only
+      // defensible if the list is verified against the set JS actually strips.
+      // Otherwise the two rules agree by luck and drift apart in silence.
+      const trimmed = [...Array(0x11000).keys()]
+        .map((cp) => String.fromCodePoint(cp))
+        .filter((ch) => ch.trim() === '');
+
+      for (const [i, ch] of trimmed.entries()) {
+        await expect(
+          insertRaw({ discord_msg_id: `ws-${i}`, text: ch.repeat(3) }),
+        ).rejects.toThrow(/suggestions_text_present/);
+        expect(() => sanitizeSuggestionText(ch.repeat(3))).toThrow();
+      }
+    });
+
+    it('accepts a format-character-only string, which the sanitizer owns and the CHECK does not', async () => {
+      // U+200B is invisible but it is not whitespace, so `btrim` leaves it and
+      // the CHECK sees a non-empty string. Asserted rather than left implicit,
+      // because it is the one place the two layers do not overlap.
+      //
+      // The split is on purpose. The CHECK answers 'is this blank', which SQL
+      // can express exactly; the sanitizer answers 'does this carry invisible
+      // payload', which needs the Unicode `Cf` category and has no POSIX-regex
+      // equivalent. Approximating the second one in SQL would produce a second
+      // rule that disagrees with the first in ways nobody tracks - so the
+      // sanitizer stays the single owner of that question, and every write path
+      // has to go through it.
+      expect(() => sanitizeSuggestionText('\u200B\u200B')).toThrow();
+      await insertRaw({ discord_msg_id: 'zwsp', text: '\u200B\u200B' });
     });
 
     it('rejects text over the length cap', async () => {
@@ -199,6 +258,102 @@ describe('Suggestions schema (e2e)', () => {
     it('rejects negative vote counts', async () => {
       await expect(insertRaw({ votes_up: -1 })).rejects.toThrow(
         /suggestions_votes_non_negative/,
+      );
+    });
+  });
+
+  describe('SuggestionsStore against a real database', () => {
+    // The unit spec proves the store's decisions against a chainable stub, which
+    // by construction accepts any method and returns whatever the test wrote.
+    // Two of its claims are properties of Postgres and not of the code -
+    // `onConflictDoNothing` matching the unique index, and the first write's
+    // text surviving a replay - so they are asserted here or not at all.
+    let store: SuggestionsStore;
+
+    beforeEach(() => {
+      store = new SuggestionsStore(db);
+    });
+
+    it('writes a suggestion the sanitizer accepted', async () => {
+      const row = await store.create({
+        discordMsgId: 'store-1',
+        author: '111111111111111111',
+        text: '  ideia   com espaco  ',
+        createdAt: POSTED_AT,
+      });
+
+      expect(row.text).toBe('ideia   com espaco');
+      expect(row.createdAt).toEqual(POSTED_AT);
+      expect(row.status).toBe('enviada');
+    });
+
+    it('matches the unique index on conflict instead of raising', async () => {
+      // `onConflictDoNothing({ target })` needs a unique index Postgres can
+      // match. If that index ever gains a `WHERE`, changes expression or is
+      // renamed, this is where it surfaces - the stubbed unit test would stay
+      // green while every bot replay crashed in production.
+      const first = await store.create({
+        discordMsgId: 'store-2',
+        author: '111111111111111111',
+        text: 'ideia original',
+        createdAt: POSTED_AT,
+      });
+
+      const replay = await store.create({
+        discordMsgId: 'store-2',
+        author: '222222222222222222',
+        text: 'texto reescrito depois',
+        createdAt: new Date('2026-09-01T12:00:00.000Z'),
+      });
+
+      expect(replay.id).toBe(first.id);
+      // What the players who voted actually read, preserved by the database.
+      expect(replay.text).toBe('ideia original');
+      expect(replay.author).toBe('111111111111111111');
+      expect(replay.createdAt).toEqual(POSTED_AT);
+
+      const { rows } = await pool.query<{ count: string }>(
+        `SELECT count(*)::text AS count FROM suggestions
+         WHERE discord_msg_id = 'store-2'`,
+      );
+      expect(rows[0].count).toBe('1');
+    });
+
+    it('rejects unstorable text before reaching the database', async () => {
+      await expect(
+        store.create({
+          discordMsgId: 'store-3',
+          author: '111111111111111111',
+          text: ' ​',
+          createdAt: POSTED_AT,
+        }),
+      ).rejects.toThrow(/empty after sanitization/);
+
+      const { rows } = await pool.query<{ count: string }>(
+        `SELECT count(*)::text AS count FROM suggestions
+         WHERE discord_msg_id = 'store-3'`,
+      );
+      expect(rows[0].count).toBe('0');
+    });
+
+    it('moves updated_at on a Drizzle update, and leaves created_at alone', async () => {
+      const created = await store.create({
+        discordMsgId: 'store-4',
+        author: '111111111111111111',
+        text: 'ideia',
+        createdAt: POSTED_AT,
+      });
+
+      const [updated] = await db
+        .update(suggestions)
+        .set({ status: 'aprovada' })
+        .where(eq(suggestions.id, created.id))
+        .returning();
+
+      expect(updated.status).toBe('aprovada');
+      expect(updated.createdAt).toEqual(POSTED_AT);
+      expect(updated.updatedAt.getTime()).toBeGreaterThanOrEqual(
+        created.updatedAt.getTime(),
       );
     });
   });
@@ -222,14 +377,14 @@ describe('Suggestions schema (e2e)', () => {
     });
 
     it('removes the table and its bookkeeping row, and re-applying restores it', async () => {
-      const rollbackSql = readFileSync(ROLLBACK_FILE).toString();
       const client = await pool.connect();
 
       try {
-        // Postgres DDL is transactional, so the real statements run and the
-        // suite's database survives them.
-        await client.query('BEGIN');
-        await client.query(rollbackSql);
+        // The script opens its own transaction and ends with COMMIT. Everything
+        // up to that COMMIT runs verbatim; the suite substitutes its own
+        // ROLLBACK at the end so the real statements - both guards included -
+        // are exercised without leaving the shared database dropped.
+        await client.query(rollbackBodyBeforeCommit());
 
         const dropped = await client.query<{ table_ref: string | null }>(
           `SELECT to_regclass('public.suggestions') AS table_ref`,
@@ -262,6 +417,35 @@ describe('Suggestions schema (e2e)', () => {
       }
 
       // Untouched outside the transaction.
+      const { rows } = await pool.query<{ table_ref: string | null }>(
+        `SELECT to_regclass('public.suggestions') AS table_ref`,
+      );
+      expect(rows[0].table_ref).not.toBeNull();
+    });
+
+    it('refuses to run when 0009 is not the head', async () => {
+      // The failure the guard exists for: roll 0009 back under a newer
+      // migration and drizzle, which decides by timestamp, would report nothing
+      // pending forever while the table is gone.
+      const client = await pool.connect();
+
+      try {
+        await client.query('BEGIN');
+        await client.query(
+          `INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
+           VALUES ('pretend-0010', $1)`,
+          [Date.now() + 60_000],
+        );
+
+        await expect(client.query(rollbackBodyBeforeCommit())).rejects.toThrow(
+          /not the head/,
+        );
+      } finally {
+        await client.query('ROLLBACK');
+        client.release();
+      }
+
+      // The real head is still 0009 and the table is still there.
       const { rows } = await pool.query<{ table_ref: string | null }>(
         `SELECT to_regclass('public.suggestions') AS table_ref`,
       );

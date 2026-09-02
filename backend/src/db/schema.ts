@@ -920,10 +920,21 @@ export const suggestions = pgTable(
       .default('enviada'),
     /** When the player posted it — **not** when the row was written. */
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
-    /** When this row last changed. Unlike {@link createdAt}, this is insert time. */
+    /**
+     * When this row last changed - genuinely the write time, and the exact
+     * opposite case from {@link createdAt}.
+     *
+     * `$onUpdate` and not a database trigger, so it is maintained by Drizzle on
+     * every `db.update()`. That covers every writer this table is meant to have;
+     * a hand-written `UPDATE` in `psql` bypasses it, which is the honest limit
+     * of the mechanism. Without it the column would be documented as "last
+     * changed" and hold the insert time forever - a plausible wrong date, which
+     * is the failure this table exists not to repeat.
+     */
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .notNull()
-      .defaultNow(),
+      .defaultNow()
+      .$onUpdate(() => new Date()),
     /** Discord user id of the staff member who took it, if any. */
     assignee: text('assignee'),
   },
@@ -943,8 +954,18 @@ export const suggestions = pgTable(
       sql`${table.votesUp} >= 0 AND ${table.votesDown} >= 0`,
     ),
     // A suggestion with no text is not a suggestion. The sanitizer rejects it
-    // too; this is the guard for any write path that skips the sanitizer.
-    check('suggestions_text_present', sql`length(btrim(${table.text})) > 0`),
+    // too; this is the backstop for any write path that skips the sanitizer.
+    //
+    // The whitespace set is spelled out, and it is spelled out to be **exactly**
+    // the set `String.prototype.trim()` strips. Bare `btrim(x)` trims spaces
+    // only, so a value of a single newline passed the first version of this
+    // constraint and CI caught it; `[:space:]` would have been collation
+    // dependent, and would still not cover U+00A0. Enumerated, the two rules are
+    // the same rule, and `suggestion-text.spec.ts` asserts they stay that way.
+    check(
+      'suggestions_text_present',
+      sql`btrim(${table.text}, E'\\u0009\\u000A\\u000B\\u000C\\u000D\\u0020\\u00A0\\u1680\\u2000\\u2001\\u2002\\u2003\\u2004\\u2005\\u2006\\u2007\\u2008\\u2009\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF') <> ''`,
+    ),
     check(
       'suggestions_text_max_length',
       sql`length(${table.text}) <= ${sql.raw(String(SUGGESTION_TEXT_MAX_CHARS))}`,

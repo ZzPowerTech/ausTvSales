@@ -20,15 +20,17 @@ after the migration it reverses.
 
 `drizzle-kit` decides what to apply by **timestamp**, not by hash: it reads the
 most recent `created_at` in `__drizzle_migrations` and applies everything newer.
-So deleting a migration's row makes it re-appliable only while it is the **latest
-applied** migration. Rolling back 0009 on a database that has already applied
-0010 removes the table, and the next `db:migrate` still skips 0009 because 0010's
-row is newer.
+So deleting a migration's row makes it re-appliable only while it is the
+**latest applied** migration. Rolled back under a newer migration, the table is
+gone and the next `db:migrate` still reports nothing pending — forever.
 
-That is a property of the linear migration model, not of these scripts. Roll back
-from the head, one at a time.
+That is a property of the linear migration model, not of these scripts, and it
+is why the rule is **checked in the script** rather than written here. Each
+`.down.sql` aborts if its own migration is not the head, and aborts if the
+bookkeeping `DELETE` does not remove exactly one row. A rule that lives only in
+a README is not a rule.
 
-## Coverage
+## Coverage## Coverage
 
 Scripts start at 0009. Migrations 0000–0008 predate this convention and have no
 rollback script; writing them is worth doing and is not this story.

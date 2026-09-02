@@ -40,6 +40,16 @@ describe('sanitizeSuggestionText', () => {
       expect(sanitizeSuggestionText('a\u007Fb\u0085c\u009Fd')).toBe('abcd');
     });
 
+    it('strips every Unicode format character, not a hand-picked list', () => {
+      // The first version enumerated ranges and let these four through while
+      // its comment claimed to cover "any renderer".
+      expect(sanitizeSuggestionText('so\u00ADft')).toBe('soft');
+      expect(sanitizeSuggestionText('a\u061Cb')).toBe('ab');
+      expect(sanitizeSuggestionText('a\uFFF9b')).toBe('ab');
+      // Tag block: arbitrary invisible payload riding inside the text.
+      expect(sanitizeSuggestionText('ok\u{E0041}\u{E0042}')).toBe('ok');
+    });
+
     it('strips zero-width and bidi override characters', () => {
       // These let stored text misrepresent itself in *any* renderer, so they
       // are removed on write rather than escaped later.
@@ -62,9 +72,31 @@ describe('sanitizeSuggestionText', () => {
     });
   });
 
-  it('normalizes to NFC so equal-looking text compares equal', () => {
-    const decomposed = 'sugestão';
-    expect(sanitizeSuggestionText(decomposed)).toBe('sugestão');
+  describe('NFC normalization', () => {
+    it('composes decomposed input', () => {
+      const decomposed = 'sugesta\u0303o';
+      expect(sanitizeSuggestionText(decomposed)).toBe('sugest\u00E3o');
+    });
+
+    it('normalizes AFTER removing invisibles, not before', () => {
+      // Regression for the ordering bug. A zero-width space between the base
+      // letter and its combining tilde blocks composition, so normalizing first
+      // leaves the pair decomposed and the removal step then deletes what was
+      // blocking it. Output renders identically and is not NFC.
+      const blocked = 'sugesta\u200B\u0303o';
+      const plain = 'sugest\u00E3o';
+
+      const cleaned = sanitizeSuggestionText(blocked);
+      expect(cleaned).toBe(plain);
+      expect(cleaned).toBe(cleaned.normalize('NFC'));
+      expect(cleaned).toHaveLength(plain.length);
+    });
+
+    it('normalizes after removing a control character too', () => {
+      expect(sanitizeSuggestionText('sugesta\u0000\u0303o')).toBe(
+        'sugest\u00E3o',
+      );
+    });
   });
 
   describe('length', () => {
@@ -72,6 +104,24 @@ describe('sanitizeSuggestionText', () => {
       const atLimit = 'a'.repeat(SUGGESTION_TEXT_MAX_CHARS);
       expect(sanitizeSuggestionText(atLimit)).toHaveLength(
         SUGGESTION_TEXT_MAX_CHARS,
+      );
+    });
+
+    it('counts code points, not UTF-16 units', () => {
+      // `String.prototype.length` counts an emoji twice; the database's
+      // `length()` counts it once. Measured in UTF-16 units, 1001 emoji were
+      // refused as "2002 characters" - a number the player never typed - while
+      // the CHECK, seeing 1001, would have accepted them.
+      const astral = '\u{1F600}'.repeat(SUGGESTION_TEXT_MAX_CHARS);
+      expect([...sanitizeSuggestionText(astral)]).toHaveLength(
+        SUGGESTION_TEXT_MAX_CHARS,
+      );
+    });
+
+    it('rejects one code point over the limit, astral included', () => {
+      const astral = '\u{1F600}'.repeat(SUGGESTION_TEXT_MAX_CHARS + 1);
+      expect(() => sanitizeSuggestionText(astral)).toThrow(
+        `is ${SUGGESTION_TEXT_MAX_CHARS + 1} characters`,
       );
     });
 

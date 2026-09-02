@@ -1,5 +1,5 @@
 {
-  "id": "90e8a0ae-9f34-4b0d-acc3-427730d2d5b8",
+  "id": "37d1c376-cc45-46ae-99b8-738f12ab061d",
   "prevId": "354afaef-109b-4804-bff0-8f9272527999",
   "version": "7",
   "dialect": "postgresql",
@@ -997,7 +997,7 @@
         },
         "suggestions_text_present": {
           "name": "suggestions_text_present",
-          "value": "length(btrim(\"suggestions\".\"text\")) > 0"
+          "value": "btrim(\"suggestions\".\"text\", E'\\u0009\\u000A\\u000B\\u000C\\u000D\\u0020\\u00A0\\u1680\\u2000\\u2001\\u2002\\u2003\\u2004\\u2005\\u2006\\u2007\\u2008\\u2009\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF') <> ''"
         },
         "suggestions_text_max_length": {
           "name": "suggestions_text_max_length",

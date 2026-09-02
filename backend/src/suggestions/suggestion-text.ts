@@ -29,35 +29,46 @@ const CONTROL_CHARS = new RegExp(
 );
 
 /**
- * Zero-width and bidirectional-formatting characters.
+ * Every Unicode **format** character (general category `Cf`).
  *
  * These are the ones that let a stored string misrepresent itself in *any*
- * renderer: `U+202E` reverses the visual order of everything after it, and the
- * zero-width family hides content from a reader while keeping it in the data.
- * Escaping at render time cannot undo either, which is why they go on write.
+ * renderer: `U+202E` reverses the visual order of what follows, `U+00AD` hides a
+ * break point inside a word so a substring filter misses it, and the tag block
+ * `U+E0000`-`U+E007F` carries arbitrary invisible payload. Escaping at render
+ * time undoes none of that, which is why they go on write.
  *
- * Escapes again, for the same reason as {@link CONTROL_CHARS} — and here the
- * reason is sharper, since every character in the class is invisible by
- * definition.
+ * The category rather than a hand-written list: the first version of this
+ * enumerated eight ranges, still let `U+00AD`, `U+061C`, `U+FFF9`-`U+FFFB` and
+ * the whole tag block through, and claimed in its own comment to cover "any
+ * renderer". A list of ranges is a claim to re-check against every Unicode
+ * revision; the category is the definition.
  */
-const INVISIBLE_CHARS = new RegExp(
-  '[\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]',
-  'g',
-);
+const FORMAT_CHARS = /\p{Cf}/gu;
 
 /**
  * Clean player-written suggestion text for storage.
  *
  * ## What it does, and the order matters
  *
- * 1. Unicode-normalizes to NFC, so two spellings of the same word are one string.
- * 2. Folds CRLF and a lone CR into a plain newline.
- * 3. Drops control characters and invisible/bidi formatting characters.
+ * 1. Folds CRLF and a lone CR into a plain newline.
+ * 2. Drops control characters and Unicode format characters.
+ * 3. **Then** normalizes to NFC.
  * 4. Collapses three or more consecutive newlines into a single blank line.
  * 5. Trims, then rejects an empty result and a result over the length cap.
  *
- * Length is measured **after** cleaning: otherwise a string padded with a
- * thousand zero-width spaces would be rejected for a size it does not have.
+ * Normalizing **after** the removals is the part that is easy to get wrong, and
+ * the first version of this function got it wrong. A zero-width space between a
+ * base letter and its combining mark - `a` + `U+200B` + `U+0303` - blocks
+ * composition, so normalizing first leaves the pair decomposed and the removal
+ * step then deletes the thing that was blocking it. The output renders as one
+ * accented letter, is **not** NFC, and does not compare equal to the same word
+ * typed normally. Anything that dedupes, searches or filters this text would
+ * see two suggestions where a reader sees one.
+ *
+ * Length is measured **after** cleaning, and in code points: otherwise a string
+ * padded with a thousand zero-width spaces would be rejected for a size it does
+ * not have, and the limit would mean a different number here than in the
+ * database's own CHECK.
  *
  * ## What it deliberately does not do
  *
@@ -84,10 +95,10 @@ export function sanitizeSuggestionText(raw: unknown): string {
   }
 
   const cleaned = raw
-    .normalize('NFC')
     .replace(/\r\n?/g, '\n')
     .replace(CONTROL_CHARS, '')
-    .replace(INVISIBLE_CHARS, '')
+    .replace(FORMAT_CHARS, '')
+    .normalize('NFC')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
@@ -98,9 +109,15 @@ export function sanitizeSuggestionText(raw: unknown): string {
     );
   }
 
-  if (cleaned.length > SUGGESTION_TEXT_MAX_CHARS) {
+  // Code points, not UTF-16 units - this is the same count the database's
+  // `length()` performs, so one limit means one thing on both sides. With
+  // `String.prototype.length` an emoji counted twice: the store rejected 1001
+  // emoji as "2002 characters" while the CHECK, which saw 1001, would have
+  // accepted them. A false refusal carrying a number the player never typed.
+  const codePoints = [...cleaned].length;
+  if (codePoints > SUGGESTION_TEXT_MAX_CHARS) {
     throw new SuggestionTextError(
-      `Suggestion text is ${cleaned.length} characters, over the ${SUGGESTION_TEXT_MAX_CHARS} limit`,
+      `Suggestion text is ${codePoints} characters, over the ${SUGGESTION_TEXT_MAX_CHARS} limit`,
       'too_long',
     );
   }
