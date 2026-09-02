@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.17.2](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.17.1...backend-v0.17.2) (2026-09-02)
+
+
+### Bug Fixes
+
+* **admin:** a linha SET quebrou a simetria — a direção do pagamento está medida ([#199](https://github.com/ZzPowerTech/ausTvSales/issues/199)) ([86460b4](https://github.com/ZzPowerTech/ausTvSales/commit/86460b49149991c82ca962517f8b3b8a2d3fb01d))
+* **admin:** a mensagem apontava para o switch que já estava certo ([#197](https://github.com/ZzPowerTech/ausTvSales/issues/197)) ([1258769](https://github.com/ZzPowerTech/ausTvSales/commit/1258769db9c8e76569220f9feff63f950d347cdd))
+* **admin:** as duas linhas de um pagamento trocam as colunas, e o E3 lia as duas ([#195](https://github.com/ZzPowerTech/ausTvSales/issues/195)) ([da43f5b](https://github.com/ZzPowerTech/ausTvSales/commit/da43f5ba110d5e8b570de3728573c07342eb1be8))
+
 ## [0.17.1](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.17.0...backend-v0.17.1) (2026-09-02)
 
 
