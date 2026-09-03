@@ -12,6 +12,7 @@ import { ItemsModule } from './items/items.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { FunnelModule } from './funnel/funnel.module';
 import { EconomyModule } from './economy/economy.module';
+import { SuggestionsModule } from './suggestions/suggestions.module';
 import { ReportModule } from './report/report.module';
 import { RetentionModule } from './retention/retention.module';
 import { TutorialModule } from './tutorial/tutorial.module';
@@ -64,6 +65,9 @@ import { SalesModule } from './sales/sales.module';
     // funil, a retencao e o read model de saude, e o unico dado que possui e o
     // registro do que foi reportado em cada semana.
     ReportModule,
+    // Sugestoes dos jogadores (S10.1, secao 5.3/7). Por ora so a tabela e o
+    // caminho de escrita que sanitiza; a superficie HTTP e a S11.1.
+    SuggestionsModule,
     CategoriesModule,
     ItemsModule,
     SalesModule,
