@@ -1,7 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { DRIZZLE } from '../db/database.module';
 import { SuggestionTextError } from './suggestion-text';
-import { SuggestionsStore } from './suggestions.store';
+import {
+  SUGGESTION_PAGE_DEFAULT,
+  SUGGESTION_PAGE_MAX,
+  SuggestionsStore,
+} from './suggestions.store';
 
 type StubMock = jest.Mock<unknown, unknown[]>;
 
@@ -361,5 +365,114 @@ describe('SuggestionsStore staff actions', () => {
       ).resolves.toBe(false);
       expect(tx.insert).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('SuggestionsStore.list', () => {
+  function buildList(items: unknown[], total: number) {
+    const rowsChain = chain(items);
+    const countChain = chain([{ value: total }]);
+    let call = 0;
+    const db = {
+      // The store fires the rows query and the count query together; the stub
+      // hands back a different chain per call, in that order.
+      select: jest.fn(() =>
+        call++ === 0 ? rowsChain.proxy : countChain.proxy,
+      ),
+    };
+    return { db, rowsChain, countChain };
+  }
+
+  async function storeWith(db: unknown): Promise<SuggestionsStore> {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [SuggestionsStore, { provide: DRIZZLE, useValue: db }],
+    }).compile();
+    return module.get(SuggestionsStore);
+  }
+
+  it('reports the total of the filtered set, not of the page', async () => {
+    // `items.length` as the total would tell the reader the backlog is exactly
+    // one page long however long it is.
+    const { db } = buildList([STORED], 137);
+    const store = await storeWith(db);
+
+    const page = await store.list({ limit: 1 });
+
+    expect(page.items).toHaveLength(1);
+    expect(page.total).toBe(137);
+  });
+
+  it('orders by date and breaks the tie by id', async () => {
+    // `created_at` holds the event date, so two suggestions can share an
+    // instant. Without a total order Postgres is free to break the tie
+    // differently per query, and pages overlap or skip rows.
+    const { db, rowsChain } = buildList([], 0);
+    const store = await storeWith(db);
+
+    await store.list({});
+
+    expect(rowsChain.calls.orderBy.mock.calls[0]).toHaveLength(2);
+  });
+
+  it('defaults the page size instead of returning everything', async () => {
+    const { db } = buildList([], 0);
+    const store = await storeWith(db);
+
+    await expect(store.list({})).resolves.toMatchObject({
+      limit: SUGGESTION_PAGE_DEFAULT,
+      offset: 0,
+    });
+  });
+
+  it('clamps an oversized limit rather than trusting it', async () => {
+    const { db } = buildList([], 0);
+    const store = await storeWith(db);
+
+    await expect(store.list({ limit: 10_000 })).resolves.toMatchObject({
+      limit: SUGGESTION_PAGE_MAX,
+    });
+  });
+
+  it('clamps a nonsensical limit or offset', async () => {
+    const { db } = buildList([], 0);
+    const store = await storeWith(db);
+
+    await expect(store.list({ limit: 0 })).resolves.toMatchObject({ limit: 1 });
+    await expect(store.list({ limit: -5 })).resolves.toMatchObject({
+      limit: 1,
+    });
+    await expect(store.list({ offset: -20 })).resolves.toMatchObject({
+      offset: 0,
+    });
+    await expect(store.list({ limit: 2.7 })).resolves.toMatchObject({
+      limit: 2,
+    });
+    await expect(store.list({ limit: Number.NaN })).resolves.toMatchObject({
+      limit: SUGGESTION_PAGE_DEFAULT,
+    });
+  });
+
+  it('applies the same filter to the rows and to the count', async () => {
+    // Two queries, one filter. If they ever disagree the listing reports a
+    // total that belongs to a different set than the page it is showing.
+    const { db, rowsChain, countChain } = buildList([], 0);
+    const store = await storeWith(db);
+
+    await store.list({ status: 'aprovada' });
+
+    expect(rowsChain.calls.where).toHaveBeenCalledTimes(1);
+    expect(countChain.calls.where).toHaveBeenCalledTimes(1);
+    expect(rowsChain.calls.where.mock.calls[0][0]).toEqual(
+      countChain.calls.where.mock.calls[0][0],
+    );
+  });
+
+  it('passes an undefined filter through when no state is asked for', async () => {
+    const { db, rowsChain } = buildList([], 0);
+    const store = await storeWith(db);
+
+    await store.list({});
+
+    expect(rowsChain.calls.where.mock.calls[0][0]).toBeUndefined();
   });
 });

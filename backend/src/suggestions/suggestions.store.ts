@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { desc, eq } from 'drizzle-orm';
+import { count, desc, eq } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDB } from '../db/database.module';
 import {
   type Suggestion,
@@ -43,6 +43,28 @@ export interface StaffActionInput {
   /** Bot command name or component custom id that produced the attempt. */
   command: string;
 }
+
+/** One page of suggestions, plus the size of the whole filtered set. */
+export interface SuggestionPage {
+  items: Suggestion[];
+  /**
+   * How many rows match the filter, ignoring the page.
+   *
+   * Required by story S10.3 ("paginada, com **total**"), and it is a second
+   * query rather than `items.length`: the two answer different questions, and a
+   * listing that reports the page size as the total tells the reader the backlog
+   * is exactly one page long no matter how long it is.
+   */
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** Largest page the listing will return, whatever the caller asks for. */
+export const SUGGESTION_PAGE_MAX = 25;
+
+/** Page size when the caller does not choose one. */
+export const SUGGESTION_PAGE_DEFAULT = 5;
 
 /** Result of {@link SuggestionsStore.transition}. */
 export type TransitionOutcome =
@@ -273,4 +295,61 @@ export class SuggestionsStore {
       .orderBy(desc(suggestionAudit.at))
       .limit(limit);
   }
+
+  /**
+   * One page of suggestions, newest first, optionally filtered by state.
+   *
+   * ## Pagination is not optional here
+   *
+   * There is no unpaginated variant, and `limit` is clamped rather than
+   * trusted. The table grows without bound and the only consumers are a Discord
+   * embed (25 components maximum) and, later, a web list — neither of which has
+   * a use for "all of them", and both of which would happily ask for it.
+   *
+   * ## Ordering is total, not just by date
+   *
+   * `created_at DESC, id DESC`. Two suggestions can share a timestamp — the
+   * column stores the event date, so a backfill or a burst can produce
+   * duplicates — and a non-total order makes pages overlap or skip rows under
+   * Postgres, which is free to break the tie differently per query. The `id`
+   * is the tiebreaker precisely because it is unique.
+   */
+  async list(options: {
+    status?: SuggestionStatus;
+    limit?: number;
+    offset?: number;
+  }): Promise<SuggestionPage> {
+    const limit = clampPageSize(options.limit);
+    const offset = Math.max(0, Math.trunc(options.offset ?? 0));
+    const where = options.status
+      ? eq(suggestions.status, options.status)
+      : undefined;
+
+    const [items, [totals]] = await Promise.all([
+      this.db
+        .select()
+        .from(suggestions)
+        .where(where)
+        .orderBy(desc(suggestions.createdAt), desc(suggestions.id))
+        .limit(limit)
+        .offset(offset),
+      this.db.select({ value: count() }).from(suggestions).where(where),
+    ]);
+
+    return { items, total: totals?.value ?? 0, limit, offset };
+  }
+}
+
+/**
+ * Page size the store will honour.
+ *
+ * Clamped, not validated: a DTO already rejects nonsense at the HTTP door, and
+ * this is the guarantee for every other caller. A `limit` of 10.000 from a
+ * future internal caller should return 25 rows, not a table scan.
+ */
+function clampPageSize(requested: number | undefined): number {
+  if (requested === undefined || !Number.isFinite(requested)) {
+    return SUGGESTION_PAGE_DEFAULT;
+  }
+  return Math.min(SUGGESTION_PAGE_MAX, Math.max(1, Math.trunc(requested)));
 }

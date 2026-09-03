@@ -402,6 +402,136 @@ describe('Suggestion states (e2e)', () => {
     });
   });
 
+  describe('GET /suggestions', () => {
+    async function seedMany(): Promise<void> {
+      // Two share an instant on purpose: `created_at` is the event date, so a
+      // burst or a backfill produces ties, and a tie is where a non-total order
+      // makes pages overlap or skip rows.
+      const shared = new Date('2026-08-20T12:00:00.000Z');
+      await db.insert(suggestions).values([
+        {
+          discordMsgId: '901',
+          author: AUTHOR,
+          text: 'a',
+          createdAt: new Date('2026-08-19T10:00:00.000Z'),
+        },
+        { discordMsgId: '902', author: AUTHOR, text: 'b', createdAt: shared },
+        { discordMsgId: '903', author: AUTHOR, text: 'c', createdAt: shared },
+        {
+          discordMsgId: '904',
+          author: AUTHOR,
+          text: 'd',
+          createdAt: new Date('2026-08-21T10:00:00.000Z'),
+          status: 'aprovada',
+        },
+        {
+          discordMsgId: '905',
+          author: AUTHOR,
+          text: 'e',
+          createdAt: new Date('2026-08-22T10:00:00.000Z'),
+          status: 'aprovada',
+        },
+      ]);
+    }
+
+    it('pages, and reports the total of the whole filtered set', async () => {
+      await seedMany();
+
+      const response = await asBot(
+        http().get('/suggestions').query({ limit: 2 }),
+      ).expect(200);
+
+      const page = bodyOf<{
+        items: { id: number }[];
+        total: number;
+        limit: number;
+        offset: number;
+      }>(response);
+      expect(page.items).toHaveLength(2);
+      expect(page.total).toBe(5);
+      expect(page.limit).toBe(2);
+      expect(page.offset).toBe(0);
+    });
+
+    it('filters by state, and the total follows the filter', async () => {
+      await seedMany();
+
+      const response = await asBot(
+        http().get('/suggestions').query({ status: 'aprovada' }),
+      ).expect(200);
+
+      const page = bodyOf<{
+        items: { status: string }[];
+        total: number;
+      }>(response);
+      expect(page.total).toBe(2);
+      expect(page.items.every((item) => item.status === 'aprovada')).toBe(true);
+    });
+
+    it('walks every row exactly once across pages, ties included', async () => {
+      // The assertion that a non-total order would fail: with `created_at`
+      // alone, Postgres may break the 902/903 tie differently per query, and a
+      // row shows up on both pages or on neither.
+      await seedMany();
+
+      const seen: number[] = [];
+      for (let offset = 0; offset < 5; offset += 2) {
+        const response = await asBot(
+          http().get('/suggestions').query({ limit: 2, offset }),
+        ).expect(200);
+        seen.push(
+          ...bodyOf<{ items: { id: number }[] }>(response).items.map(
+            (item) => item.id,
+          ),
+        );
+      }
+
+      expect(seen).toHaveLength(5);
+      expect(new Set(seen).size).toBe(5);
+    });
+
+    it('returns newest first', async () => {
+      await seedMany();
+
+      const response = await asBot(http().get('/suggestions')).expect(200);
+      const items = bodyOf<{ items: { createdAt: string }[] }>(response).items;
+
+      const dates = items.map((item) => new Date(item.createdAt).getTime());
+      expect([...dates].sort((a, b) => b - a)).toEqual(dates);
+    });
+
+    it('refuses a limit above the cap instead of silently clamping at the door', async () => {
+      // The DTO rejects it; the store would clamp. Both, on purpose: the door
+      // tells a caller it asked for something impossible, and the clamp covers
+      // every caller that is not the door.
+      await asBot(http().get('/suggestions').query({ limit: 1000 })).expect(
+        400,
+      );
+    });
+
+    it('refuses a state outside the five', async () => {
+      await asBot(http().get('/suggestions').query({ status: 'Open' })).expect(
+        400,
+      );
+    });
+
+    it('is behind the bot key like every other route', async () => {
+      await http().get('/suggestions').expect(401);
+    });
+
+    it('returns an empty page rather than an error when nothing matches', async () => {
+      await seedMany();
+
+      const response = await asBot(
+        http().get('/suggestions').query({ status: 'concluida' }),
+      ).expect(200);
+
+      const page = bodyOf<{ items: unknown[]; total: number }>(response);
+      expect(page.items).toEqual([]);
+      expect(page.total).toBe(0);
+    });
+  });
+
   describe('POST /suggestions/:id/denied-attempts', () => {
     it('records what the bot refused, with actor and command', async () => {
       const seeded = await seed();
