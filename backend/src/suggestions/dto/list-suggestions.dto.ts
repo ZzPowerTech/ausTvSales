@@ -33,6 +33,7 @@ export class ListSuggestionsDto {
 
   @ApiPropertyOptional({
     minimum: 0,
+    maximum: Number.MAX_SAFE_INTEGER,
     default: 0,
     description: 'Quantas linhas pular. Paginacao por offset, nao por cursor.',
   })
@@ -40,5 +41,11 @@ export class ListSuggestionsDto {
   @Type(() => Number)
   @IsInt()
   @Min(0)
+  // `@IsInt()` e `Number.isInteger`, e `Number.isInteger(1e21)` e **true** — um
+  // float em notacao exponencial atravessava a validacao inteira. Daqui ele
+  // chegava ao Postgres como `1e+21` (`invalid input syntax for type bigint`,
+  // 500 numa rota que promete 400) ou, sendo `NaN`, fazia o drizzle omitir o
+  // `OFFSET` e devolver a primeira pagina reportando um offset que nao aplicou.
+  @Max(Number.MAX_SAFE_INTEGER)
   offset?: number;
 }

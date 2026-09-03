@@ -403,35 +403,67 @@ describe('Suggestion states (e2e)', () => {
   });
 
   describe('GET /suggestions', () => {
-    async function seedMany(): Promise<void> {
-      // Two share an instant on purpose: `created_at` is the event date, so a
-      // burst or a backfill produces ties, and a tie is where a non-total order
-      // makes pages overlap or skip rows.
-      const shared = new Date('2026-08-20T12:00:00.000Z');
-      await db.insert(suggestions).values([
-        {
-          discordMsgId: '901',
-          author: AUTHOR,
-          text: 'a',
-          createdAt: new Date('2026-08-19T10:00:00.000Z'),
-        },
-        { discordMsgId: '902', author: AUTHOR, text: 'b', createdAt: shared },
-        { discordMsgId: '903', author: AUTHOR, text: 'c', createdAt: shared },
-        {
-          discordMsgId: '904',
-          author: AUTHOR,
-          text: 'd',
-          createdAt: new Date('2026-08-21T10:00:00.000Z'),
-          status: 'aprovada',
-        },
-        {
-          discordMsgId: '905',
-          author: AUTHOR,
-          text: 'e',
-          createdAt: new Date('2026-08-22T10:00:00.000Z'),
-          status: 'aprovada',
-        },
-      ]);
+    /**
+     * Five suggestions, with the tie placed to **straddle** a page boundary.
+     *
+     * The first version put the two same-instant rows in positions 2 and 3,
+     * which with `limit: 2` are exactly the two slots of page two — so neither
+     * could cross a boundary and no tie-break could ever be observed. The test
+     * built on it passed identically with and without `desc(id)`, which is the
+     * house failure mode: a test that cannot fail, presented as the proof.
+     *
+     * Positions here, newest first: 0 `e`, **1 `d` / 2 `c` (the tie)**, 3 `b`,
+     * 4 `a`. With `limit: 2` the tie spans pages one and two.
+     */
+    async function seedMany(): Promise<number[]> {
+      const shared = new Date('2026-08-21T10:00:00.000Z');
+      const rows = await db
+        .insert(suggestions)
+        .values([
+          {
+            discordMsgId: '901',
+            author: AUTHOR,
+            text: 'a',
+            createdAt: new Date('2026-08-18T10:00:00.000Z'),
+          },
+          {
+            discordMsgId: '902',
+            author: AUTHOR,
+            text: 'b',
+            createdAt: new Date('2026-08-19T10:00:00.000Z'),
+          },
+          {
+            discordMsgId: '903',
+            author: AUTHOR,
+            text: 'c',
+            createdAt: shared,
+            status: 'aprovada',
+          },
+          {
+            discordMsgId: '904',
+            author: AUTHOR,
+            text: 'd',
+            createdAt: shared,
+            status: 'aprovada',
+          },
+          {
+            discordMsgId: '905',
+            author: AUTHOR,
+            text: 'e',
+            createdAt: new Date('2026-08-22T10:00:00.000Z'),
+          },
+        ])
+        .returning({
+          id: suggestions.id,
+          discordMsgId: suggestions.discordMsgId,
+        });
+
+      const byMsg = new Map(rows.map((row) => [row.discordMsgId, row.id]));
+      // Expected order: newest first, ties broken by descending id — which for
+      // this seed means 904 before 903, since 904 was inserted second.
+      return ['905', '904', '903', '902', '901'].map(
+        (msg) => byMsg.get(msg) as number,
+      );
     }
 
     it('pages, and reports the total of the whole filtered set', async () => {
@@ -468,11 +500,12 @@ describe('Suggestion states (e2e)', () => {
       expect(page.items.every((item) => item.status === 'aprovada')).toBe(true);
     });
 
-    it('walks every row exactly once across pages, ties included', async () => {
-      // The assertion that a non-total order would fail: with `created_at`
-      // alone, Postgres may break the 902/903 tie differently per query, and a
-      // row shows up on both pages or on neither.
-      await seedMany();
+    it('walks the rows in one exact order across pages, tie included', async () => {
+      // Cardinality is not the assertion. The first version counted five
+      // distinct ids and passed with no tie-break at all; what fixes the
+      // invariant is the *sequence*, with the tie straddling a page edge so the
+      // order has to survive being split.
+      const expectedOrder = await seedMany();
 
       const seen: number[] = [];
       for (let offset = 0; offset < 5; offset += 2) {
@@ -486,8 +519,7 @@ describe('Suggestion states (e2e)', () => {
         );
       }
 
-      expect(seen).toHaveLength(5);
-      expect(new Set(seen).size).toBe(5);
+      expect(seen).toEqual(expectedOrder);
     });
 
     it('returns newest first', async () => {

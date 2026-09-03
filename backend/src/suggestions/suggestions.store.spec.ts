@@ -1,5 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { desc } from 'drizzle-orm';
 import { DRIZZLE } from '../db/database.module';
+import { suggestions } from '../db/schema';
 import { SuggestionTextError } from './suggestion-text';
 import {
   SUGGESTION_PAGE_DEFAULT,
@@ -406,12 +408,20 @@ describe('SuggestionsStore.list', () => {
     // `created_at` holds the event date, so two suggestions can share an
     // instant. Without a total order Postgres is free to break the tie
     // differently per query, and pages overlap or skip rows.
+    //
+    // The columns, not the count. Asserting `toHaveLength(2)` caught the second
+    // key being *removed* and not it being *replaced*: swapping `id` for
+    // `updated_at` keeps two arguments and stays green, while the order stops
+    // being total — two rows from one backfill share both timestamps. What has
+    // to hold is that the tiebreaker is unique.
     const { db, rowsChain } = buildList([], 0);
     const store = await storeWith(db);
 
     await store.list({});
 
-    expect(rowsChain.calls.orderBy.mock.calls[0]).toHaveLength(2);
+    const [first, second] = rowsChain.calls.orderBy.mock.calls[0];
+    expect(first).toEqual(desc(suggestions.createdAt));
+    expect(second).toEqual(desc(suggestions.id));
   });
 
   it('defaults the page size instead of returning everything', async () => {
@@ -433,7 +443,7 @@ describe('SuggestionsStore.list', () => {
     });
   });
 
-  it('clamps a nonsensical limit or offset', async () => {
+  it('clamps a nonsensical limit', async () => {
     const { db } = buildList([], 0);
     const store = await storeWith(db);
 
@@ -441,15 +451,30 @@ describe('SuggestionsStore.list', () => {
     await expect(store.list({ limit: -5 })).resolves.toMatchObject({
       limit: 1,
     });
-    await expect(store.list({ offset: -20 })).resolves.toMatchObject({
-      offset: 0,
-    });
     await expect(store.list({ limit: 2.7 })).resolves.toMatchObject({
       limit: 2,
     });
     await expect(store.list({ limit: Number.NaN })).resolves.toMatchObject({
       limit: SUGGESTION_PAGE_DEFAULT,
     });
+  });
+
+  it('refuses to trust a non-finite offset instead of dropping the clause', async () => {
+    // The mirror of `clampPageSize`, which was missing. `Number.isInteger(1e21)`
+    // is **true**, so the DTO's `@IsInt()` let it through; from there drizzle
+    // either sent `1e+21` to Postgres (`invalid input syntax for bigint`, a 500
+    // where the contract promises 400) or, for `NaN`/`Infinity`, dropped the
+    // `OFFSET` clause entirely and returned page one while the response echoed
+    // an offset it had not applied. Silent wrong answer, which is the failure
+    // the limit clamp exists to prevent on the other side.
+    const { db } = buildList([], 0);
+    const store = await storeWith(db);
+
+    for (const bad of [Number.NaN, Infinity, -Infinity, 1e21, -20, 2.7]) {
+      await expect(store.list({ offset: bad })).resolves.toMatchObject({
+        offset: bad === 2.7 ? 2 : 0,
+      });
+    }
   });
 
   it('applies the same filter to the rows and to the count', async () => {
