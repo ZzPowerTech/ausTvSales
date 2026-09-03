@@ -1,10 +1,8 @@
 import { SUGGESTION_STATUSES, type SuggestionStatus } from '../db/schema';
 import {
   ALLOWED_TRANSITIONS,
-  TERMINAL_STATUSES,
   canTransition,
   describeRefusal,
-  isSuggestionStatus,
 } from './suggestion-transitions';
 
 /**
@@ -64,9 +62,13 @@ describe('suggestion transitions', () => {
   });
 
   it('treats both endings as terminal', () => {
-    expect([...TERMINAL_STATUSES].sort()).toEqual(['concluida', 'recusada']);
-    for (const terminal of TERMINAL_STATUSES) {
+    for (const terminal of ['concluida', 'recusada'] as const) {
       expect(ALLOWED_TRANSITIONS[terminal]).toHaveLength(0);
+    }
+    // And nothing else is terminal — otherwise a suggestion could get stuck in
+    // a state nobody meant to be an ending.
+    for (const open of ['enviada', 'aprovada', 'em_andamento'] as const) {
+      expect(ALLOWED_TRANSITIONS[open].length).toBeGreaterThan(0);
     }
   });
 
@@ -74,22 +76,6 @@ describe('suggestion transitions', () => {
     expect(Object.keys(ALLOWED_TRANSITIONS).sort()).toEqual(
       [...SUGGESTION_STATUSES].sort(),
     );
-  });
-
-  describe('isSuggestionStatus', () => {
-    it('accepts the five states', () => {
-      for (const status of SUGGESTION_STATUSES) {
-        expect(isSuggestionStatus(status)).toBe(true);
-      }
-    });
-
-    it('rejects anything else, including the Ticket-Bot vocabulary', () => {
-      // `status` there is free text with "Open" and "Closed" in it. Untrusted
-      // input reaching this table has to be narrowed, not trusted.
-      for (const value of ['Open', 'Closed', 'ENVIADA', '', null, 7, {}]) {
-        expect(isSuggestionStatus(value)).toBe(false);
-      }
-    });
   });
 
   describe('describeRefusal', () => {

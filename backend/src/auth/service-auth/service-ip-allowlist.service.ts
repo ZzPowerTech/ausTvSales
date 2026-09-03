@@ -83,12 +83,22 @@ export abstract class ServiceIpAllowlistService {
   }
 
   /**
-   * Canonicalizes an address for comparison: lower-cased, with an IPv4-mapped
-   * IPv6 form (`::ffff:1.2.3.4`, as a dual-stack socket may report) reduced to
-   * the plain IPv4 so it matches an IPv4 allowlist entry.
+   * Canonicalizes an address for comparison.
+   *
+   * Lower-cased; an IPv4-mapped IPv6 form (`::ffff:1.2.3.4`, as a dual-stack
+   * socket may report) reduced to the plain IPv4; and **IPv6 loopback reduced to
+   * IPv4 loopback**, so `127.0.0.1` in a list also admits `::1`.
+   *
+   * That last one is not cosmetic. A caller that resolves `localhost` on a
+   * dual-stack host gets `::1` first, and Express then reports `::1` — which did
+   * not match a list containing `127.0.0.1`, while {@link isPrivateAddress} in
+   * this same class already agreed `::1` is loopback. The two functions
+   * disagreeing about what loopback means is how an allowlist rejects the
+   * traffic it was written to admit.
    */
   static normalize(ip: string): string {
     const trimmed = ip.trim().toLowerCase();
+    if (trimmed === '::1') return '127.0.0.1';
     const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(trimmed);
     return mapped ? mapped[1] : trimmed;
   }

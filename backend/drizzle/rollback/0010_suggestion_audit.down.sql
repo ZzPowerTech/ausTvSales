@@ -31,7 +31,7 @@ BEGIN
   ORDER BY "created_at" DESC
   LIMIT 1;
 
-  IF head_hash IS DISTINCT FROM '2c83d9a085babbc97d10bfeb927194dbe96f4c7ed0b489327a1b9d8f0d4dfcb8' THEN
+  IF head_hash IS DISTINCT FROM 'a8fb3d2f06bdaef52dfb9e93374c0a53d8fb4851caa79cc330c768fe29f28eb2' THEN
     RAISE EXCEPTION
       'Migration 0010 is not the head (head hash is %). Rolling it back here would drop the table and leave db:migrate reporting success. Roll back from the head, one at a time.',
       coalesce(head_hash, '<no migrations applied>');
@@ -47,7 +47,7 @@ DROP TABLE IF EXISTS "suggestion_audit";
 DO $$
 DECLARE removed integer;
 BEGIN
-  DELETE FROM "drizzle"."__drizzle_migrations" WHERE "hash" = '2c83d9a085babbc97d10bfeb927194dbe96f4c7ed0b489327a1b9d8f0d4dfcb8';
+  DELETE FROM "drizzle"."__drizzle_migrations" WHERE "hash" = 'a8fb3d2f06bdaef52dfb9e93374c0a53d8fb4851caa79cc330c768fe29f28eb2';
   GET DIAGNOSTICS removed = ROW_COUNT;
 
   IF removed <> 1 THEN

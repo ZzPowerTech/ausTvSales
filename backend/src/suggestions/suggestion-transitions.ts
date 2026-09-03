@@ -1,4 +1,4 @@
-import { SUGGESTION_STATUSES, type SuggestionStatus } from '../db/schema';
+import type { SuggestionStatus } from '../db/schema';
 
 /**
  * The state machine of spec §5.3:
@@ -38,26 +38,12 @@ export const ALLOWED_TRANSITIONS: Readonly<
   recusada: [],
 });
 
-/** States that accept no further transition. */
-export const TERMINAL_STATUSES: readonly SuggestionStatus[] =
-  SUGGESTION_STATUSES.filter(
-    (status) => ALLOWED_TRANSITIONS[status].length === 0,
-  );
-
 /** Whether `to` is a legal next state for a suggestion currently in `from`. */
 export function canTransition(
   from: SuggestionStatus,
   to: SuggestionStatus,
 ): boolean {
   return ALLOWED_TRANSITIONS[from].includes(to);
-}
-
-/** Whether `value` is one of the five states, narrowing an untrusted string. */
-export function isSuggestionStatus(value: unknown): value is SuggestionStatus {
-  return (
-    typeof value === 'string' &&
-    (SUGGESTION_STATUSES as readonly string[]).includes(value)
-  );
 }
 
 /**

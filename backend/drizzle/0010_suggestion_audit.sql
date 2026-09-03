@@ -13,7 +13,7 @@ CREATE TABLE "suggestion_audit" (
 	CONSTRAINT "suggestion_audit_to_status_valid" CHECK ("suggestion_audit"."to_status" IS NULL OR "suggestion_audit"."to_status" IN ('enviada', 'aprovada', 'em_andamento', 'concluida', 'recusada')),
 	CONSTRAINT "suggestion_audit_shape_matches_action" CHECK (("suggestion_audit"."action" = 'transition' AND "suggestion_audit"."to_status" IS NOT NULL AND "suggestion_audit"."reason" IS NULL)
           OR ("suggestion_audit"."action" = 'transition_denied' AND "suggestion_audit"."to_status" IS NOT NULL AND "suggestion_audit"."reason" IS NOT NULL)
-          OR ("suggestion_audit"."action" = 'auth_denied' AND "suggestion_audit"."reason" IS NOT NULL))
+          OR ("suggestion_audit"."action" = 'auth_denied' AND "suggestion_audit"."to_status" IS NULL AND "suggestion_audit"."reason" IS NOT NULL))
 );
 --> statement-breakpoint
 ALTER TABLE "suggestion_audit" ADD CONSTRAINT "suggestion_audit_suggestion_id_suggestions_id_fk" FOREIGN KEY ("suggestion_id") REFERENCES "public"."suggestions"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint

@@ -220,6 +220,12 @@ export class SuggestionsStore {
    * Returns `false` when the suggestion does not exist. No row is written in
    * that case: the trail is joined to real suggestions, and an orphan attempt
    * belongs in the log, not in a table that cannot represent it.
+   *
+   * The read and the write are **not** in one transaction, unlike
+   * {@link transition}. Inert today, because nothing deletes a suggestion: the
+   * row cannot vanish between the two statements. The day a delete path exists,
+   * this becomes a foreign-key violation — a 500 where the caller deserved the
+   * 404 the check above was written to produce.
    */
   async recordAuthDenied(
     input: StaffActionInput & { reason: string },

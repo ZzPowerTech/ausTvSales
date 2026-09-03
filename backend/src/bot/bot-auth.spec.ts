@@ -1,5 +1,10 @@
 import { ExecutionContext, ForbiddenException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { GUARDS_METADATA } from '@nestjs/common/constants';
+import { THROTTLER_LIMIT } from '@nestjs/throttler/dist/throttler.constants';
+import { BOT_THROTTLE_LIMIT } from '../config/throttling';
+import { IS_PUBLIC_KEY } from '../auth/public.decorator';
+import { BOT_AUTH_GUARDS, BotAuth } from './bot-auth.decorator';
 import { BotApiKeyGuard } from './bot-api-key.guard';
 import { BotApiKeyService } from './bot-api-key.service';
 import { BotIpAllowlistGuard } from './bot-ip-allowlist.guard';
@@ -113,6 +118,10 @@ describe('bot principal', () => {
       expect(service.isAllowed('127.0.0.1')).toBe(true);
       // IPv4-mapped IPv6, as a dual-stack socket may report it.
       expect(service.isAllowed('::ffff:127.0.0.1')).toBe(true);
+      // And plain IPv6 loopback, which is what Express reports when the caller
+      // resolved `localhost` on a dual-stack host — the natural thing for a
+      // co-located bot to write, and the form that used to be refused.
+      expect(service.isAllowed('::1')).toBe(true);
     });
 
     it('blocks a request that arrived through the proxy', () => {
@@ -163,11 +172,12 @@ describe('bot principal', () => {
       ).toThrow(ForbiddenException);
     });
 
-    it('does not blame TRUST_PROXY when a private source is refused', () => {
-      // The ingest guard says "this is probably the proxy, check TRUST_PROXY"
-      // for a private address, because the plugin calls from another machine.
-      // Here loopback is the normal case, so that hint would be a confident
-      // pointer at a non-problem on every refusal.
+    it('names the co-located cause on a refused loopback, not the proxy one', () => {
+      // The first version of this asserted *silence* — the guard was given a
+      // flag that suppressed the hint, on the reasoning that loopback is normal
+      // for a co-located caller. That turned off the only diagnostic pointing at
+      // the one failure that actually happens here: the configured address not
+      // being the one this deployment produces.
       const warn = jest
         .spyOn(Logger.prototype, 'warn')
         .mockImplementation(() => undefined);
@@ -182,12 +192,81 @@ describe('bot principal', () => {
         ),
       ).toThrow(ForbiddenException);
 
-      const messages = warn.mock.calls.map((call) => String(call[0]));
-      // It did log the refusal — otherwise "no TRUST_PROXY in the messages"
-      // would pass on an empty array and prove nothing.
-      expect(messages.join(' ')).toContain('source IP not in allowlist');
-      expect(messages.join(' ')).not.toContain('TRUST_PROXY');
+      const messages = warn.mock.calls.map((call) => String(call[0])).join(' ');
+      // It did log the refusal — otherwise the assertions below would pass on an
+      // empty array and prove nothing.
+      expect(messages).toContain('source IP not in allowlist');
+      // Its own hint, naming what a co-located principal gets wrong…
+      expect(messages).toContain('BOT_ALLOWED_IPS');
+      expect(messages).toContain('gateway da bridge');
+      // …and not the plugin's, which blames the proxy for reading the wrong hop.
+      expect(messages).not.toContain('nao o cliente real');
       warn.mockRestore();
     });
+  });
+});
+
+describe('@BotAuth()', () => {
+  /**
+   * The composition, asserted rather than described.
+   *
+   * The guard classes above are exercised in isolation, and the e2e suite ran
+   * with `BOT_ALLOWED_IPS` unset — so deleting `BotIpAllowlistGuard` from the
+   * decorator, or the `@Throttle` beside `ThrottlerGuard`, left the whole suite
+   * green. The protection against that was a comment.
+   */
+  class Probe {
+    @BotAuth()
+    handler(): void {}
+  }
+
+  const descriptor = Object.getOwnPropertyDescriptor(
+    Probe.prototype,
+    'handler',
+  ) as PropertyDescriptor;
+
+  it('applies the allowlist, the throttler and the key guard, in that order', () => {
+    const guards = Reflect.getMetadata(
+      GUARDS_METADATA,
+      descriptor.value as object,
+    ) as unknown[];
+
+    expect(guards).toEqual([...BOT_AUTH_GUARDS]);
+  });
+
+  it('rejects an unlisted source before the key is ever derived', () => {
+    // The allowlist first is the property that keeps arbitrary internet clients
+    // away from the scrypt derivation.
+    const guards = Reflect.getMetadata(
+      GUARDS_METADATA,
+      descriptor.value as object,
+    ) as unknown[];
+
+    expect(guards.indexOf(BotIpAllowlistGuard)).toBeLessThan(
+      guards.indexOf(BotApiKeyGuard),
+    );
+  });
+
+  it('carries a throttle profile, not just the guard', () => {
+    // `@Throttle` alone is inert metadata and `ThrottlerGuard` alone inherits
+    // the ingest profile — 10 req/s on a staff route. Both, or neither works.
+    // The key is suffixed with the profile name — `@Throttle({ default: … })`
+    // writes `THROTTLER:LIMITdefault`. Read from the constant plus the name, so
+    // a rename of the profile fails here instead of silently asserting nothing.
+    const limit = Reflect.getMetadata(
+      `${THROTTLER_LIMIT}default`,
+      descriptor.value as object,
+    ) as number | undefined;
+
+    expect(limit).toBe(BOT_THROTTLE_LIMIT);
+  });
+
+  it('marks the route public to the session guard', () => {
+    // Without `@Public()` the global deny-by-default guard would reject the bot,
+    // which has no session — and the route would be documented as needing a
+    // dashboard cookie.
+    expect(Reflect.getMetadata(IS_PUBLIC_KEY, descriptor.value as object)).toBe(
+      true,
+    );
   });
 });

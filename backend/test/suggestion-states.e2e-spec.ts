@@ -114,6 +114,32 @@ describe('Suggestion states (e2e)', () => {
         .expect(401);
     });
 
+    it('refuses a source outside the allowlist, key or no key', async () => {
+      // With `BOT_ALLOWED_IPS` unset — as CI had it — the allowlist is disabled
+      // and `isAllowed()` returns true for everything, so deleting
+      // `BotIpAllowlistGuard` from `@BotAuth()` left the whole suite green.
+      //
+      // `TRUST_PROXY` defaults to `loopback` and supertest connects from
+      // loopback, so the app honours this header and `req.ip` becomes the
+      // address below. 403 and not 401: the caller is not allowed here at all,
+      // whatever credential it holds.
+      const seeded = await seed('enviada', '900000000000000030');
+
+      await asBot(
+        http()
+          .get(`/suggestions/${seeded.id}`)
+          .set('X-Forwarded-For', '203.0.113.7'),
+      ).expect(403);
+    });
+
+    it('still admits the co-located caller', async () => {
+      // The other half: the allowlist is on, and it is not blocking the traffic
+      // it exists to admit. Without this, the test above could be passing
+      // because everything is refused.
+      const seeded = await seed('enviada', '900000000000000031');
+      await asBot(http().get(`/suggestions/${seeded.id}`)).expect(200);
+    });
+
     it('accepts the bot key', async () => {
       const seeded = await seed();
       const response = await asBot(http().get(`/suggestions/${seeded.id}`));
@@ -230,8 +256,12 @@ describe('Suggestion states (e2e)', () => {
 
       const after = await store.getById(seeded.id);
       expect(after?.createdAt).toEqual(new Date(POSTED_AT));
+      // `toBeGreaterThan`, with no slack. The first version subtracted one
+      // millisecond, which made it `>=` — and removing `$onUpdate` from the
+      // column left `updated_at` frozen at the insert and the test named "moves
+      // updated_at" still passing.
       expect(after?.updatedAt.getTime()).toBeGreaterThan(
-        seeded.updatedAt.getTime() - 1,
+        seeded.updatedAt.getTime(),
       );
     });
 

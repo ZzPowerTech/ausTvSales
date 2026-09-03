@@ -1,5 +1,5 @@
 {
-  "id": "ccd83c8f-74f8-4717-8194-ea002d999c13",
+  "id": "7474aae3-de58-4ab0-91fa-7208c7e49a8a",
   "prevId": "37d1c376-cc45-46ae-99b8-738f12ab061d",
   "version": "7",
   "dialect": "postgresql",
@@ -1012,7 +1012,7 @@
         },
         "suggestion_audit_shape_matches_action": {
           "name": "suggestion_audit_shape_matches_action",
-          "value": "(\"suggestion_audit\".\"action\" = 'transition' AND \"suggestion_audit\".\"to_status\" IS NOT NULL AND \"suggestion_audit\".\"reason\" IS NULL)\n          OR (\"suggestion_audit\".\"action\" = 'transition_denied' AND \"suggestion_audit\".\"to_status\" IS NOT NULL AND \"suggestion_audit\".\"reason\" IS NOT NULL)\n          OR (\"suggestion_audit\".\"action\" = 'auth_denied' AND \"suggestion_audit\".\"reason\" IS NOT NULL)"
+          "value": "(\"suggestion_audit\".\"action\" = 'transition' AND \"suggestion_audit\".\"to_status\" IS NOT NULL AND \"suggestion_audit\".\"reason\" IS NULL)\n          OR (\"suggestion_audit\".\"action\" = 'transition_denied' AND \"suggestion_audit\".\"to_status\" IS NOT NULL AND \"suggestion_audit\".\"reason\" IS NOT NULL)\n          OR (\"suggestion_audit\".\"action\" = 'auth_denied' AND \"suggestion_audit\".\"to_status\" IS NULL AND \"suggestion_audit\".\"reason\" IS NOT NULL)"
         }
       },
       "isRLSEnabled": false

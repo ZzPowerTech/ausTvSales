@@ -1011,11 +1011,17 @@ export type SuggestionAuditAction = (typeof SUGGESTION_AUDIT_ACTIONS)[number];
  * own history; "who has been trying to approve their own suggestions" is only
  * answerable if the attempts that failed were written down too.
  *
- * ## Append-only
+ * ## Append-only, by convention
  *
- * Same reasoning as `health_checks`: there is no update path and no delete path.
- * A trail that can be rewritten answers "what does it say now", which is not the
+ * Same reasoning as `health_checks`: no code path updates or deletes a row, and
+ * a trail that can be rewritten answers "what does it say now", which is not the
  * question anyone asks it.
+ *
+ * It is a convention and not a constraint: the application role holds `UPDATE`
+ * and `DELETE` on this table like any other. Making it real needs a rule or a
+ * trigger, and that is worth doing for the trail that outlives an incident —
+ * saying so here rather than letting the word "append-only" imply a guarantee
+ * the database is not making.
  */
 export const suggestionAudit = pgTable(
   'suggestion_audit',
@@ -1033,7 +1039,16 @@ export const suggestionAudit = pgTable(
     suggestionId: integer('suggestion_id')
       .notNull()
       .references(() => suggestions.id),
-    /** Discord user id of whoever acted. An identifier, never a display name. */
+    /**
+     * Discord user id of whoever acted. An identifier, never a display name.
+     *
+     * **Self-declared by the bot**, and the trail is only as good as that. The
+     * API cannot verify it: it holds no Discord token and never asks the guild
+     * who pressed the button. That is a deliberate trade — putting a bot token
+     * in this process to double-check would widen its blast radius — but it
+     * bounds what this table proves. It says "the bot reported that this id
+     * acted", not "this id acted". A compromised bot can write anything here.
+     */
     actor: text('actor').notNull(),
     action: text('action').$type<SuggestionAuditAction>().notNull(),
     /** State the suggestion was in. Always known: it is read before acting. */
@@ -1079,14 +1094,20 @@ export const suggestionAudit = pgTable(
       'suggestion_audit_to_status_valid',
       sql`${table.toStatus} IS NULL OR ${table.toStatus} IN ('enviada', 'aprovada', 'em_andamento', 'concluida', 'recusada')`,
     ),
-    // A recorded transition has a target and no refusal reason; a refusal has a
-    // reason. Enforced here so a row cannot claim to be a state change while
-    // carrying the shape of a rejection.
+    // A recorded transition has a target and no refusal reason; a machine
+    // refusal has both; an auth refusal has a reason and **no** target, because
+    // the bot rejected the actor before a target was chosen.
+    //
+    // That last clause is not decoration. Without it the doc on `toStatus`
+    // ("null only for auth_denied") was a claim the database did not hold, and a
+    // future bot that started sending the intended target would be accepted —
+    // silently breaking any reader that tells a machine refusal from an auth
+    // refusal by looking at the column.
     check(
       'suggestion_audit_shape_matches_action',
       sql`(${table.action} = 'transition' AND ${table.toStatus} IS NOT NULL AND ${table.reason} IS NULL)
           OR (${table.action} = 'transition_denied' AND ${table.toStatus} IS NOT NULL AND ${table.reason} IS NOT NULL)
-          OR (${table.action} = 'auth_denied' AND ${table.reason} IS NOT NULL)`,
+          OR (${table.action} = 'auth_denied' AND ${table.toStatus} IS NULL AND ${table.reason} IS NOT NULL)`,
     ),
   ],
 );

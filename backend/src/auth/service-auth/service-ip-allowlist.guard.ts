@@ -8,6 +8,15 @@ import type { Request } from 'express';
 import { ServiceIpAllowlistService } from './service-ip-allowlist.service';
 
 /**
+ * Hint for a principal that calls from **another machine**: a private address
+ * here is almost never a foreign caller being blocked, it is the app reading the
+ * proxy hop instead of the real client.
+ */
+export const PROXY_MISMATCH_HINT =
+  'endereco privado/loopback: provavelmente o proxy, nao o cliente real.' +
+  ' Verifique TRUST_PROXY (logado no boot) e se o proxy envia X-Forwarded-For';
+
+/**
  * Shared source-IP allowlist guard for the API's service principals.
  *
  * Applied BEFORE the API-key guard by every principal's auth decorator, so a
@@ -33,14 +42,18 @@ export abstract class ServiceIpAllowlistGuard implements CanActivate {
     private readonly principal: string,
     private readonly logger: Logger,
     /**
-     * Whether a private/loopback source is expected for this principal.
+     * What to add to the log when a **private/loopback** source is refused.
      *
-     * For the plugin it is not — it calls from another machine — so a private
-     * address means the app is reading the proxy hop instead of the real client.
-     * For the Discord bot, which runs on this very VPS, loopback is the normal
-     * case and the hint would be noise pointing at a non-problem.
+     * There is always something worth saying, which is why this replaced a
+     * boolean that suppressed the hint entirely. A private address reaching a
+     * principal that calls from another machine means `trust proxy` does not
+     * match how the proxy reaches this process; a private address refused for a
+     * co-located principal means the configured value is not the one this
+     * deployment actually produces. Different causes, same symptom, and neither
+     * is helped by silence — the boolean version turned off the only diagnostic
+     * pointing at the cause of an incident this repo has already had.
      */
-    private readonly expectsPrivateSource = false,
+    private readonly privateSourceHint = PROXY_MISMATCH_HINT,
   ) {}
 
   canActivate(context: ExecutionContext): boolean {
@@ -58,24 +71,15 @@ export abstract class ServiceIpAllowlistGuard implements CanActivate {
   }
 
   /**
-   * For a principal that calls from another machine, a private/loopback address
-   * here almost never means "a foreign caller was blocked" — it means `trust
-   * proxy` does not match how the proxy reaches this process. That is a config
-   * mistake whose symptom is legitimate traffic being refused, so the log points
-   * at it directly instead of leaving the operator to recognise a
-   * bridge-gateway address on their own.
+   * A private/loopback source is almost never a foreign caller being blocked, so
+   * the log names the likely cause instead of leaving the operator to recognise
+   * a bridge-gateway address on their own. What that cause *is* differs per
+   * principal, which is why the text is injected.
    */
   private proxyHint(ip: string | undefined): string {
-    if (
-      this.expectsPrivateSource ||
-      !ip ||
-      !ServiceIpAllowlistService.isPrivateAddress(ip)
-    ) {
+    if (!ip || !ServiceIpAllowlistService.isPrivateAddress(ip)) {
       return '';
     }
-    return (
-      ' — endereco privado/loopback: provavelmente o proxy, nao o cliente real.' +
-      ' Verifique TRUST_PROXY (logado no boot) e se o proxy envia X-Forwarded-For'
-    );
+    return ` — ${this.privateSourceHint}`;
   }
 }

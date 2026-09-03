@@ -6,15 +6,30 @@ import { ServiceIpAllowlistService } from '../auth/service-auth/service-ip-allow
  * Source-IP allowlist for the bot→API routes.
  *
  * The bot runs on the **same VPS** as this API (decision of 2026-09-02, which
- * also answers open question 4 of the sprint plan), so it calls over loopback
- * and the expected value is `127.0.0.1`.
+ * also answers open question 4 of the sprint plan), so it calls locally.
  *
- * A loopback-only allowlist looks like it guards nothing — anything on the box
- * can reach it. What it actually buys is the opposite direction: a request that
- * arrives **through Nginx** carries the real client address in `X-Forwarded-For`
- * and so never matches, which makes these routes unreachable from the internet
- * even if a location block is added by mistake. That is worth having for the
- * only routes in this API that mutate staff-facing state.
+ * ## The value is measured, not assumed
+ *
+ * `127.0.0.1` is the obvious guess for "same machine" and it is not what every
+ * deployment produces. With the API in a container — the topology
+ * `docs/nginx-ingest.md` describes, and the one behind the 2026-07-19 incident —
+ * a caller from outside the container arrives as the bridge gateway
+ * (`172.x.0.1`). `::1` is handled: `normalize` folds IPv6 loopback into the IPv4
+ * form, so a caller that resolved `localhost` on a dual-stack host still
+ * matches. The gateway case is not, and cannot be — it depends on the deploy.
+ *
+ * ## What the allowlist buys, stated conditionally
+ *
+ * A loopback-only list looks like it guards nothing: anything on the box reaches
+ * the process anyway. The gain runs the other way — a request arriving through
+ * Nginx **with `proxy_set_header X-Forwarded-For`** carries the real client
+ * address and never matches, so an accidental `location` block does not expose
+ * these routes.
+ *
+ * That is conditional and the condition matters: Nginx does not set that header
+ * on its own. Without it the request reaches the app as loopback and **does**
+ * match. What holds unconditionally is the smaller claim — a leaked key is
+ * useless off this host.
  *
  * Required in production by env validation, like the ingest one, and optional in
  * dev/test so local runs are not blocked.
