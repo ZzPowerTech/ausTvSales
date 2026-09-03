@@ -187,8 +187,44 @@ Suíte: **72 suítes, 903 testes** unitários, mais 5 arquivos de e2e novos cont
   **Por que nenhum teste pegava:** todas as fixtures de pagamento eram `PAY_RECEIVER`. Com uma
   linha por pagamento, um join que lê os dois tipos é indistinguível de um que lê o certo.
 
-**Próxima: Sprint 10** — sugestões (modelo, corpus e bot). Sem gate: a S6.1 foi cancelada e a S10
-não depende mais de nada da S6.
+**Sprint 10 — as três histórias entregues e mergeadas em cinco PRs. Nada implantado.** A sprint
+atravessa **dois repositórios**, o que o plano não dimensionava: S10.2 e S10.3 são cada uma metade
+backend e metade bot. [#202](https://github.com/ZzPowerTech/ausTvSales/pull/202) (schema),
+[#203](https://github.com/ZzPowerTech/ausTvSales/pull/203) (estados, auditoria, superfície),
+[#205](https://github.com/ZzPowerTech/ausTvSales/pull/205) (listagem paginada),
+[Ticket-Bot#1](https://github.com/austv-minecraft/Ticket-Bot/pull/1) (comandos, cargo, escape) e
+[Ticket-Bot#2](https://github.com/austv-minecraft/Ticket-Bot/pull/2) (navegação).
+
+**A decisão de arquitetura que a S10.2 exigiu, e que fechou a pergunta nº 4 do plano:** o bot roda
+na **mesma VPS da API**, a sugestão é persistida pela **API**, e o bot chega até ela por HTTP com
+token de serviço em loopback. Bot escrevendo direto no Postgres foi descartado: poria credencial de
+banco no host do bot e faria o schema existir em dois repositórios livres para divergir.
+
+**Onde cada decisão da S10.2 é tomada, e são lugares diferentes de propósito:** o cargo de staff é
+checado **no bot**, porque cargo do Discord só existe lá; a transição é validada **na API**, que tem
+a máquina de estados e recusa com 409 sem tocar no registro; e a recusa do bot é **reportada** para
+a API, porque recusa que só vive em log de processo não é consultável — que é o defeito do
+`sendTicketLog` uma camada acima.
+
+**Decisão que continua pendente do dono:** o diagrama da §5.3 lido como cadeia estrita só permite
+`recusada` depois de aprovar e iniciar. Implementei `recusada` alcançável de qualquer estado aberto,
+porque a maioria das recusas acontece na leitura e forçar a aprovação antes poria uma mentira na
+trilha de toda sugestão rejeitada. Está marcado no PR #203, não enterrado no código.
+
+⚠️ **Mergeado não é implantado, e nada disso foi observado em produção.** Os segredos que o
+subsistema exige (`BOT_API_KEYS` na API; `ADMIN_API_KEY`, `ADMIN_API_BASE_URL` e
+`SUGGESTIONS_CHANNEL_ID` no bot) ainda não existem na VPS — o que é seguro porque as três do bot
+são opcionais por decisão: sem elas os comandos de sugestão respondem "não configurado" e o resto
+do bot segue de pé. E `BOT_ALLOWED_IPS` precisa ser **medido**, não escolhido. E o revisor do
+Copilot **não rodou** em nenhum dos PRs (quota da conta esgotada) — a revisão que houve foi a do
+agente adversarial, que devolveu **as duas histórias** `BLOCKED`: sete achados na S10.1, e na S10.2
+um valor de allowlist que nenhuma topologia produz (backend) mais um furo de escape que um `>` na
+frente abria (bot), com o teste que deveria fixá-lo passando com a proteção removida.
+
+🔴 **Achado fora de escopo, no `Ticket-Bot`:** o `pnpm-lock.yaml` committado resolve para
+`@magicyan/discord@1.7.4` + `discord.js@14.20.0`, e esse par não importa (`LabelBuilder` não existe
+na 14.20). Uma instalação limpa **não sobe o bot**. Não foi causado por esta sprint; o próximo
+rebuild de imagem encontra.
 
 **🟢 A primeira leitura de produção com o funil inteiro vivo — 2026-09-02 22:05.** O relatório
 semanal rodou por gatilho manual, `delivered: true`, e **fecha o item do DoD da S9** que pedia um
