@@ -115,6 +115,44 @@ export class EnvironmentVariables {
   })
   INGEST_ALLOWED_IPS?: string;
 
+  // --- Bot auth (Discord bot -> API, AusTV Admin S10.2) ---
+
+  // Comma-separated list of accepted bot API keys, same 64-hex-char shape and
+  // same dual-key rotation window as the ingest list — and a DIFFERENT list on
+  // purpose. The bot and the plugin are two principals with two blast radiuses:
+  // one shared key would let a leaked bot key submit sales, and rotating one
+  // would take down the other.
+  //
+  // Required in every environment (fail-closed), for the reason the ingest keys
+  // are: these are the routes that mutate staff-facing state, and a process that
+  // boots without a key set is a process whose guard accepts nothing or (after
+  // one careless refactor) everything.
+  @Matches(/^\s*[0-9a-fA-F]{64}\s*(,\s*[0-9a-fA-F]{64}\s*)*$/, {
+    message:
+      'BOT_API_KEYS must be a comma-separated list of 64-char hex keys (openssl rand -hex 32)',
+  })
+  BOT_API_KEYS!: string;
+
+  // Exact source IPs allowed to reach the bot routes. The bot runs on this same
+  // VPS (decision of 2026-09-02), so in production this is `127.0.0.1`.
+  //
+  // A loopback allowlist reads like it guards nothing, and what it actually buys
+  // runs the other way: a request arriving through Nginx carries the real client
+  // address, so it never matches, and the suggestion routes stay unreachable
+  // from the internet even if a location block is added by mistake.
+  //
+  // Required in production, optional in dev/test — same staging as the ingest
+  // allowlist, and unset there disables the app-level check.
+  @ValidateIf(
+    (o: EnvironmentVariables) =>
+      o.NODE_ENV === Environment.Production || o.BOT_ALLOWED_IPS !== undefined,
+  )
+  @Matches(/^\s*[^\s,]+\s*(,\s*[^\s,]+\s*)*$/, {
+    message:
+      'BOT_ALLOWED_IPS must be a comma-separated list of IP addresses (required in production)',
+  })
+  BOT_ALLOWED_IPS?: string;
+
   // --- Instrumentation health alerts (AusTV Admin S6.3, ADR-006) ---
 
   // Discord webhook that receives the instrumentation-health alerts. The URL is

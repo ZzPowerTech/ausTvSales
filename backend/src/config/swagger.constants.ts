@@ -26,3 +26,13 @@ export const SESSION_SECURITY_SCHEME = 'session';
  * anonymous writes.
  */
 export const INGEST_SECURITY_SCHEME = 'ingest-api-key';
+
+/**
+ * Discord-bot API-key scheme (story S10.2).
+ *
+ * A second scheme rather than reusing the ingest one, because they are two
+ * principals with two key sets and two allowlists. Documenting the suggestion
+ * routes under `ingest-api-key` would tell a reader that the plugin's key opens
+ * them, which is exactly the confusion the separate key set exists to prevent.
+ */
+export const BOT_SECURITY_SCHEME = 'bot-api-key';

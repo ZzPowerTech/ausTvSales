@@ -181,3 +181,185 @@ describe('SuggestionsStore', () => {
     });
   });
 });
+
+describe('SuggestionsStore staff actions', () => {
+  /**
+   * `transition` runs inside `db.transaction`, so the stub has to hand the
+   * callback something that behaves like a transaction handle. Everything the
+   * method touches on it — select/for, update, insert — is recorded so the test
+   * can assert on *which* statements ran, which is the only way a stub can say
+   * anything about "the record was not altered".
+   */
+  function buildTx(current: unknown[], updated: unknown[]) {
+    const selectChain = chain(current);
+    const updateChain = chain(updated);
+    const insertChain = chain([]);
+
+    const tx = {
+      select: jest.fn(() => selectChain.proxy),
+      update: jest.fn(() => updateChain.proxy),
+      insert: jest.fn(() => insertChain.proxy),
+    };
+
+    const db = {
+      transaction: jest.fn(async (fn: (t: typeof tx) => Promise<unknown>) =>
+        fn(tx),
+      ),
+      select: jest.fn(() => selectChain.proxy),
+      insert: jest.fn(() => insertChain.proxy),
+    };
+
+    return { db, tx, selectChain, updateChain, insertChain };
+  }
+
+  async function storeWith(db: unknown): Promise<SuggestionsStore> {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [SuggestionsStore, { provide: DRIZZLE, useValue: db }],
+    }).compile();
+    return module.get(SuggestionsStore);
+  }
+
+  const ACTION = {
+    id: 1,
+    actor: '333333333333333333',
+    command: '/sugestao aprovar',
+  };
+
+  describe('transition', () => {
+    it('locks the row it is about to decide against', async () => {
+      // Without `FOR UPDATE` this is check-then-act, and two staff members
+      // pressing at once can land `aprovada` and `recusada` on the same
+      // suggestion — each legal at the instant it was checked.
+      const { db, selectChain } = buildTx(
+        [STORED],
+        [{ ...STORED, status: 'aprovada' }],
+      );
+      const store = await storeWith(db);
+
+      await store.transition({ ...ACTION, to: 'aprovada' });
+
+      expect(selectChain.calls.for).toHaveBeenCalledWith('update');
+    });
+
+    it('updates and writes a transition audit row on a legal move', async () => {
+      const moved = { ...STORED, status: 'aprovada' as const };
+      const { db, tx, insertChain } = buildTx([STORED], [moved]);
+      const store = await storeWith(db);
+
+      const outcome = await store.transition({ ...ACTION, to: 'aprovada' });
+
+      expect(outcome).toEqual({ ok: true, suggestion: moved });
+      expect(tx.update).toHaveBeenCalled();
+      const audit = insertChain.calls.values.mock.calls[0][0] as Record<
+        string,
+        unknown
+      >;
+      expect(audit).toMatchObject({
+        suggestionId: 1,
+        actor: ACTION.actor,
+        action: 'transition',
+        fromStatus: 'enviada',
+        toStatus: 'aprovada',
+        command: ACTION.command,
+      });
+      // A move that happened is not a refusal, so it carries no reason.
+      expect(audit.reason).toBeUndefined();
+    });
+
+    it('refuses an illegal move WITHOUT touching the suggestion', async () => {
+      // The literal wording of the acceptance criterion. `update` never being
+      // called is the assertion that carries it.
+      const { db, tx, insertChain } = buildTx([STORED], []);
+      const store = await storeWith(db);
+
+      const outcome = await store.transition({ ...ACTION, to: 'concluida' });
+
+      expect(tx.update).not.toHaveBeenCalled();
+      expect(outcome).toMatchObject({
+        ok: false,
+        reason: 'invalid_transition',
+        current: 'enviada',
+      });
+
+      const audit = insertChain.calls.values.mock.calls[0][0] as Record<
+        string,
+        unknown
+      >;
+      expect(audit).toMatchObject({
+        action: 'transition_denied',
+        fromStatus: 'enviada',
+        toStatus: 'concluida',
+        actor: ACTION.actor,
+        command: ACTION.command,
+      });
+      expect(audit.reason).toEqual(expect.stringContaining('aprovada'));
+    });
+
+    it('records the refusal even though nothing changed', async () => {
+      // A trail that only holds what succeeded cannot answer who has been
+      // trying what — which is the reason refusals are in this table at all.
+      const { db, tx } = buildTx([STORED], []);
+      const store = await storeWith(db);
+
+      await store.transition({ ...ACTION, to: 'concluida' });
+
+      expect(tx.insert).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports not_found without writing anything', async () => {
+      const { db, tx } = buildTx([], []);
+      const store = await storeWith(db);
+
+      const outcome = await store.transition({ ...ACTION, to: 'aprovada' });
+
+      expect(outcome).toEqual({ ok: false, reason: 'not_found' });
+      expect(tx.insert).not.toHaveBeenCalled();
+      expect(tx.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses a no-op transition to the state it is already in', async () => {
+      const { db, tx } = buildTx([STORED], []);
+      const store = await storeWith(db);
+
+      const outcome = await store.transition({ ...ACTION, to: 'enviada' });
+
+      expect(outcome).toMatchObject({
+        ok: false,
+        reason: 'invalid_transition',
+      });
+      expect(tx.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('recordAuthDenied', () => {
+    it('writes an auth_denied row against the current state', async () => {
+      const { db, insertChain } = buildTx([{ status: 'aprovada' }], []);
+      const store = await storeWith(db);
+
+      const recorded = await store.recordAuthDenied({
+        ...ACTION,
+        reason: 'sem cargo de staff',
+      });
+
+      expect(recorded).toBe(true);
+      expect(insertChain.calls.values.mock.calls[0][0]).toMatchObject({
+        suggestionId: 1,
+        actor: ACTION.actor,
+        action: 'auth_denied',
+        fromStatus: 'aprovada',
+        command: ACTION.command,
+        reason: 'sem cargo de staff',
+      });
+    });
+
+    it('writes nothing when the suggestion does not exist', async () => {
+      const { db, tx } = buildTx([], []);
+      const store = await storeWith(db);
+
+      await expect(
+        store.recordAuthDenied({ ...ACTION, reason: 'sem cargo' }),
+      ).resolves.toBe(false);
+      expect(tx.insert).not.toHaveBeenCalled();
+    });
+  });
+});

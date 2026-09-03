@@ -6,6 +6,7 @@ import { SESSION_COOKIE } from '../auth/auth.types';
 import { createDocsSessionMiddleware } from '../auth/docs-session.middleware';
 import { SessionService } from '../auth/session.service';
 import {
+  BOT_SECURITY_SCHEME,
   INGEST_SECURITY_SCHEME,
   SESSION_SECURITY_SCHEME,
 } from './swagger.constants';
@@ -173,6 +174,21 @@ export function setupSwagger(app: NestExpressApplication): void {
           'junto do header no mesmo esquema.',
       },
       INGEST_SECURITY_SCHEME,
+    )
+    .addApiKey(
+      {
+        type: 'apiKey',
+        in: 'header',
+        name: 'X-Api-Key',
+        description:
+          'Chave compartilhada do bot do Discord (S10.2). Vale apenas para as ' +
+          'rotas de sugestao, e somente a partir dos IPs da allowlist do bot — ' +
+          'que em producao e o loopback, porque o bot roda na mesma VPS. Uma ' +
+          'chamada vinda de fora, via Nginx, carrega o IP real do cliente e ' +
+          'leva 403. Chave distinta da de ingest de proposito: sao dois ' +
+          'principais, e um vazamento nao pode virar o outro.',
+      },
+      BOT_SECURITY_SCHEME,
     )
     // Requisito global: quem nao declarar o proprio esquema exige sessao. Sem
     // isto o documento nao distingue rota protegida de rota publica, e a

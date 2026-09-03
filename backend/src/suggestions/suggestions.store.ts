@@ -1,8 +1,15 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDB } from '../db/database.module';
-import { type Suggestion, suggestions } from '../db/schema';
+import {
+  type Suggestion,
+  type SuggestionAuditEntry,
+  type SuggestionStatus,
+  suggestionAudit,
+  suggestions,
+} from '../db/schema';
 import { sanitizeSuggestionText } from './suggestion-text';
+import { canTransition, describeRefusal } from './suggestion-transitions';
 
 /**
  * Everything needed to record a suggestion, and nothing the database decides.
@@ -22,6 +29,33 @@ export interface NewSuggestionInput {
   /** When the player posted it. Not defaulted, and not the insert time. */
   createdAt: Date;
 }
+
+/**
+ * What a staff action asks for. `command` is carried on every one of them
+ * because story S10.2 wants a denied attempt logged "with author and command" —
+ * and an actor without the route they took is half an incident report.
+ */
+export interface StaffActionInput {
+  /** Suggestion being acted upon. */
+  id: number;
+  /** Discord user id of the staff member. */
+  actor: string;
+  /** Bot command name or component custom id that produced the attempt. */
+  command: string;
+}
+
+/** Result of {@link SuggestionsStore.transition}. */
+export type TransitionOutcome =
+  | { ok: true; suggestion: Suggestion }
+  | { ok: false; reason: 'not_found' }
+  | {
+      ok: false;
+      reason: 'invalid_transition';
+      /** State the suggestion is actually in. */
+      current: SuggestionStatus;
+      /** Player-facing explanation, naming what *is* allowed. */
+      message: string;
+    };
 
 /**
  * The write path for player suggestions (spec §7, story S10.1).
@@ -101,5 +135,142 @@ export class SuggestionsStore {
       .where(eq(suggestions.discordMsgId, discordMsgId))
       .limit(1);
     return rows[0] ?? null;
+  }
+
+  /**
+   * Move one suggestion to `to`, if the state machine allows it.
+   *
+   * ## "Refused without altering the record", literally
+   *
+   * The read, the decision and the write happen in one transaction, with the
+   * row held by `FOR UPDATE`. Two staff members pressing buttons at the same
+   * moment therefore serialize: the second one decides against the state the
+   * first one left behind, not against the state it saw when it rendered.
+   *
+   * Without the lock this would be check-then-act, and the failure is not
+   * theoretical — it is `aprovada` and `recusada` both landing on the same
+   * suggestion, each having been legal at the instant it was checked.
+   *
+   * A refused transition still **commits**: the suggestion is untouched and an
+   * `transition_denied` row is written. That is the point of recording refusals
+   * — an audit trail that only holds what succeeded cannot answer who has been
+   * trying what.
+   */
+  async transition(
+    input: StaffActionInput & { to: SuggestionStatus },
+  ): Promise<TransitionOutcome> {
+    return this.db.transaction(async (tx) => {
+      const [current] = await tx
+        .select()
+        .from(suggestions)
+        .where(eq(suggestions.id, input.id))
+        .for('update');
+
+      if (!current) return { ok: false, reason: 'not_found' };
+
+      if (!canTransition(current.status, input.to)) {
+        const message = describeRefusal(current.status, input.to);
+        await tx.insert(suggestionAudit).values({
+          suggestionId: current.id,
+          actor: input.actor,
+          action: 'transition_denied',
+          fromStatus: current.status,
+          toStatus: input.to,
+          command: input.command,
+          reason: message,
+        });
+        this.logger.warn(
+          `Refused ${current.status} -> ${input.to} on suggestion ${input.id} by ${input.actor} via ${input.command}`,
+        );
+        return {
+          ok: false,
+          reason: 'invalid_transition',
+          current: current.status,
+          message,
+        };
+      }
+
+      const [updated] = await tx
+        .update(suggestions)
+        .set({ status: input.to })
+        .where(eq(suggestions.id, input.id))
+        .returning();
+
+      await tx.insert(suggestionAudit).values({
+        suggestionId: input.id,
+        actor: input.actor,
+        action: 'transition',
+        fromStatus: current.status,
+        toStatus: input.to,
+        command: input.command,
+      });
+
+      return { ok: true, suggestion: updated };
+    });
+  }
+
+  /**
+   * Record an attempt the **bot** refused before it ever got here.
+   *
+   * The staff-role check has to happen where the Discord roles are, which is the
+   * bot. That makes the refusal invisible to this database unless the bot
+   * reports it — and a refusal nobody can query is the `sendTicketLog` problem
+   * again, one layer up.
+   *
+   * Returns `false` when the suggestion does not exist. No row is written in
+   * that case: the trail is joined to real suggestions, and an orphan attempt
+   * belongs in the log, not in a table that cannot represent it.
+   *
+   * The read and the write are **not** in one transaction, unlike
+   * {@link transition}. Inert today, because nothing deletes a suggestion: the
+   * row cannot vanish between the two statements. The day a delete path exists,
+   * this becomes a foreign-key violation — a 500 where the caller deserved the
+   * 404 the check above was written to produce.
+   */
+  async recordAuthDenied(
+    input: StaffActionInput & { reason: string },
+  ): Promise<boolean> {
+    const [current] = await this.db
+      .select({ status: suggestions.status })
+      .from(suggestions)
+      .where(eq(suggestions.id, input.id));
+
+    if (!current) return false;
+
+    await this.db.insert(suggestionAudit).values({
+      suggestionId: input.id,
+      actor: input.actor,
+      action: 'auth_denied',
+      fromStatus: current.status,
+      command: input.command,
+      reason: input.reason,
+    });
+    this.logger.warn(
+      `Bot refused ${input.actor} on suggestion ${input.id} via ${input.command}: ${input.reason}`,
+    );
+    return true;
+  }
+
+  /** One suggestion by id, or `null`. */
+  async getById(id: number): Promise<Suggestion | null> {
+    const rows = await this.db
+      .select()
+      .from(suggestions)
+      .where(eq(suggestions.id, id))
+      .limit(1);
+    return rows[0] ?? null;
+  }
+
+  /** This suggestion's audit trail, newest first. */
+  async auditFor(
+    suggestionId: number,
+    limit = 50,
+  ): Promise<SuggestionAuditEntry[]> {
+    return this.db
+      .select()
+      .from(suggestionAudit)
+      .where(eq(suggestionAudit.suggestionId, suggestionId))
+      .orderBy(desc(suggestionAudit.at))
+      .limit(limit);
   }
 }
