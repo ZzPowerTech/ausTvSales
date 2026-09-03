@@ -1,12 +1,18 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
 import * as schema from '../src/db/schema';
 import { sanitizeSuggestionText } from '../src/suggestions/suggestion-text';
+import {
+  bodyBeforeCommit,
+  migrationChainFrom,
+  migrationFile,
+  rollbackChainDownTo,
+  rollbackFile,
+} from './rollback-utils';
 import { SuggestionsStore } from '../src/suggestions/suggestions.store';
 import {
   SUGGESTION_STATUSES,
@@ -14,30 +20,8 @@ import {
   suggestions,
 } from '../src/db/schema';
 
-const MIGRATION_FILE = join(__dirname, '..', 'drizzle', '0009_suggestions.sql');
-const ROLLBACK_FILE = join(
-  __dirname,
-  '..',
-  'drizzle',
-  'rollback',
-  '0009_suggestions.down.sql',
-);
-
-/**
- * The rollback script up to (but excluding) its final `COMMIT`.
- *
- * The script is written to be run whole by an operator, so it opens and closes
- * its own transaction. The suite needs everything except that close: it runs the
- * real statements, asserts against the uncommitted state, and issues its own
- * `ROLLBACK`. Asserting the trailing `COMMIT` is present keeps this helper from
- * quietly becoming a no-op if the script ever stops managing its transaction.
- */
-function rollbackBodyBeforeCommit(): string {
-  const script = readFileSync(ROLLBACK_FILE).toString();
-  const commitAt = script.lastIndexOf('COMMIT;');
-  expect(commitAt).toBeGreaterThan(-1);
-  return script.slice(0, commitAt);
-}
+const MIGRATION_FILE = migrationFile('0009');
+const ROLLBACK_FILE = rollbackFile('0009');
 
 /**
  * Integration test for the `suggestions` schema (story S10.1) against a real
@@ -380,11 +364,13 @@ describe('Suggestions schema (e2e)', () => {
       const client = await pool.connect();
 
       try {
-        // The script opens its own transaction and ends with COMMIT. Everything
-        // up to that COMMIT runs verbatim; the suite substitutes its own
-        // ROLLBACK at the end so the real statements - both guards included -
-        // are exercised without leaving the shared database dropped.
-        await client.query(rollbackBodyBeforeCommit());
+        // Chained down from the head, one script at a time, because that is the
+        // only order the guards allow. When 0010 landed, this test failed with
+        // "0009 is not the head" — the guard catching its own author, which is
+        // exactly the production accident it was written to prevent.
+        for (const down of rollbackChainDownTo('0009')) {
+          await client.query(down);
+        }
 
         const dropped = await client.query<{ table_ref: string | null }>(
           `SELECT to_regclass('public.suggestions') AS table_ref`,
@@ -402,10 +388,12 @@ describe('Suggestions schema (e2e)', () => {
         );
         expect(bookkeeping.rows[0].count).toBe('0');
 
-        // Forward again, on top of the rollback, inside the same transaction:
-        // the migration has to be re-appliable, which is what makes the
-        // rollback safe to use rather than merely destructive.
-        await client.query(readFileSync(MIGRATION_FILE).toString());
+        // Forward again, on top of the rollback: the migrations have to be
+        // re-appliable, which is what makes a rollback safe to use rather than
+        // merely destructive.
+        for (const up of migrationChainFrom('0009')) {
+          await client.query(up);
+        }
         const recreated = await client.query<{ table_ref: string | null }>(
           `SELECT to_regclass('public.suggestions') AS table_ref`,
         );
@@ -413,8 +401,7 @@ describe('Suggestions schema (e2e)', () => {
       } finally {
         // In the `finally`, not after the assertions: a failed expectation
         // throws, and a connection returned to the pool mid-transaction poisons
-        // whatever picks it up next — which is how one broken assertion here
-        // turned into `current transaction is aborted` in an unrelated hook.
+        // whatever picks it up next.
         await client.query('ROLLBACK');
         client.release();
       }
@@ -426,7 +413,7 @@ describe('Suggestions schema (e2e)', () => {
       expect(rows[0].table_ref).not.toBeNull();
     });
 
-    it('refuses to run when 0009 is not the head', async () => {
+    it('refuses to run on its own, under a newer migration', async () => {
       // The failure the guard exists for: roll 0009 back under a newer
       // migration and drizzle, which decides by timestamp, would report nothing
       // pending forever while the table is gone.
@@ -436,13 +423,13 @@ describe('Suggestions schema (e2e)', () => {
         await client.query('BEGIN');
         await client.query(
           `INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
-           VALUES ('pretend-0010', $1)`,
+           VALUES ('pretend-newer', $1)`,
           [Date.now() + 60_000],
         );
 
-        await expect(client.query(rollbackBodyBeforeCommit())).rejects.toThrow(
-          /not the head/,
-        );
+        await expect(
+          client.query(bodyBeforeCommit(ROLLBACK_FILE)),
+        ).rejects.toThrow(/not the head/);
       } finally {
         await client.query('ROLLBACK');
         client.release();

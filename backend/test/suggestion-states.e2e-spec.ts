@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { asc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
@@ -11,20 +10,14 @@ import * as schema from '../src/db/schema';
 import { suggestionAudit, suggestions } from '../src/db/schema';
 import { SuggestionsStore } from '../src/suggestions/suggestions.store';
 import { createApp } from './e2e-utils';
+import {
+  bodyBeforeCommit,
+  migrationFile,
+  rollbackFile,
+} from './rollback-utils';
 
-const MIGRATION_FILE = join(
-  __dirname,
-  '..',
-  'drizzle',
-  '0010_suggestion_audit.sql',
-);
-const ROLLBACK_FILE = join(
-  __dirname,
-  '..',
-  'drizzle',
-  'rollback',
-  '0010_suggestion_audit.down.sql',
-);
+const MIGRATION_FILE = migrationFile('0010');
+const ROLLBACK_FILE = rollbackFile('0010');
 
 /** The key the CI workflow and `.env.example` configure for the bot principal. */
 const BOT_KEY = process.env.BOT_API_KEYS?.split(',')[0].trim() ?? '';
@@ -501,13 +494,6 @@ describe('Suggestion states (e2e)', () => {
   });
 
   describe('rollback', () => {
-    function rollbackBodyBeforeCommit(): string {
-      const script = readFileSync(ROLLBACK_FILE).toString();
-      const commitAt = script.lastIndexOf('COMMIT;');
-      expect(commitAt).toBeGreaterThan(-1);
-      return script.slice(0, commitAt);
-    }
-
     it('pins the hash the migrator actually recorded', async () => {
       const expected = createHash('sha256')
         .update(readFileSync(MIGRATION_FILE).toString())
@@ -525,7 +511,7 @@ describe('Suggestion states (e2e)', () => {
     it('removes the table and re-applying restores it', async () => {
       const client = await pool.connect();
       try {
-        await client.query(rollbackBodyBeforeCommit());
+        await client.query(bodyBeforeCommit(ROLLBACK_FILE));
 
         const dropped = await client.query<{ table_ref: string | null }>(
           `SELECT to_regclass('public.suggestion_audit') AS table_ref`,
@@ -558,9 +544,9 @@ describe('Suggestion states (e2e)', () => {
           [Date.now() + 60_000],
         );
 
-        await expect(client.query(rollbackBodyBeforeCommit())).rejects.toThrow(
-          /not the head/,
-        );
+        await expect(
+          client.query(bodyBeforeCommit(ROLLBACK_FILE)),
+        ).rejects.toThrow(/not the head/);
       } finally {
         await client.query('ROLLBACK');
         client.release();
