@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.18.0...backend-v0.19.0) (2026-09-03)
+
+
+### Features
+
+* **admin:** a listagem ordena por data e desempata por id ([#205](https://github.com/ZzPowerTech/ausTvSales/issues/205)) ([09c695b](https://github.com/ZzPowerTech/ausTvSales/commit/09c695bfd3d6758c61f5316fdab8e9fce2689757))
+
 ## [0.18.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.17.2...backend-v0.18.0) (2026-09-03)
 
 
