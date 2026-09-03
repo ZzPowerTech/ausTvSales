@@ -225,9 +225,12 @@ describe('Suggestion states (e2e)', () => {
       const seeded = await seed();
 
       const response = await asBot(
-        http()
-          .patch(`/suggestions/${seeded.id}/status`)
-          .send({ to: 'aprovada', actor: STAFF, command: '/sugestao aprovar' }),
+        http().patch(`/suggestions/${seeded.id}/status`).send({
+          to: 'aprovada',
+          actor: STAFF,
+          command: '/sugestao aprovar',
+          actor_nickname: 'Shinigami',
+        }),
       ).expect(200);
 
       expect(bodyOf<{ status: string }>(response).status).toBe('aprovada');
@@ -251,9 +254,12 @@ describe('Suggestion states (e2e)', () => {
       const seeded = await seed();
 
       await asBot(
-        http()
-          .patch(`/suggestions/${seeded.id}/status`)
-          .send({ to: 'aprovada', actor: STAFF, command: 'btn' }),
+        http().patch(`/suggestions/${seeded.id}/status`).send({
+          to: 'aprovada',
+          actor: STAFF,
+          command: 'btn',
+          actor_nickname: 'Shinigami',
+        }),
       ).expect(200);
 
       const after = await store.getById(seeded.id);
@@ -318,9 +324,12 @@ describe('Suggestion states (e2e)', () => {
       const seeded = await seed('concluida', '900000000000000010');
 
       const response = await asBot(
-        http()
-          .patch(`/suggestions/${seeded.id}/status`)
-          .send({ to: 'aprovada', actor: STAFF, command: 'btn' }),
+        http().patch(`/suggestions/${seeded.id}/status`).send({
+          to: 'aprovada',
+          actor: STAFF,
+          command: 'btn',
+          actor_nickname: 'Shinigami',
+        }),
       ).expect(409);
 
       expect(bodyOf<{ message: string }>(response).message).toContain('final');
@@ -340,9 +349,12 @@ describe('Suggestion states (e2e)', () => {
 
     it('answers 404 for a suggestion that does not exist', async () => {
       await asBot(
-        http()
-          .patch('/suggestions/999999/status')
-          .send({ to: 'aprovada', actor: STAFF, command: 'btn' }),
+        http().patch('/suggestions/999999/status').send({
+          to: 'aprovada',
+          actor: STAFF,
+          command: 'btn',
+          actor_nickname: 'Shinigami',
+        }),
       ).expect(404);
     });
 
@@ -368,6 +380,7 @@ describe('Suggestion states (e2e)', () => {
           to: 'aprovada',
           actor: STAFF,
           command: 'btn-aprovar',
+          actorNickname: 'Shinigami',
         }),
         store.transition({
           id: seeded.id,
@@ -457,9 +470,11 @@ describe('Suggestion states (e2e)', () => {
       const seeded = await seed('enviada', '900000000000000041');
 
       await asBot(
-        http()
-          .patch(`/suggestions/${seeded.id}/status`)
-          .send({ to: 'aprovada', actor: STAFF, command: 'btn' }),
+        http().patch(`/suggestions/${seeded.id}/status`).send({
+          to: 'aprovada',
+          actor: STAFF,
+          command: 'btn',
+        }),
       ).expect(400);
 
       const after = await store.getById(seeded.id);
@@ -760,9 +775,12 @@ describe('Suggestion states (e2e)', () => {
         }),
       ).expect(409);
       await asBot(
-        http()
-          .patch(`/suggestions/${seeded.id}/status`)
-          .send({ to: 'aprovada', actor: STAFF, command: 'aprovar' }),
+        http().patch(`/suggestions/${seeded.id}/status`).send({
+          to: 'aprovada',
+          actor: STAFF,
+          command: 'aprovar',
+          actor_nickname: 'Shinigami',
+        }),
       ).expect(200);
 
       const response = await asBot(

@@ -114,13 +114,26 @@ export class SuggestionsController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: TransitionSuggestionDto,
   ): Promise<Suggestion> {
-    const outcome = await this.store.transition({
-      id,
-      to: dto.to,
-      actor: dto.actor,
-      command: dto.command,
-      actorNickname: dto.actor_nickname,
-    });
+    let outcome;
+    try {
+      outcome = await this.store.transition({
+        id,
+        to: dto.to,
+        actor: dto.actor,
+        command: dto.command,
+        actorNickname: dto.actor_nickname,
+      });
+    } catch (error) {
+      // Same mapping as `create`, and it was missing here: approving freezes a
+      // nickname, so this route sanitizes player-controlled text too. Without
+      // the branch a name that is blank once cleaned came back as a **500**,
+      // which tells the bot "the service broke" when the truth is "that name
+      // cannot be stored".
+      if (error instanceof SuggestionTextError) {
+        throw new UnprocessableSuggestionTextException(error);
+      }
+      throw error;
+    }
 
     if (outcome.ok) return outcome.suggestion;
     if (outcome.reason === 'not_found') throw new NotFoundException();
