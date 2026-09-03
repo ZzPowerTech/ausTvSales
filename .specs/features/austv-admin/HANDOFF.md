@@ -1481,3 +1481,70 @@ linha de tendência. Não se decide isso pelo código.
 em 2026-09-03. Até lá, receita por coorte, tempo até o 1º gasto, E3, E4 e R1 continuam sem base — e
 a posição por jogador no tutorial depende do ciclo das 03:00 com o `TUTORIAL_POSITION_ENABLED`
 ligado, que só passou a valer hoje.
+
+---
+
+## Sprint 10 — o que a leitura do `Ticket-Bot` mudou (2026-09-02/03)
+
+### A pergunta nº 4 caiu, e a resposta decidiu a arquitetura
+
+**O bot roda na mesma VPS da API** (dono, 2026-09-02). Com isso, a sugestão é persistida pela API e
+o bot chega por HTTP em loopback com token de serviço.
+
+A alternativa — bot falando direto com o Postgres — não foi descartada por gosto: poria uma
+credencial de banco no host do bot, e o schema passaria a existir em dois repositórios que podem
+divergir sem que nada reclame. O token é revogável; a credencial de banco é uma chave mestra.
+
+**Efeito colateral que parece nada e não é:** a allowlist de IP do bot é o loopback, o que soa
+inútil (qualquer coisa na máquina alcança). O que ela compra corre no sentido oposto — uma
+requisição que chega **pelo Nginx** carrega o IP real do cliente, não casa com `127.0.0.1`, e as
+rotas de sugestão ficam inalcançáveis da internet mesmo que um `location` entre por engano. São as
+únicas rotas desta API que mudam estado de staff.
+
+### O `escapeMarkdown` da discord.js não faz o que o nome promete
+
+Medido na 14.19: com as opções padrão, `# titulo [clique](http://evil)` volta **byte a byte
+idêntico**. `heading`, `bulletedList`, `numberedList` e `maskedLink` são `false` por padrão.
+
+Isso é razoável para quem formata as próprias strings, e errado para quem formata as de um
+estranho. Num card de sugestão o jogador viraria o próprio texto em cabeçalho, ou em link cujo
+rótulo diz uma coisa e o destino diz outra — o mais interessante dos dois.
+
+**A regra que fica:** escapar não é uma chamada, é uma chamada **com opções**. E escapar não para
+menção: `@everyone` não é markdown, sobrevive ao escape, e o Discord resolve com as permissões do
+**bot**. `allowedMentions: { parse: [] }` é a outra metade, e as duas são necessárias.
+
+### O bug de escape que continua em produção
+
+`Ticket-Bot`, `src/discord/responders/tickets/control/open-details-member.ts:16` interpola o motivo
+escrito pelo jogador cru, sem escape e sem `allowedMentions`. Um jogador digita `@everyone` no campo
+"Motivo", um staff clica em "Ver Especificações", e o bot repete o texto usando as permissões dele.
+
+Lá a resposta é `ephemeral`, o que reduz o alcance — **não elimina**. Não foi corrigido na S10.2:
+mexer no domínio de tickets junto misturaria dois assuntos num PR. Está registrado no `CLAUDE.md`
+do bot e continua aberto.
+
+### Uma guarda que derrubou o teste do próprio autor
+
+Os scripts de rollback recusam rodar se a migration deles não for a cabeça — porque o `drizzle-kit`
+decide por timestamp, e reverter uma migration sob outra mais nova derruba a tabela enquanto o
+`db:migrate` segue dizendo "nada pendente", para sempre.
+
+A guarda entrou com a 0009. Quando a 0010 chegou, o teste de rollback da 0009 falhou com *"0009 is
+not the head"* — a guarda pegando quem a escreveu.
+
+**Contornar seria fácil e errado.** A ordem que os scripts permitem é uma só, e virou código
+(`backend/test/rollback-utils.ts`: desce da cabeça até o alvo, reaplica na volta) em vez de
+convenção escrita num README. Regra que mora em README não é regra — que é o mesmo argumento que a
+store deste épico faz sobre sanitizar numa porta só.
+
+### Método: o que os testes pegaram e os unitários não podiam
+
+- O CHECK de "texto presente" usava `btrim(x)`, que corta **espaço ASCII e mais nada**. Só a
+  asserção contra Postgres real pegou; os unitários exercitam o sanitizador, que nunca foi o que
+  estava errado.
+- A ordem do NFC: o teste que "provava" normalização usava a forma já composta dos dois lados e
+  passava por construção. O caso que discrimina é um zero-width **entre** a base e a combinante.
+- Os dois limites de 2000 (`String.length` em UTF-16 contra `length()` do Postgres em caracteres)
+  coincidiam por acidente em todos os testes, porque todos usavam ASCII. Faltava a **combinação**,
+  não o eixo — o mesmo formato de lacuna do `belowMinimum` da S9.

@@ -1151,6 +1151,114 @@ Dois padrões que valem registrar como método, não como incidente:
 
 ---
 
+## Registro da Sprint 10 (2026-09-02/03)
+
+**As três histórias entregues e mergeadas, em cinco PRs.** A sprint atravessa **dois
+repositórios**, o que não estava dimensionado no plano: S10.2 e S10.3 são cada uma metade backend
+(`ausTvSales`) e metade bot (`austv-minecraft/Ticket-Bot`), e não existe PR único que cubra
+qualquer das duas.
+
+**Mergeado ≠ implantado.** Nada disto rodou em produção, e as variáveis de ambiente que o
+subsistema exige ainda não existem na VPS — o que é seguro justamente porque as três do bot são
+opcionais: sem elas os comandos de sugestão respondem "não configurado" e o resto do bot segue de
+pé. Ver "o que ainda não foi observado", abaixo.
+
+| história | onde | PR |
+|---|---|---|
+| S10.1 — schema `suggestion` | `ausTvSales` | [#202](https://github.com/ZzPowerTech/ausTvSales/pull/202) |
+| S10.2 — estados, auditoria, superfície autenticada | `ausTvSales` | [#203](https://github.com/ZzPowerTech/ausTvSales/pull/203) |
+| S10.2 — comandos, check de cargo, escape | `Ticket-Bot` | [austv-minecraft/Ticket-Bot#1](https://github.com/austv-minecraft/Ticket-Bot/pull/1) |
+| S10.3 — rota `GET /suggestions` paginada | `ausTvSales` | [#205](https://github.com/ZzPowerTech/ausTvSales/pull/205) |
+| S10.3 — `/sugestoes` com navegação | `Ticket-Bot` | [austv-minecraft/Ticket-Bot#2](https://github.com/austv-minecraft/Ticket-Bot/pull/2) |
+| registro (este texto) | `ausTvSales` | [#204](https://github.com/ZzPowerTech/ausTvSales/pull/204) |
+
+### O que o review derrubou, e vale mais que a contagem de histórias
+
+A S10.1 voltou **BLOCKED** com sete achados. Três da família que este épico já conhece — algo com
+cara de estar certo e que não está:
+
+| achado | por que importa |
+|---|---|
+| `btrim(x)` corta **só espaço ASCII** | o CHECK "texto presente" aceitava uma sugestão feita só de `
+`. A guarda existia, tinha nome, aparecia no `information_schema`, e era **inalcançável pela falha que acontece** |
+| `.normalize('NFC')` antes das remoções | um zero-width entre base e combinante bloqueia a composição; removê-lo depois deixa a saída decomposta. Duas strings idênticas na tela deixavam de comparar iguais — e o teste que "provava" NFC usava a forma já composta dos dois lados |
+| dois limites de 2000 medindo coisas diferentes | `String.length` conta UTF-16, `length()` do Postgres conta caracteres. 1001 emoji eram recusados como "2002 characters" |
+
+Os outros quatro: rollback sem guarda de cabeça, store nunca exercitada contra Postgres real, lista
+de invisíveis mais estreita que o próprio comentário afirmava, e `updated_at` documentado como
+"última mudança" sem nada mantendo.
+
+**As três histórias voltaram `BLOCKED` ou com ressalva, e por defeitos diferentes. A S10.2, nos
+dois repositórios:**
+
+- **Backend:** `BOT_ALLOWED_IPS=127.0.0.1` é o palpite óbvio para "mesma máquina" e é o valor que
+  **nenhuma** das duas topologias documentadas produz — `::1` não normalizava para a forma IPv4
+  (enquanto o `isPrivateAddress` da mesma classe já concordava que é loopback), e com a API em
+  container o peer é o gateway da bridge, que é a forma exata do incidente de 2026-07-19. E eu
+  tinha desligado justamente o hint de diagnóstico que aponta para isso. Some-se: **nada testava o
+  `@BotAuth()`** e a allowlist estava **desligada no CI**, então apagar o guard da composição
+  deixava a suíte inteira verde.
+- **Bot:** as regex de heading e lista do `escapeMarkdown` são **ancoradas em início de linha**,
+  então um `> ` na frente desloca o `#` e o conjunto sobrevive — `> # AVISO OFICIAL DA STAFF` volta
+  idêntico mesmo com as quatro opções ligadas. E o teste que deveria fixar o `maskedLink`
+  **passava com a proteção removida**: `"\["` num literal TS é só `"["`.
+
+**E a S10.3 caiu pela regra que este épico registrou como método:** *um teste que passa não prova
+que a decisão está certa; prova que ela não mudou.* Ali nem isso. O e2e apresentado como **a**
+prova da ordem total era cego por aritmética — as duas linhas de mesmo instante caíam nas duas
+vagas exatas da página dois, então nenhuma podia atravessar uma fronteira e o desempate nunca era
+exercido. O teste passava idêntico com e sem `desc(id)`, e o comentário dentro dele afirmava o
+contrário. O unitário tampouco: `toHaveLength(2)` pega a **remoção** da segunda chave e não a
+**substituição** por uma não-única. Junto veio um `?offset=1e21` que atravessava a validação
+inteira, porque `@IsInt()` é `Number.isInteger` e `Number.isInteger(1e21)` é `true`.
+
+No bot, a ressalva foi de autorização: `/sugestoes` era executável por **@everyone**, contra a
+convenção dos quatro comandos vizinhos, e a defesa ("já é público nos cards") era uma suposição
+sobre configuração de runtime que o código nunca lia. Virou checagem: quem chama precisa **enxergar
+o canal de sugestões**. É a mesma correção que esta sprint fez três vezes — trocar proteção
+posicional por proteção checada.
+
+**E uma correção derrubou o teste do próprio autor.** A guarda "só rode se esta migration for a
+cabeça" entrou na 0009; quando a 0010 chegou, o teste de rollback da 0009 falhou com *"0009 is not
+the head"*. Contornar seria fácil e errado: a ordem que os scripts permitem é uma só, e virou
+código (`test/rollback-utils.ts`), não convenção escrita num README.
+
+### O que ainda não foi observado
+
+- **Nada foi implantado.** Os PRs estão em `main`; o comportamento em produção não foi medido, e
+  os segredos (`BOT_API_KEYS`, `ADMIN_API_KEY`, `ADMIN_API_BASE_URL`, `SUGGESTIONS_CHANNEL_ID`)
+  ainda não existem na VPS. A distinção entre "verde em CI" e "observado" é a que o
+  `S6-VERIFICACAO.md` cobra, e ela continua aberta aqui.
+- **`BOT_ALLOWED_IPS` ainda precisa ser MEDIDO**, não escolhido: `127.0.0.1` é o palpite óbvio e é
+  o valor que nenhuma das duas topologias do `docs/nginx-ingest.md` produz.
+- **O `cybersecurity-validator` do Copilot não rodou** em nenhum dos três PRs — quota da conta
+  esgotada, resposta idêntica nas três. A revisão que houve foi a do agente adversarial.
+- **A suíte de testes do `Ticket-Bot` nasceu nesta sprint** (28 casos) e cobre escape, check de
+  cargo e o parser da listagem. É deliberadamente pequena, não é base para testar o bot inteiro. E
+  **não há CI naquele repositório** — os comandos foram rodados à mão.
+
+### Divergência de texto a resolver no DoD
+
+O critério 1 da issue #118 diz *"filtra pelos **4** estados"*; a §5.3 do spec tem **cinco**, e o
+comando oferece os cinco mais "Todos". É superconjunto, não defeito — mas os dois documentos
+discordam e alguém tropeça nisso ao fechar o DoD.
+
+### 🔴 Achado fora de escopo: o lockfile do `Ticket-Bot` não resolve
+
+Instalar as dependências a partir do `pnpm-lock.yaml` committado dá
+`@magicyan/discord@1.7.4(discord.js@14.20.0)`, e esse par **não importa**:
+
+```
+SyntaxError: The requested module 'discord.js' does not provide an export named 'LabelBuilder'
+```
+
+`LabelBuilder` não existe na 14.20.0. Como o `env.validate.ts` importa `brBuilder` desse pacote,
+uma instalação limpa **não sobe o bot**. Não foi causado por esta sprint — o lockfile não foi
+tocado — e o deploy atual provavelmente roda com um `node_modules` mais antigo. Mas o próximo
+rebuild de imagem encontra isto.
+
+---
+
 # Sprint 11 — API de sugestões e métricas de guild
 
 ### S11.1 — Módulo `suggestions` · 8 SP · `feat/api-suggestions`
@@ -1295,7 +1403,15 @@ Nenhuma seta aponta para trás.
    testada.
 2. **Os `java_offline` do proxy são bots?** 39,3% de conversão contra 71,5% do Bedrock.
 3. **O conserto do tutorial pegou?** Verificar em 5–7 dias se a taxa de entrada voltou a ~100%.
-4. **Onde roda o bot do Discord?** Afeta rede e gestão de segredos na S10.
+4. ~~**Onde roda o bot do Discord?**~~ **Respondido pelo dono em 2026-09-02: na mesma VPS
+   da API** (`sales.austv.net`). A resposta decidiu a S10.2: a sugestão é persistida pela API e o
+   bot chega até ela por **HTTP com token de serviço**, em loopback. O caminho alternativo — bot
+   escrevendo direto no Postgres — foi descartado porque poria credencial de banco no host do bot
+   e faria o schema existir em dois repositórios livres para divergir em silêncio.
+   Efeito colateral que vale registrar: a allowlist de IP do bot é o **loopback**, e o que ela
+   compra corre no sentido oposto ao que parece — requisição que chega pelo Nginx carrega o IP real
+   do cliente, não casa, e as rotas de sugestão ficam inalcançáveis da internet mesmo que um
+   `location` entre por engano.
 5. ~~`playerpoints_transaction_log` tem histórico?~~ **Respondido em 2026-08-21:** 6.664 linhas
    desde 2026-01-30; economia é prospectiva; `description` **não** classifica o gasto —
    `ausTvSales` segue obrigatório.
