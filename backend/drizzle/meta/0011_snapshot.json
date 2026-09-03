@@ -1,5 +1,5 @@
 {
-  "id": "65445f1e-c699-46be-8dcf-270c114d0c28",
+  "id": "b377af9b-e124-451b-8525-e793f243e611",
   "prevId": "7474aae3-de58-4ab0-91fa-7208c7e49a8a",
   "version": "7",
   "dialect": "postgresql",
@@ -1162,9 +1162,9 @@
           "name": "suggestions_assignee_pair",
           "value": "(\"suggestions\".\"assignee\" IS NULL AND \"suggestions\".\"assignee_nickname\" IS NULL)\n          OR (\"suggestions\".\"assignee\" IS NOT NULL AND \"suggestions\".\"assignee_nickname\" IS NOT NULL)"
         },
-        "suggestions_assignee_nickname_length": {
-          "name": "suggestions_assignee_nickname_length",
-          "value": "\"suggestions\".\"assignee_nickname\" IS NULL OR length(\"suggestions\".\"assignee_nickname\") BETWEEN 1 AND 64"
+        "suggestions_assignee_nickname_valid": {
+          "name": "suggestions_assignee_nickname_valid",
+          "value": "\"suggestions\".\"assignee_nickname\" IS NULL\n          OR (length(\"suggestions\".\"assignee_nickname\") <= 64\n              AND btrim(\"suggestions\".\"assignee_nickname\", E'\\u0009\\u000A\\u000B\\u000C\\u000D\\u0020\\u00A0\\u1680\\u2000\\u2001\\u2002\\u2003\\u2004\\u2005\\u2006\\u2007\\u2008\\u2009\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF') <> '')"
         },
         "suggestions_text_max_length": {
           "name": "suggestions_text_max_length",

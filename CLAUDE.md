@@ -212,6 +212,10 @@ aprovação antes poria uma mentira na trilha de toda sugestão rejeitada. O cus
 fica registrado: com `concluida` e `recusada` terminais e sem reabertura, um clique errado só se
 conserta com `UPDATE` à mão — que não escreve linha de auditoria.
 
+**⚠️ Ordem de implantação, entre os dois repositórios:** a **API primeiro**. O bot passou a mandar
+`actor_nickname` em toda transição, e a API valida com `forbidNonWhitelisted` — subir o bot antes
+faz toda mudança de estado voltar **400** até a API subir.
+
 **🔓 Exceção à §8 aberta pelo dono em 2026-09-03:** o **apelido do staff que aprovou** aparece na
 loja pública do servidor. A §8 mantém dado pessoal fora de superfície pública; esta é a única
 exceção, e o escopo é exatamente ele — staff que aprova, apelido apenas, nada sobre jogador. O

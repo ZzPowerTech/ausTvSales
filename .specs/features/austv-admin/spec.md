@@ -815,9 +815,28 @@ guild_metric  date · joins · leaves · members_total
 | MySQL do Plan ← NestJS (coorte) | credencial ampla, lag no servidor | usuário **read-only** dedicado; agregação fora do pico |
 | `/v1/*` sob carga | query pesada afeta o jogo | cache com TTL por endpoint |
 | Bot Discord | comando de staff por qualquer um | role verificada server-side, nunca só no client |
-| Sugestões no site público | XSS via texto de jogador | sanitizar na escrita **e** escapar na renderização |
+| Sugestões no site público | XSS via texto de jogador | sanitizar na escrita **e** escapar na renderização — vale para **todo** texto vindo de pessoa, inclusive o apelido do aprovador |
 | API | IDOR em rota de jogador | JWT + verificação de escopo por recurso |
 | Dados pessoais | LGPD | contagem de mensagens, não conteúdo; sem IP no dashboard |
+
+> ### 🔓 Exceção declarada: o apelido de quem aprova sai na loja pública
+>
+> **Aberta pelo dono em 2026-09-03.** A regra desta seção mantém dado pessoal
+> fora de superfície pública; a loja do servidor passa a creditar quem aceitou a
+> sugestão, mostrando o **apelido do staff no Discord**.
+>
+> **Escopo, e é só isto:** staff que aprova, apelido apenas. Nada sobre jogador,
+> nenhum outro campo, nenhuma outra superfície.
+>
+> **O apelido é congelado no momento da aprovação** (`suggestions.assignee_nickname`),
+> não resolvido na leitura: a API não tem token do Discord (ADR da S10.2), e quem
+> se renomear depois não reescreve o que a loja disse antes. Mesma forma do
+> `nickname_at_purchase` ao lado do `player_uuid`.
+>
+> **A exceção é sobre publicar, não sobre sanitizar.** O apelido passa pelo mesmo
+> tratamento de escrita que o texto do jogador — controles, invisíveis e bidi
+> removidos — porque `U+202E` num apelido inverte a linha de crédito numa página
+> pública e escape de renderização não desfaz isso.
 
 Credenciais MySQL em texto plano em mcMMO, EvenMoreFish, BattlePass, MyCommand — **não versionar
 sem sanitizar**.
