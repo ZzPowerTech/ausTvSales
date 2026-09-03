@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.19.0...backend-v0.20.0) (2026-09-03)
+
+
+### Features
+
+* **admin:** o apelido de quem aprovou é congelado, não consultado depois ([#209](https://github.com/ZzPowerTech/ausTvSales/issues/209)) ([2a3233c](https://github.com/ZzPowerTech/ausTvSales/commit/2a3233c16503cda4c66fd7dede93636d4dd9e2ca))
+
 ## [0.19.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.18.0...backend-v0.19.0) (2026-09-03)
 
 
