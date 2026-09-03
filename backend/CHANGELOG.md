@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.17.2...backend-v0.18.0) (2026-09-03)
+
+
+### Features
+
+* **admin:** a tabela de sugestões nasce sem default em created_at ([#202](https://github.com/ZzPowerTech/ausTvSales/issues/202)) ([2c8e898](https://github.com/ZzPowerTech/ausTvSales/commit/2c8e898e8a69b0f4f1fd29ee83d0f38bc7d05473))
+* **admin:** a transição inválida é recusada com a linha travada ([#203](https://github.com/ZzPowerTech/ausTvSales/issues/203)) ([c065385](https://github.com/ZzPowerTech/ausTvSales/commit/c065385e86a2716a9de81a1aa9ca546f04511790))
+
 ## [0.17.2](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.17.1...backend-v0.17.2) (2026-09-02)
 
 
