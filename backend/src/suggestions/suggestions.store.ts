@@ -42,6 +42,15 @@ export interface StaffActionInput {
   actor: string;
   /** Bot command name or component custom id that produced the attempt. */
   command: string;
+  /**
+   * The actor's Discord **server nickname**, as the bot read it right now.
+   *
+   * Required for a transition, because the one that lands on `aprovada` freezes
+   * it into `assignee_nickname` — the credit line the public shop shows. The bot
+   * is the only party that can resolve it (this API has no Discord token), so
+   * the name has to travel with the action rather than be looked up later.
+   */
+  actorNickname?: string;
 }
 
 /** One page of suggestions, plus the size of the whole filtered set. */
@@ -212,9 +221,22 @@ export class SuggestionsStore {
         };
       }
 
+      // The approver is recorded on the transition **into** `aprovada`, and
+      // only then. Whoever later moves it to `em_andamento` or `concluida` is
+      // answering a different question — "who accepted this" has one answer, and
+      // every actor is in the audit trail regardless.
+      //
+      // `??` and not a plain assignment on later moves: re-approving is
+      // impossible (the machine forbids `aprovada -> aprovada`), so this only
+      // ever writes once.
+      const claiming =
+        input.to === 'aprovada' && input.actorNickname
+          ? { assignee: input.actor, assigneeNickname: input.actorNickname }
+          : {};
+
       const [updated] = await tx
         .update(suggestions)
-        .set({ status: input.to })
+        .set({ status: input.to, ...claiming })
         .where(eq(suggestions.id, input.id))
         .returning();
 

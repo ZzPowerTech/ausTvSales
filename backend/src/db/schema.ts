@@ -883,7 +883,8 @@ export const SUGGESTION_TEXT_MAX_CHARS = 2000;
  * ## Identity
  *
  * `author` and `assignee` hold **Discord user ids** (snowflakes), never display
- * names. §8 allows an identifier and nothing more, and a display name is both
+ * names — with one named exception, `assignee_nickname`, documented on the
+ * column itself. §8 allows an identifier and nothing more, and a display name is both
  * personal data and mutable — the audit trail the states need has to survive a
  * nickname change. The `Ticket-Bot` logs `displayName` today; that is the
  * pattern this column exists not to repeat.
@@ -935,8 +936,39 @@ export const suggestions = pgTable(
       .notNull()
       .defaultNow()
       .$onUpdate(() => new Date()),
-    /** Discord user id of the staff member who took it, if any. */
+    /**
+     * Discord user id of the staff member who approved it, if any.
+     *
+     * Set when the suggestion first reaches `aprovada` and **not moved again**
+     * afterwards: the question it answers is "who accepted this", and whoever
+     * later marks it `em_andamento` or `concluida` is answering a different one
+     * (that lives in the audit trail, which records every actor).
+     */
     assignee: text('assignee'),
+    /**
+     * The approver's Discord **server nickname**, snapshotted at approval.
+     *
+     * ## Why a snapshot and not a lookup
+     *
+     * The nickname lives in Discord and this API holds no bot token — that was
+     * the S10.2 decision, and widening it to resolve a display name would be a
+     * poor trade. So the bot, which does have the token, sends the nickname with
+     * the approval and it is frozen here.
+     *
+     * That is the same shape as `sales.nickname_at_purchase` beside
+     * `player_uuid`, and the same reasoning: the id is the durable key, the name
+     * is what was true at the moment of the event. Someone who renames
+     * themselves next month does not rewrite what the shop said last month.
+     *
+     * ## This is personal data on a public surface
+     *
+     * §8 keeps personal data off public surfaces, and the server shop is
+     * public. Publishing the approver's nickname there is a **deliberate
+     * exception**, decided by the owner on 2026-09-03 so the shop can credit
+     * who accepted a suggestion. It is the exception's whole scope: staff who
+     * approve, nickname only, nothing about players.
+     */
+    assigneeNickname: text('assignee_nickname'),
   },
   (table) => [
     uniqueIndex('suggestions_discord_msg_id_unique').on(table.discordMsgId),
@@ -965,6 +997,17 @@ export const suggestions = pgTable(
     check(
       'suggestions_text_present',
       sql`btrim(${table.text}, E'\\u0009\\u000A\\u000B\\u000C\\u000D\\u0020\\u00A0\\u1680\\u2000\\u2001\\u2002\\u2003\\u2004\\u2005\\u2006\\u2007\\u2008\\u2009\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF') <> ''`,
+    ),
+    // A nickname without an approver is a name attached to nobody. The pair is
+    // written together or not at all.
+    check(
+      'suggestions_assignee_pair',
+      sql`(${table.assignee} IS NULL AND ${table.assigneeNickname} IS NULL)
+          OR (${table.assignee} IS NOT NULL AND ${table.assigneeNickname} IS NOT NULL)`,
+    ),
+    check(
+      'suggestions_assignee_nickname_length',
+      sql`${table.assigneeNickname} IS NULL OR length(${table.assigneeNickname}) BETWEEN 1 AND 64`,
     ),
     check(
       'suggestions_text_max_length',

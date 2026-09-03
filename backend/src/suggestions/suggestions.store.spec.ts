@@ -312,6 +312,65 @@ describe('SuggestionsStore staff actions', () => {
       expect(tx.insert).toHaveBeenCalledTimes(1);
     });
 
+    it('records the approver and their nickname on the move into aprovada', async () => {
+      const { db, updateChain } = buildTx(
+        [STORED],
+        [{ ...STORED, status: 'aprovada' }],
+      );
+      const store = await storeWith(db);
+
+      await store.transition({
+        ...ACTION,
+        to: 'aprovada',
+        actorNickname: 'Shinigami',
+      });
+
+      expect(updateChain.calls.set.mock.calls[0][0]).toEqual({
+        status: 'aprovada',
+        assignee: ACTION.actor,
+        assigneeNickname: 'Shinigami',
+      });
+    });
+
+    it('does not claim the suggestion on any other transition', async () => {
+      // "Who accepted this" has one answer. Whoever later moves it to
+      // `em_andamento` or `concluida` is answering a different question, and the
+      // audit trail already records every actor.
+      const approved = { ...STORED, status: 'aprovada' as const };
+      const { db, updateChain } = buildTx(
+        [approved],
+        [{ ...approved, status: 'em_andamento' }],
+      );
+      const store = await storeWith(db);
+
+      await store.transition({
+        ...ACTION,
+        to: 'em_andamento',
+        actorNickname: 'Ozielux',
+      });
+
+      expect(updateChain.calls.set.mock.calls[0][0]).toEqual({
+        status: 'em_andamento',
+      });
+    });
+
+    it('does not write a nickname without an approver, or the reverse', async () => {
+      // The DB check refuses half a pair; this keeps the store from ever
+      // offering one. Approving with no nickname moves the state and leaves the
+      // credit line empty rather than writing an id with no name.
+      const { db, updateChain } = buildTx(
+        [STORED],
+        [{ ...STORED, status: 'aprovada' }],
+      );
+      const store = await storeWith(db);
+
+      await store.transition({ ...ACTION, to: 'aprovada' });
+
+      expect(updateChain.calls.set.mock.calls[0][0]).toEqual({
+        status: 'aprovada',
+      });
+    });
+
     it('reports not_found without writing anything', async () => {
       const { db, tx } = buildTx([], []);
       const store = await storeWith(db);

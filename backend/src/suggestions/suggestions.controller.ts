@@ -119,6 +119,7 @@ export class SuggestionsController {
       to: dto.to,
       actor: dto.actor,
       command: dto.command,
+      actorNickname: dto.actor_nickname,
     });
 
     if (outcome.ok) return outcome.suggestion;

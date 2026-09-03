@@ -400,6 +400,89 @@ describe('Suggestion states (e2e)', () => {
       const final = await store.getById(seeded.id);
       expect(final?.status).toBe('recusada');
     });
+
+    it('credits the approver, with the nickname frozen as it was', async () => {
+      const seeded = await seed();
+
+      const response = await asBot(
+        http().patch(`/suggestions/${seeded.id}/status`).send({
+          to: 'aprovada',
+          actor: STAFF,
+          command: 'btn',
+          actor_nickname: 'Shinigami',
+        }),
+      ).expect(200);
+
+      const body = bodyOf<{ assignee: string; assigneeNickname: string }>(
+        response,
+      );
+      expect(body.assignee).toBe(STAFF);
+      expect(body.assigneeNickname).toBe('Shinigami');
+    });
+
+    it('keeps the original approver when someone else advances it', async () => {
+      const seeded = await seed();
+
+      await asBot(
+        http().patch(`/suggestions/${seeded.id}/status`).send({
+          to: 'aprovada',
+          actor: STAFF,
+          command: 'btn',
+          actor_nickname: 'Shinigami',
+        }),
+      ).expect(200);
+
+      const response = await asBot(
+        http().patch(`/suggestions/${seeded.id}/status`).send({
+          to: 'em_andamento',
+          actor: '444444444444444444',
+          command: 'btn',
+          actor_nickname: 'Ozielux',
+        }),
+      ).expect(200);
+
+      // The shop credits whoever accepted it, not whoever touched it last.
+      const body = bodyOf<{ assignee: string; assigneeNickname: string }>(
+        response,
+      );
+      expect(body.assignee).toBe(STAFF);
+      expect(body.assigneeNickname).toBe('Shinigami');
+    });
+
+    it('refuses a nickname longer than Discord allows', async () => {
+      const seeded = await seed();
+
+      await asBot(
+        http()
+          .patch(`/suggestions/${seeded.id}/status`)
+          .send({
+            to: 'aprovada',
+            actor: STAFF,
+            command: 'btn',
+            actor_nickname: 'a'.repeat(65),
+          }),
+      ).expect(400);
+    });
+
+    it('rejects half an approver pair written straight to the table', async () => {
+      // The guard for any writer that skips the store: a nickname attached to
+      // nobody, or an id with no name, is not a credit line.
+      const seeded = await seed('enviada', '900000000000000040');
+
+      await expect(
+        pool.query(
+          `UPDATE suggestions SET assignee_nickname = 'Fulano' WHERE id = $1`,
+          [seeded.id],
+        ),
+      ).rejects.toThrow(/suggestions_assignee_pair/);
+
+      await expect(
+        pool.query(`UPDATE suggestions SET assignee = $2 WHERE id = $1`, [
+          seeded.id,
+          STAFF,
+        ]),
+      ).rejects.toThrow(/suggestions_assignee_pair/);
+    });
   });
 
   describe('GET /suggestions', () => {
