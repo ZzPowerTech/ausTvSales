@@ -975,3 +975,121 @@ export const suggestions = pgTable(
 
 export type Suggestion = typeof suggestions.$inferSelect;
 export type NewSuggestion = typeof suggestions.$inferInsert;
+
+/**
+ * What an audit row records. Kept narrow on purpose — an open-ended `action`
+ * turns the trail into free text, which is the `Ticket-Bot` failure this table
+ * exists to avoid.
+ */
+export const SUGGESTION_AUDIT_ACTIONS = [
+  /** A state change that happened. */
+  'transition',
+  /** A state change the machine refused; the suggestion did not change. */
+  'transition_denied',
+  /** A staff action the bot refused before calling the API: role check failed. */
+  'auth_denied',
+] as const;
+
+export type SuggestionAuditAction = (typeof SUGGESTION_AUDIT_ACTIONS)[number];
+
+/**
+ * Append-only trail of who tried to change what on a suggestion (story S10.2).
+ *
+ * ## Why a table and not a Discord embed
+ *
+ * The `Ticket-Bot` "audit" today is `sendTicketLog`: an embed posted to a
+ * channel. It is editable by anyone with Manage Messages, it is free text with
+ * no fields to query, it records `displayName` instead of an id, it fails
+ * silently when the channel is unconfigured, and it does not cover every action.
+ * None of those are things you find out during an incident and still have the
+ * record. So the trail is a table, and the channel post — if any — is a copy.
+ *
+ * ## Refusals are recorded, not only successes
+ *
+ * `transition_denied` and `auth_denied` are the reason this table earns its
+ * keep. "Who changed this to concluida" is answerable from the suggestion row's
+ * own history; "who has been trying to approve their own suggestions" is only
+ * answerable if the attempts that failed were written down too.
+ *
+ * ## Append-only
+ *
+ * Same reasoning as `health_checks`: there is no update path and no delete path.
+ * A trail that can be rewritten answers "what does it say now", which is not the
+ * question anyone asks it.
+ */
+export const suggestionAudit = pgTable(
+  'suggestion_audit',
+  {
+    id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+    /**
+     * The suggestion acted upon.
+     *
+     * `NOT NULL` and a real foreign key: every action this table records is an
+     * action on a suggestion that exists. An attempt against an id that is not
+     * in the table produces a 404 and a log line, not a row here — there is
+     * nothing to attach it to, and a nullable column would invite writing
+     * orphans that no query can join.
+     */
+    suggestionId: integer('suggestion_id')
+      .notNull()
+      .references(() => suggestions.id),
+    /** Discord user id of whoever acted. An identifier, never a display name. */
+    actor: text('actor').notNull(),
+    action: text('action').$type<SuggestionAuditAction>().notNull(),
+    /** State the suggestion was in. Always known: it is read before acting. */
+    fromStatus: text('from_status').$type<SuggestionStatus>().notNull(),
+    /**
+     * State that was asked for.
+     *
+     * Null only for `auth_denied`, where the bot rejected the actor before any
+     * target was chosen — a staff-only button pressed by a non-staff member.
+     */
+    toStatus: text('to_status').$type<SuggestionStatus>(),
+    /**
+     * The bot command or component id that produced the attempt.
+     *
+     * Story S10.2 asks for the denied attempt to be logged "with author and
+     * command", and the command is the half that says *how* someone got there:
+     * the same refusal from a slash command and from a button nobody should be
+     * able to see are different incidents.
+     */
+    command: text('command').notNull(),
+    /** Why it was refused. Null for `transition`, which was not refused. */
+    reason: text('reason'),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // The only read: this suggestion's history, newest first.
+    index('suggestion_audit_suggestion_at_idx').on(
+      table.suggestionId,
+      table.at.desc(),
+    ),
+    // "What has this person been trying to do" — the question refusals exist
+    // for, and it does not fit the index above.
+    index('suggestion_audit_actor_at_idx').on(table.actor, table.at.desc()),
+    check(
+      'suggestion_audit_action_valid',
+      sql`${table.action} IN ('transition', 'transition_denied', 'auth_denied')`,
+    ),
+    check(
+      'suggestion_audit_from_status_valid',
+      sql`${table.fromStatus} IN ('enviada', 'aprovada', 'em_andamento', 'concluida', 'recusada')`,
+    ),
+    check(
+      'suggestion_audit_to_status_valid',
+      sql`${table.toStatus} IS NULL OR ${table.toStatus} IN ('enviada', 'aprovada', 'em_andamento', 'concluida', 'recusada')`,
+    ),
+    // A recorded transition has a target and no refusal reason; a refusal has a
+    // reason. Enforced here so a row cannot claim to be a state change while
+    // carrying the shape of a rejection.
+    check(
+      'suggestion_audit_shape_matches_action',
+      sql`(${table.action} = 'transition' AND ${table.toStatus} IS NOT NULL AND ${table.reason} IS NULL)
+          OR (${table.action} = 'transition_denied' AND ${table.toStatus} IS NOT NULL AND ${table.reason} IS NOT NULL)
+          OR (${table.action} = 'auth_denied' AND ${table.reason} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export type SuggestionAuditEntry = typeof suggestionAudit.$inferSelect;
+export type NewSuggestionAuditEntry = typeof suggestionAudit.$inferInsert;

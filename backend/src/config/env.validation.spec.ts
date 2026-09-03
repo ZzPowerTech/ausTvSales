@@ -5,6 +5,11 @@ const VALID_DB_URL = 'postgresql://user:pass@localhost:5432/austv_sales';
 const VALID_INGEST_KEY =
   '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
+// Different from the ingest key on purpose: a fixture that reused it could not
+// tell "both principals are configured" from "one value satisfied both rules".
+const VALID_BOT_KEY =
+  'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210';
+
 // Minimal set of Discord/session/ingest vars required for a config to validate.
 const AUTH_ENV = {
   DISCORD_CLIENT_ID: 'client-id',
@@ -14,6 +19,8 @@ const AUTH_ENV = {
   SESSION_JWT_SECRET: 'a-session-secret-that-is-long-enough-000000',
   INGEST_API_KEYS: VALID_INGEST_KEY,
   INGEST_ALLOWED_IPS: '203.0.113.10',
+  BOT_API_KEYS: VALID_BOT_KEY,
+  BOT_ALLOWED_IPS: '127.0.0.1',
 };
 
 describe('validateEnv', () => {
@@ -205,5 +212,61 @@ describe('validateEnv', () => {
       ...withoutIps,
     });
     expect(result.INGEST_ALLOWED_IPS).toBeUndefined();
+  });
+});
+
+describe('validateEnv — bot principal (AusTV Admin S10.2)', () => {
+  const BASE: Record<string, string> = {
+    DATABASE_URL: VALID_DB_URL,
+    ...AUTH_ENV,
+  };
+
+  /** BASE without one variable, to exercise the "not configured" path. */
+  function without(key: string): Record<string, string> {
+    const copy = { ...BASE };
+    delete copy[key];
+    return copy;
+  }
+
+  it('accepts a single 64-char hex BOT_API_KEYS', () => {
+    expect(validateEnv({ ...BASE }).BOT_API_KEYS).toBe(VALID_BOT_KEY);
+  });
+
+  it('accepts a comma-separated BOT_API_KEYS rotation window', () => {
+    const rotating = `${VALID_BOT_KEY},${VALID_INGEST_KEY}`;
+    expect(validateEnv({ ...BASE, BOT_API_KEYS: rotating }).BOT_API_KEYS).toBe(
+      rotating,
+    );
+  });
+
+  it('rejects a missing BOT_API_KEYS', () => {
+    // Required in every environment, like the ingest keys: these are the routes
+    // that mutate staff-facing state, and a guard that boots with no key set is
+    // one careless refactor away from accepting everything.
+    expect(() => validateEnv(without('BOT_API_KEYS'))).toThrow(/BOT_API_KEYS/);
+  });
+
+  it('rejects a BOT_API_KEYS that is not 64 hex chars', () => {
+    expect(() => validateEnv({ ...BASE, BOT_API_KEYS: 'short' })).toThrow(
+      /BOT_API_KEYS/,
+    );
+  });
+
+  it('requires BOT_ALLOWED_IPS in production', () => {
+    expect(() =>
+      validateEnv({ ...without('BOT_ALLOWED_IPS'), NODE_ENV: 'production' }),
+    ).toThrow(/BOT_ALLOWED_IPS/);
+  });
+
+  it('allows a missing BOT_ALLOWED_IPS outside production', () => {
+    expect(
+      validateEnv(without('BOT_ALLOWED_IPS')).BOT_ALLOWED_IPS,
+    ).toBeUndefined();
+  });
+
+  it('accepts the loopback the co-located bot actually uses', () => {
+    expect(
+      validateEnv({ ...BASE, BOT_ALLOWED_IPS: '127.0.0.1' }).BOT_ALLOWED_IPS,
+    ).toBe('127.0.0.1');
   });
 });

@@ -71,6 +71,13 @@
       "when": 1788392672044,
       "tag": "0009_suggestions",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788400971970,
+      "tag": "0010_suggestion_audit",
+      "breakpoints": true
     }
   ]
 }

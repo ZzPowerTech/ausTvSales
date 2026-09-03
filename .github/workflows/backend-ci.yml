@@ -51,6 +51,9 @@ jobs:
       SESSION_JWT_SECRET: ci-session-secret-for-e2e-suite-0123456789
       # Non-secret CI value (64 hex chars) for the ingest guard boot validation.
       INGEST_API_KEYS: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+      # Idem para o principal do bot (S10.2). Chave DIFERENTE da de ingest, para
+      # que um teste que aceite a chave errada falhe aqui em vez de em producao.
+      BOT_API_KEYS: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210'
       # Nomes das instancias do Plan (S7.2). Sem eles o modulo `metrics` sobe com
       # lista vazia e as rotas por servidor respondem 404 — o que faria o e2e
       # testar um app que nao e o que roda em producao. `PLAN_BASE_URL` fica

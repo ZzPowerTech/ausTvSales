@@ -213,3 +213,22 @@ export function DashboardThrottle(): ReturnType<typeof applyDecorators> {
     }),
   );
 }
+
+/**
+ * Bot→API profile (story S10.2).
+ *
+ * Staff actions on suggestions are human-paced: a moderator working through a
+ * backlog approves a handful a minute, not a hundred. The window is generous
+ * enough that a burst of button presses never trips it, and tight enough that a
+ * loop — a bot bug, or a leaked key used from the same host — cannot rewrite the
+ * whole table before anyone notices.
+ *
+ * Deliberately not the ingest profile. 10 req/s is right for a plugin draining a
+ * queue and is far too permissive for a route that mutates staff-facing state.
+ */
+export const BOT_THROTTLE_TTL_MS = 60_000; // window: 1 minute
+export const BOT_THROTTLE_LIMIT = 60;
+
+export const botThrottle = {
+  default: { ttl: BOT_THROTTLE_TTL_MS, limit: BOT_THROTTLE_LIMIT },
+} as const;
