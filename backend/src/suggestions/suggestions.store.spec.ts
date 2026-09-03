@@ -242,7 +242,11 @@ describe('SuggestionsStore staff actions', () => {
       );
       const store = await storeWith(db);
 
-      await store.transition({ ...ACTION, to: 'aprovada' });
+      await store.transition({
+        ...ACTION,
+        to: 'aprovada',
+        actorNickname: 'Shinigami',
+      });
 
       expect(selectChain.calls.for).toHaveBeenCalledWith('update');
     });
@@ -252,7 +256,11 @@ describe('SuggestionsStore staff actions', () => {
       const { db, tx, insertChain } = buildTx([STORED], [moved]);
       const store = await storeWith(db);
 
-      const outcome = await store.transition({ ...ACTION, to: 'aprovada' });
+      const outcome = await store.transition({
+        ...ACTION,
+        to: 'aprovada',
+        actorNickname: 'Shinigami',
+      });
 
       expect(outcome).toEqual({ ok: true, suggestion: moved });
       expect(tx.update).toHaveBeenCalled();
@@ -310,6 +318,64 @@ describe('SuggestionsStore staff actions', () => {
       await store.transition({ ...ACTION, to: 'concluida' });
 
       expect(tx.insert).toHaveBeenCalledTimes(1);
+    });
+
+    it('records the approver and their nickname on the move into aprovada', async () => {
+      const { db, updateChain } = buildTx(
+        [STORED],
+        [{ ...STORED, status: 'aprovada' }],
+      );
+      const store = await storeWith(db);
+
+      await store.transition({
+        ...ACTION,
+        to: 'aprovada',
+        actorNickname: 'Shinigami',
+      });
+
+      expect(updateChain.calls.set.mock.calls[0][0]).toEqual({
+        status: 'aprovada',
+        assignee: ACTION.actor,
+        assigneeNickname: 'Shinigami',
+      });
+    });
+
+    it('does not claim the suggestion on any other transition', async () => {
+      // "Who accepted this" has one answer. Whoever later moves it to
+      // `em_andamento` or `concluida` is answering a different question, and the
+      // audit trail already records every actor.
+      const approved = { ...STORED, status: 'aprovada' as const };
+      const { db, updateChain } = buildTx(
+        [approved],
+        [{ ...approved, status: 'em_andamento' }],
+      );
+      const store = await storeWith(db);
+
+      await store.transition({
+        ...ACTION,
+        to: 'em_andamento',
+        actorNickname: 'Ozielux',
+      });
+
+      expect(updateChain.calls.set.mock.calls[0][0]).toEqual({
+        status: 'em_andamento',
+      });
+    });
+
+    it('refuses to approve without a name, instead of approving uncredited', async () => {
+      // The first version let this through: the move landed, `claiming` was
+      // empty, and the suggestion sat approved with a blank credit line —
+      // **permanently**, because `aprovada` is not reachable twice and neither
+      // ending re-opens. The only repair was an `UPDATE` by hand, which writes
+      // no audit row. A test then fixed that silence as if it were the design.
+      const { db, tx } = buildTx([STORED], [{ ...STORED, status: 'aprovada' }]);
+      const store = await storeWith(db);
+
+      await expect(
+        store.transition({ ...ACTION, to: 'aprovada' }),
+      ).rejects.toThrow(SuggestionTextError);
+
+      expect(tx.update).not.toHaveBeenCalled();
     });
 
     it('reports not_found without writing anything', async () => {

@@ -8,7 +8,7 @@ import {
   suggestionAudit,
   suggestions,
 } from '../db/schema';
-import { sanitizeSuggestionText } from './suggestion-text';
+import { sanitizeNickname, sanitizeSuggestionText } from './suggestion-text';
 import { canTransition, describeRefusal } from './suggestion-transitions';
 
 /**
@@ -42,6 +42,19 @@ export interface StaffActionInput {
   actor: string;
   /** Bot command name or component custom id that produced the attempt. */
   command: string;
+  /**
+   * The actor's Discord **server nickname**, as the bot read it right now.
+   *
+   * **Required to approve**, and the DTO enforces that with a 400 rather than
+   * accepting the move and dropping the credit. There is no second chance:
+   * `aprovada` is not reachable twice and neither ending re-opens, so a
+   * suggestion approved without a name stays uncredited until someone runs an
+   * `UPDATE` by hand — which writes no audit row.
+   *
+   * The bot is the only party that can resolve it (this API holds no Discord
+   * token), so the name travels with the action instead of being looked up.
+   */
+  actorNickname?: string;
 }
 
 /** One page of suggestions, plus the size of the whole filtered set. */
@@ -212,9 +225,31 @@ export class SuggestionsStore {
         };
       }
 
+      // The approver is recorded on the transition **into** `aprovada`, and
+      // only then. Whoever later moves it to `em_andamento` or `concluida` is
+      // answering a different question — "who accepted this" has one answer, and
+      // every actor is in the audit trail regardless.
+      //
+      // Written at most once, and that is a property of the machine rather than
+      // of this branch: `aprovada` is not reachable twice, and both endings are
+      // terminal with no re-open. So there is no later write to guard against.
+      //
+      // Sanitized here, like `text`, and for the sharper reason: this is the one
+      // field written *in order to be published*. The bot escapes markdown on
+      // render, which leaves bidi and invisible characters exactly where they
+      // are — `U+202E` in a nickname reverses the credit line on a public page,
+      // and escaping cannot undo that afterwards.
+      const claiming =
+        input.to === 'aprovada'
+          ? {
+              assignee: input.actor,
+              assigneeNickname: sanitizeNickname(input.actorNickname),
+            }
+          : {};
+
       const [updated] = await tx
         .update(suggestions)
-        .set({ status: input.to })
+        .set({ status: input.to, ...claiming })
         .where(eq(suggestions.id, input.id))
         .returning();
 

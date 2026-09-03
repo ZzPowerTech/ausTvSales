@@ -1,16 +1,20 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsIn,
   IsNotEmpty,
   IsString,
   Matches,
   MaxLength,
+  ValidateIf,
 } from 'class-validator';
 import { SUGGESTION_STATUSES, type SuggestionStatus } from '../../db/schema';
 import { DISCORD_SNOWFLAKE, DISCORD_SNOWFLAKE_MESSAGE } from './discord-id';
 
 /** Longest command identifier accepted, so the audit column cannot be a payload. */
 export const AUDIT_COMMAND_MAX_CHARS = 120;
+
+/** Discord's own cap for a server nickname, mirrored by the DB check. */
+export const ASSIGNEE_NICKNAME_MAX_CHARS = 64;
 
 export class TransitionSuggestionDto {
   @ApiProperty({
@@ -38,4 +42,24 @@ export class TransitionSuggestionDto {
   @IsNotEmpty()
   @MaxLength(AUDIT_COMMAND_MAX_CHARS)
   command!: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Apelido do staff no servidor do Discord, lido pelo bot agora. A ' +
+      'transicao que chega em `aprovada` congela isto em `assignee_nickname` — ' +
+      'e o congelamento e o ponto: quem se renomear no mes que vem nao reescreve ' +
+      'o que a loja disse no mes passado. Obrigatorio na pratica para aprovar; ' +
+      'sem ele a sugestao muda de estado e fica sem credito.',
+    maxLength: ASSIGNEE_NICKNAME_MAX_CHARS,
+  })
+  // Obrigatorio para APROVAR, opcional no resto. `@IsOptional()` puro aceitava
+  // `{to:"aprovada", actor, command}` com 200 e a sugestao ficava aprovada e sem
+  // credito — permanentemente, porque `aprovada` nao e alcancavel duas vezes e
+  // nenhum final reabre. O bot sempre manda; o 400 fecha o buraco para todo
+  // chamador que nao e o bot.
+  @ValidateIf((dto: TransitionSuggestionDto) => dto.to === 'aprovada')
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(ASSIGNEE_NICKNAME_MAX_CHARS)
+  actor_nickname?: string;
 }

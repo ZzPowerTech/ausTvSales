@@ -1,4 +1,4 @@
-import { SUGGESTION_TEXT_MAX_CHARS } from '../db/schema';
+import { NICKNAME_MAX_CHARS, SUGGESTION_TEXT_MAX_CHARS } from '../db/schema';
 
 /** Raised when player-written text cannot be stored as a suggestion. */
 export class SuggestionTextError extends Error {
@@ -118,6 +118,78 @@ export function sanitizeSuggestionText(raw: unknown): string {
   if (codePoints > SUGGESTION_TEXT_MAX_CHARS) {
     throw new SuggestionTextError(
       `Suggestion text is ${codePoints} characters, over the ${SUGGESTION_TEXT_MAX_CHARS} limit`,
+      'too_long',
+    );
+  }
+
+  return cleaned;
+}
+
+/**
+ * CR, LF and tab, as escapes rather than literals.
+ *
+ * Written this way for the same reason as {@link CONTROL_CHARS}: spelled out,
+ * the class is invisible in a diff — and this file has already had a regex
+ * silently turn into raw control bytes once.
+ */
+const LINE_BREAKS = new RegExp('[\\r\\n\\t]+', 'g');
+
+/**
+ * Clean a Discord nickname for storage.
+ *
+ * ## Why this exists at all
+ *
+ * `assignee_nickname` is the one field of this subsystem written **in order to
+ * be published** — it is the shop's credit line — and it was the only one with
+ * no write-side cleaning. §8 asks for sanitizing on write *and* escaping on
+ * render, and the bot's `renderPlayerText` only does the second half: it escapes
+ * markdown and leaves bidi and invisible characters exactly where they were.
+ *
+ * Measured before this was added: a nickname of `U+202E` + text, one of only
+ * zero-width spaces, one of a single `U+00A0`, and one of three plain spaces
+ * all reached the column untouched.
+ * reverses the visual order of everything after it, so a credit line could be
+ * made to read backwards on a public page, and escaping cannot undo that later.
+ *
+ * ## Why it is not `sanitizeSuggestionText`
+ *
+ * A nickname is one line. Newlines are removed rather than collapsed — a
+ * multi-line "nickname" in an embed field is a way to forge a second field, e.g.
+ * `Fulano
+Aprovado por: Dono`.
+ *
+ * @throws {SuggestionTextError} if the value is not a string, is blank once
+ *   cleaned, or exceeds {@link NICKNAME_MAX_CHARS}.
+ */
+export function sanitizeNickname(raw: unknown): string {
+  if (typeof raw !== 'string') {
+    throw new SuggestionTextError(
+      `Nickname must be a string, got ${typeof raw}`,
+      'not_a_string',
+    );
+  }
+
+  const cleaned = raw
+    // Newlines become spaces rather than disappearing, so two words do not run
+    // together into a name nobody has.
+    .replace(LINE_BREAKS, ' ')
+    .replace(CONTROL_CHARS, '')
+    .replace(FORMAT_CHARS, '')
+    .normalize('NFC')
+    .replace(/ {2,}/g, ' ')
+    .trim();
+
+  if (cleaned.length === 0) {
+    throw new SuggestionTextError(
+      'Nickname is empty after sanitization',
+      'empty',
+    );
+  }
+
+  const codePoints = [...cleaned].length;
+  if (codePoints > NICKNAME_MAX_CHARS) {
+    throw new SuggestionTextError(
+      `Nickname is ${codePoints} characters, over the ${NICKNAME_MAX_CHARS} limit`,
       'too_long',
     );
   }

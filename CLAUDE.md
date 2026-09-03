@@ -206,10 +206,22 @@ a máquina de estados e recusa com 409 sem tocar no registro; e a recusa do bot 
 a API, porque recusa que só vive em log de processo não é consultável — que é o defeito do
 `sendTicketLog` uma camada acima.
 
-**Decisão que continua pendente do dono:** o diagrama da §5.3 lido como cadeia estrita só permite
-`recusada` depois de aprovar e iniciar. Implementei `recusada` alcançável de qualquer estado aberto,
-porque a maioria das recusas acontece na leitura e forçar a aprovação antes poria uma mentira na
-trilha de toda sugestão rejeitada. Está marcado no PR #203, não enterrado no código.
+**✅ Confirmado pelo dono em 2026-09-03:** `recusada` é alcançável de **qualquer estado aberto**, e
+não pela cadeia estrita do diagrama da §5.3. A maioria das recusas acontece na leitura, e forçar a
+aprovação antes poria uma mentira na trilha de toda sugestão rejeitada. O custo levantado no review
+fica registrado: com `concluida` e `recusada` terminais e sem reabertura, um clique errado só se
+conserta com `UPDATE` à mão — que não escreve linha de auditoria.
+
+**⚠️ Ordem de implantação, entre os dois repositórios:** a **API primeiro**. O bot passou a mandar
+`actor_nickname` em toda transição, e a API valida com `forbidNonWhitelisted` — subir o bot antes
+faz toda mudança de estado voltar **400** até a API subir.
+
+**🔓 Exceção à §8 aberta pelo dono em 2026-09-03:** o **apelido do staff que aprovou** aparece na
+loja pública do servidor. A §8 mantém dado pessoal fora de superfície pública; esta é a única
+exceção, e o escopo é exatamente ele — staff que aprova, apelido apenas, nada sobre jogador. O
+apelido é **congelado no momento da aprovação** (`suggestions.assignee_nickname`), não resolvido na
+leitura: a API não tem token do Discord (decisão da S10.2), e quem se renomear depois não reescreve
+o que a loja disse antes. Mesma forma do `nickname_at_purchase` ao lado do `player_uuid`.
 
 ⚠️ **Mergeado não é implantado, e nada disso foi observado em produção.** Os segredos que o
 subsistema exige (`BOT_API_KEYS` na API; `ADMIN_API_KEY`, `ADMIN_API_BASE_URL` e

@@ -12,7 +12,9 @@ import { SuggestionsStore } from '../src/suggestions/suggestions.store';
 import { createApp } from './e2e-utils';
 import {
   bodyBeforeCommit,
+  migrationChainFrom,
   migrationFile,
+  rollbackChainDownTo,
   rollbackFile,
 } from './rollback-utils';
 
@@ -223,9 +225,12 @@ describe('Suggestion states (e2e)', () => {
       const seeded = await seed();
 
       const response = await asBot(
-        http()
-          .patch(`/suggestions/${seeded.id}/status`)
-          .send({ to: 'aprovada', actor: STAFF, command: '/sugestao aprovar' }),
+        http().patch(`/suggestions/${seeded.id}/status`).send({
+          to: 'aprovada',
+          actor: STAFF,
+          command: '/sugestao aprovar',
+          actor_nickname: 'Shinigami',
+        }),
       ).expect(200);
 
       expect(bodyOf<{ status: string }>(response).status).toBe('aprovada');
@@ -249,9 +254,12 @@ describe('Suggestion states (e2e)', () => {
       const seeded = await seed();
 
       await asBot(
-        http()
-          .patch(`/suggestions/${seeded.id}/status`)
-          .send({ to: 'aprovada', actor: STAFF, command: 'btn' }),
+        http().patch(`/suggestions/${seeded.id}/status`).send({
+          to: 'aprovada',
+          actor: STAFF,
+          command: 'btn',
+          actor_nickname: 'Shinigami',
+        }),
       ).expect(200);
 
       const after = await store.getById(seeded.id);
@@ -316,9 +324,12 @@ describe('Suggestion states (e2e)', () => {
       const seeded = await seed('concluida', '900000000000000010');
 
       const response = await asBot(
-        http()
-          .patch(`/suggestions/${seeded.id}/status`)
-          .send({ to: 'aprovada', actor: STAFF, command: 'btn' }),
+        http().patch(`/suggestions/${seeded.id}/status`).send({
+          to: 'aprovada',
+          actor: STAFF,
+          command: 'btn',
+          actor_nickname: 'Shinigami',
+        }),
       ).expect(409);
 
       expect(bodyOf<{ message: string }>(response).message).toContain('final');
@@ -338,9 +349,12 @@ describe('Suggestion states (e2e)', () => {
 
     it('answers 404 for a suggestion that does not exist', async () => {
       await asBot(
-        http()
-          .patch('/suggestions/999999/status')
-          .send({ to: 'aprovada', actor: STAFF, command: 'btn' }),
+        http().patch('/suggestions/999999/status').send({
+          to: 'aprovada',
+          actor: STAFF,
+          command: 'btn',
+          actor_nickname: 'Shinigami',
+        }),
       ).expect(404);
     });
 
@@ -366,6 +380,7 @@ describe('Suggestion states (e2e)', () => {
           to: 'aprovada',
           actor: STAFF,
           command: 'btn-aprovar',
+          actorNickname: 'Shinigami',
         }),
         store.transition({
           id: seeded.id,
@@ -399,6 +414,151 @@ describe('Suggestion states (e2e)', () => {
       // ends refused.
       const final = await store.getById(seeded.id);
       expect(final?.status).toBe('recusada');
+    });
+
+    it('credits the approver, with the nickname frozen as it was', async () => {
+      const seeded = await seed();
+
+      const response = await asBot(
+        http().patch(`/suggestions/${seeded.id}/status`).send({
+          to: 'aprovada',
+          actor: STAFF,
+          command: 'btn',
+          actor_nickname: 'Shinigami',
+        }),
+      ).expect(200);
+
+      const body = bodyOf<{ assignee: string; assigneeNickname: string }>(
+        response,
+      );
+      expect(body.assignee).toBe(STAFF);
+      expect(body.assigneeNickname).toBe('Shinigami');
+    });
+
+    it('keeps the original approver when someone else advances it', async () => {
+      const seeded = await seed();
+
+      await asBot(
+        http().patch(`/suggestions/${seeded.id}/status`).send({
+          to: 'aprovada',
+          actor: STAFF,
+          command: 'btn',
+          actor_nickname: 'Shinigami',
+        }),
+      ).expect(200);
+
+      const response = await asBot(
+        http().patch(`/suggestions/${seeded.id}/status`).send({
+          to: 'em_andamento',
+          actor: '444444444444444444',
+          command: 'btn',
+          actor_nickname: 'Ozielux',
+        }),
+      ).expect(200);
+
+      // The shop credits whoever accepted it, not whoever touched it last.
+      const body = bodyOf<{ assignee: string; assigneeNickname: string }>(
+        response,
+      );
+      expect(body.assignee).toBe(STAFF);
+      expect(body.assigneeNickname).toBe('Shinigami');
+    });
+
+    it('refuses to approve with no name at all', async () => {
+      // 400, not a 200 that quietly drops the credit. There is no second
+      // chance: `aprovada` is not reachable twice and neither ending re-opens.
+      const seeded = await seed('enviada', '900000000000000041');
+
+      await asBot(
+        http().patch(`/suggestions/${seeded.id}/status`).send({
+          to: 'aprovada',
+          actor: STAFF,
+          command: 'btn',
+        }),
+      ).expect(400);
+
+      const after = await store.getById(seeded.id);
+      expect(after?.status).toBe('enviada');
+    });
+
+    it('still allows the other transitions without a name', async () => {
+      // The requirement is scoped to approval, which is the only move that
+      // freezes a credit line.
+      const seeded = await seed('enviada', '900000000000000042');
+
+      await asBot(
+        http()
+          .patch(`/suggestions/${seeded.id}/status`)
+          .send({ to: 'recusada', actor: STAFF, command: 'btn' }),
+      ).expect(200);
+    });
+
+    it('cleans the name before freezing it', async () => {
+      // The one field written in order to be published was the only one with no
+      // write-side cleaning: a bidi override reverses the credit line on a
+      // public page, and escaping at render cannot undo that.
+      const seeded = await seed('enviada', '900000000000000043');
+
+      const response = await asBot(
+        http().patch(`/suggestions/${seeded.id}/status`).send({
+          to: 'aprovada',
+          actor: STAFF,
+          command: 'btn',
+          actor_nickname: '‮Shinigami​',
+        }),
+      ).expect(200);
+
+      expect(
+        bodyOf<{ assigneeNickname: string }>(response).assigneeNickname,
+      ).toBe('Shinigami');
+    });
+
+    it('refuses a name that is blank once cleaned', async () => {
+      const seeded = await seed('enviada', '900000000000000044');
+
+      await asBot(
+        http().patch(`/suggestions/${seeded.id}/status`).send({
+          to: 'aprovada',
+          actor: STAFF,
+          command: 'btn',
+          actor_nickname: ' ​',
+        }),
+      ).expect(422);
+    });
+
+    it('refuses a nickname longer than Discord allows', async () => {
+      const seeded = await seed();
+
+      await asBot(
+        http()
+          .patch(`/suggestions/${seeded.id}/status`)
+          .send({
+            to: 'aprovada',
+            actor: STAFF,
+            command: 'btn',
+            actor_nickname: 'a'.repeat(65),
+          }),
+      ).expect(400);
+    });
+
+    it('rejects half an approver pair written straight to the table', async () => {
+      // The guard for any writer that skips the store: a nickname attached to
+      // nobody, or an id with no name, is not a credit line.
+      const seeded = await seed('enviada', '900000000000000040');
+
+      await expect(
+        pool.query(
+          `UPDATE suggestions SET assignee_nickname = 'Fulano' WHERE id = $1`,
+          [seeded.id],
+        ),
+      ).rejects.toThrow(/suggestions_assignee_pair/);
+
+      await expect(
+        pool.query(`UPDATE suggestions SET assignee = $2 WHERE id = $1`, [
+          seeded.id,
+          STAFF,
+        ]),
+      ).rejects.toThrow(/suggestions_assignee_pair/);
     });
   });
 
@@ -615,9 +775,12 @@ describe('Suggestion states (e2e)', () => {
         }),
       ).expect(409);
       await asBot(
-        http()
-          .patch(`/suggestions/${seeded.id}/status`)
-          .send({ to: 'aprovada', actor: STAFF, command: 'aprovar' }),
+        http().patch(`/suggestions/${seeded.id}/status`).send({
+          to: 'aprovada',
+          actor: STAFF,
+          command: 'aprovar',
+          actor_nickname: 'Shinigami',
+        }),
       ).expect(200);
 
       const response = await asBot(
@@ -703,14 +866,22 @@ describe('Suggestion states (e2e)', () => {
     it('removes the table and re-applying restores it', async () => {
       const client = await pool.connect();
       try {
-        await client.query(bodyBeforeCommit(ROLLBACK_FILE));
+        // Chained down from the head, because each script refuses to run unless
+        // its own migration is the newest applied one. This spec ran the 0010
+        // script directly and broke the day 0011 landed — the same toll 0009
+        // already paid, and the reason `rollbackChainDownTo` exists.
+        for (const down of rollbackChainDownTo('0010')) {
+          await client.query(down);
+        }
 
         const dropped = await client.query<{ table_ref: string | null }>(
           `SELECT to_regclass('public.suggestion_audit') AS table_ref`,
         );
         expect(dropped.rows[0].table_ref).toBeNull();
 
-        await client.query(readFileSync(MIGRATION_FILE).toString());
+        for (const up of migrationChainFrom('0010')) {
+          await client.query(up);
+        }
         const recreated = await client.query<{ table_ref: string | null }>(
           `SELECT to_regclass('public.suggestion_audit') AS table_ref`,
         );

@@ -63,6 +63,7 @@ describe('Suggestions schema (e2e)', () => {
 
     expect(rows.map((r) => r.column_name).sort()).toEqual([
       'assignee',
+      'assignee_nickname',
       'author',
       'created_at',
       'discord_msg_id',
@@ -411,6 +412,56 @@ describe('Suggestions schema (e2e)', () => {
         `SELECT to_regclass('public.suggestions') AS table_ref`,
       );
       expect(rows[0].table_ref).not.toBeNull();
+    });
+
+    it('reverses 0011 too, chained down from the head', async () => {
+      // Every `.down.sql` gets exercised, not only the first one written. The
+      // S6.2b lesson: a script delivered and never run is the product of the
+      // story missing its point.
+      const client = await pool.connect();
+
+      try {
+        for (const down of rollbackChainDownTo('0011')) {
+          await client.query(down);
+        }
+
+        const dropped = await client.query<{ column_name: string }[]>(
+          `SELECT column_name FROM information_schema.columns
+           WHERE table_name = 'suggestions' AND column_name = 'assignee_nickname'`,
+        );
+        expect(dropped.rows).toHaveLength(0);
+
+        for (const up of migrationChainFrom('0011')) {
+          await client.query(up);
+        }
+        const back = await client.query(
+          `SELECT column_name FROM information_schema.columns
+           WHERE table_name = 'suggestions' AND column_name = 'assignee_nickname'`,
+        );
+        expect(back.rows).toHaveLength(1);
+      } finally {
+        await client.query('ROLLBACK');
+        client.release();
+      }
+    });
+
+    it('refuses to roll back 0011 under a newer migration', async () => {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(
+          `INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
+           VALUES ('pretend-newer-0012', $1)`,
+          [Date.now() + 60_000],
+        );
+
+        await expect(
+          client.query(bodyBeforeCommit(rollbackFile('0011'))),
+        ).rejects.toThrow(/not the head/);
+      } finally {
+        await client.query('ROLLBACK');
+        client.release();
+      }
     });
 
     it('refuses to run on its own, under a newer migration', async () => {
