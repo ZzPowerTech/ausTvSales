@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { desc, eq } from 'drizzle-orm';
+import { count, desc, eq } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDB } from '../db/database.module';
 import {
   type Suggestion,
@@ -43,6 +43,28 @@ export interface StaffActionInput {
   /** Bot command name or component custom id that produced the attempt. */
   command: string;
 }
+
+/** One page of suggestions, plus the size of the whole filtered set. */
+export interface SuggestionPage {
+  items: Suggestion[];
+  /**
+   * How many rows match the filter, ignoring the page.
+   *
+   * Required by story S10.3 ("paginada, com **total**"), and it is a second
+   * query rather than `items.length`: the two answer different questions, and a
+   * listing that reports the page size as the total tells the reader the backlog
+   * is exactly one page long no matter how long it is.
+   */
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** Largest page the listing will return, whatever the caller asks for. */
+export const SUGGESTION_PAGE_MAX = 25;
+
+/** Page size when the caller does not choose one. */
+export const SUGGESTION_PAGE_DEFAULT = 5;
 
 /** Result of {@link SuggestionsStore.transition}. */
 export type TransitionOutcome =
@@ -273,4 +295,102 @@ export class SuggestionsStore {
       .orderBy(desc(suggestionAudit.at))
       .limit(limit);
   }
+
+  /**
+   * One page of suggestions, newest first, optionally filtered by state.
+   *
+   * ## Pagination is not optional here
+   *
+   * There is no unpaginated variant, and `limit` is clamped rather than
+   * trusted. The table grows without bound and the only consumers are a Discord
+   * embed (25 components maximum) and, later, a web list — neither of which has
+   * a use for "all of them", and both of which would happily ask for it.
+   *
+   * ## The unfiltered path has no index, and that is a decision with a threshold
+   *
+   * `suggestions_status_created_at_idx` serves a filtered listing. Without a
+   * `status` — the bot's default — Postgres sorts the whole table and counts it
+   * unindexed, twice per page click. Fine at the size this table will have for
+   * years, and the fix is one index on `(created_at DESC, id DESC)` the day
+   * `GET /suggestions` stops being sub-millisecond. Written down so that day is
+   * recognised rather than discovered.
+   *
+   * ## Two reads, two snapshots
+   *
+   * The rows and the count are separate statements and share no transaction, so
+   * under `READ COMMITTED` a write between them makes `total` describe one
+   * instant and `items` another. Accepted rather than fixed: the visible cost is
+   * a "next page" button enabled for a page that renders one row more or less,
+   * and `REPEATABLE READ` is a steep price for a Discord listing.
+   *
+   * Offset pagination also drifts *between* requests — a suggestion posted while
+   * someone reads page one pushes a row down into page two, where they see it
+   * twice. The guarantee below is about the inside of one query, not about a
+   * sequence of them.
+   *
+   * ## Ordering is total, not just by date
+   *
+   * `created_at DESC, id DESC`. Two suggestions can share a timestamp — the
+   * column stores the event date, so a backfill or a burst can produce
+   * duplicates — and a non-total order makes pages overlap or skip rows under
+   * Postgres, which is free to break the tie differently per query. The `id`
+   * is the tiebreaker precisely because it is unique.
+   */
+  async list(options: {
+    status?: SuggestionStatus;
+    limit?: number;
+    offset?: number;
+  }): Promise<SuggestionPage> {
+    const limit = clampPageSize(options.limit);
+    const offset = clampOffset(options.offset);
+    const where = options.status
+      ? eq(suggestions.status, options.status)
+      : undefined;
+
+    const [items, [totals]] = await Promise.all([
+      this.db
+        .select()
+        .from(suggestions)
+        .where(where)
+        .orderBy(desc(suggestions.createdAt), desc(suggestions.id))
+        .limit(limit)
+        .offset(offset),
+      this.db.select({ value: count() }).from(suggestions).where(where),
+    ]);
+
+    return { items, total: totals?.value ?? 0, limit, offset };
+  }
+}
+
+/**
+ * Page size the store will honour.
+ *
+ * Clamped, not validated: a DTO already rejects nonsense at the HTTP door, and
+ * this is the guarantee for every other caller. A `limit` of 10.000 from a
+ * future internal caller should return 25 rows, not a table scan.
+ */
+/**
+ * Offset the store will honour.
+ *
+ * The mirror of {@link clampPageSize}, and it was missing. `Math.trunc` passes
+ * `NaN` and `Infinity` straight through, and drizzle then either sends Postgres
+ * something it rejects (`1e+21` → `invalid input syntax for type bigint`, a 500)
+ * or emits no `OFFSET` at all — returning page one while the response reports an
+ * offset that was never applied. The second is the worse of the two: a wrong
+ * answer that looks like a right one.
+ *
+ * The HTTP door does not cover this either: `@IsInt()` is `Number.isInteger`,
+ * and `Number.isInteger(1e21)` is `true`.
+ */
+function clampOffset(requested: number | undefined): number {
+  if (requested === undefined || !Number.isFinite(requested)) return 0;
+  const truncated = Math.trunc(requested);
+  return Number.isSafeInteger(truncated) ? Math.max(0, truncated) : 0;
+}
+
+function clampPageSize(requested: number | undefined): number {
+  if (requested === undefined || !Number.isFinite(requested)) {
+    return SUGGESTION_PAGE_DEFAULT;
+  }
+  return Math.min(SUGGESTION_PAGE_MAX, Math.max(1, Math.trunc(requested)));
 }

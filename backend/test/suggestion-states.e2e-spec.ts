@@ -402,6 +402,168 @@ describe('Suggestion states (e2e)', () => {
     });
   });
 
+  describe('GET /suggestions', () => {
+    /**
+     * Five suggestions, with the tie placed to **straddle** a page boundary.
+     *
+     * The first version put the two same-instant rows in positions 2 and 3,
+     * which with `limit: 2` are exactly the two slots of page two — so neither
+     * could cross a boundary and no tie-break could ever be observed. The test
+     * built on it passed identically with and without `desc(id)`, which is the
+     * house failure mode: a test that cannot fail, presented as the proof.
+     *
+     * Positions here, newest first: 0 `e`, **1 `d` / 2 `c` (the tie)**, 3 `b`,
+     * 4 `a`. With `limit: 2` the tie spans pages one and two.
+     */
+    async function seedMany(): Promise<number[]> {
+      const shared = new Date('2026-08-21T10:00:00.000Z');
+      const rows = await db
+        .insert(suggestions)
+        .values([
+          {
+            discordMsgId: '901',
+            author: AUTHOR,
+            text: 'a',
+            createdAt: new Date('2026-08-18T10:00:00.000Z'),
+          },
+          {
+            discordMsgId: '902',
+            author: AUTHOR,
+            text: 'b',
+            createdAt: new Date('2026-08-19T10:00:00.000Z'),
+          },
+          {
+            discordMsgId: '903',
+            author: AUTHOR,
+            text: 'c',
+            createdAt: shared,
+            status: 'aprovada',
+          },
+          {
+            discordMsgId: '904',
+            author: AUTHOR,
+            text: 'd',
+            createdAt: shared,
+            status: 'aprovada',
+          },
+          {
+            discordMsgId: '905',
+            author: AUTHOR,
+            text: 'e',
+            createdAt: new Date('2026-08-22T10:00:00.000Z'),
+          },
+        ])
+        .returning({
+          id: suggestions.id,
+          discordMsgId: suggestions.discordMsgId,
+        });
+
+      const byMsg = new Map(rows.map((row) => [row.discordMsgId, row.id]));
+      // Expected order: newest first, ties broken by descending id — which for
+      // this seed means 904 before 903, since 904 was inserted second.
+      return ['905', '904', '903', '902', '901'].map(
+        (msg) => byMsg.get(msg) as number,
+      );
+    }
+
+    it('pages, and reports the total of the whole filtered set', async () => {
+      await seedMany();
+
+      const response = await asBot(
+        http().get('/suggestions').query({ limit: 2 }),
+      ).expect(200);
+
+      const page = bodyOf<{
+        items: { id: number }[];
+        total: number;
+        limit: number;
+        offset: number;
+      }>(response);
+      expect(page.items).toHaveLength(2);
+      expect(page.total).toBe(5);
+      expect(page.limit).toBe(2);
+      expect(page.offset).toBe(0);
+    });
+
+    it('filters by state, and the total follows the filter', async () => {
+      await seedMany();
+
+      const response = await asBot(
+        http().get('/suggestions').query({ status: 'aprovada' }),
+      ).expect(200);
+
+      const page = bodyOf<{
+        items: { status: string }[];
+        total: number;
+      }>(response);
+      expect(page.total).toBe(2);
+      expect(page.items.every((item) => item.status === 'aprovada')).toBe(true);
+    });
+
+    it('walks the rows in one exact order across pages, tie included', async () => {
+      // Cardinality is not the assertion. The first version counted five
+      // distinct ids and passed with no tie-break at all; what fixes the
+      // invariant is the *sequence*, with the tie straddling a page edge so the
+      // order has to survive being split.
+      const expectedOrder = await seedMany();
+
+      const seen: number[] = [];
+      for (let offset = 0; offset < 5; offset += 2) {
+        const response = await asBot(
+          http().get('/suggestions').query({ limit: 2, offset }),
+        ).expect(200);
+        seen.push(
+          ...bodyOf<{ items: { id: number }[] }>(response).items.map(
+            (item) => item.id,
+          ),
+        );
+      }
+
+      expect(seen).toEqual(expectedOrder);
+    });
+
+    it('returns newest first', async () => {
+      await seedMany();
+
+      const response = await asBot(http().get('/suggestions')).expect(200);
+      const items = bodyOf<{ items: { createdAt: string }[] }>(response).items;
+
+      const dates = items.map((item) => new Date(item.createdAt).getTime());
+      expect([...dates].sort((a, b) => b - a)).toEqual(dates);
+    });
+
+    it('refuses a limit above the cap instead of silently clamping at the door', async () => {
+      // The DTO rejects it; the store would clamp. Both, on purpose: the door
+      // tells a caller it asked for something impossible, and the clamp covers
+      // every caller that is not the door.
+      await asBot(http().get('/suggestions').query({ limit: 1000 })).expect(
+        400,
+      );
+    });
+
+    it('refuses a state outside the five', async () => {
+      await asBot(http().get('/suggestions').query({ status: 'Open' })).expect(
+        400,
+      );
+    });
+
+    it('is behind the bot key like every other route', async () => {
+      await http().get('/suggestions').expect(401);
+    });
+
+    it('returns an empty page rather than an error when nothing matches', async () => {
+      await seedMany();
+
+      const response = await asBot(
+        http().get('/suggestions').query({ status: 'concluida' }),
+      ).expect(200);
+
+      const page = bodyOf<{ items: unknown[]; total: number }>(response);
+      expect(page.items).toEqual([]);
+      expect(page.total).toBe(0);
+    });
+  });
+
   describe('POST /suggestions/:id/denied-attempts', () => {
     it('records what the bot refused, with actor and command', async () => {
       const seeded = await seed();

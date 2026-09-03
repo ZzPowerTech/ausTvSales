@@ -10,15 +10,17 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { BotAuth } from '../bot/bot-auth.decorator';
 import type { Suggestion, SuggestionAuditEntry } from '../db/schema';
 import { CreateSuggestionDto } from './dto/create-suggestion.dto';
+import { ListSuggestionsDto } from './dto/list-suggestions.dto';
 import { DeniedAttemptDto } from './dto/denied-attempt.dto';
 import { TransitionSuggestionDto } from './dto/transition-suggestion.dto';
 import { SuggestionTextError } from './suggestion-text';
-import { SuggestionsStore } from './suggestions.store';
+import { type SuggestionPage, SuggestionsStore } from './suggestions.store';
 import { UnprocessableSuggestionTextException } from './unprocessable-suggestion-text.exception';
 
 /**
@@ -74,6 +76,21 @@ export class SuggestionsController {
       }
       throw error;
     }
+  }
+
+  @Get()
+  @BotAuth()
+  @ApiOperation({
+    summary: 'Lista sugestoes, filtradas por estado e paginadas',
+    description:
+      'Sempre paginada e sempre com `total` — que e o tamanho do conjunto ' +
+      'filtrado inteiro, nao o da pagina. Ordenada por data e, em empate, por ' +
+      'id: `created_at` guarda a data do evento, entao duas sugestoes podem ' +
+      'compartilhar o instante, e uma ordem nao-total faz paginas se ' +
+      'sobreporem ou pularem linhas.',
+  })
+  async list(@Query() query: ListSuggestionsDto): Promise<SuggestionPage> {
+    return this.store.list(query);
   }
 
   @Get(':id')
