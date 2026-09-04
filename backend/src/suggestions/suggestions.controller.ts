@@ -180,8 +180,9 @@ export class SuggestionsController {
     description:
       'Recebe o valor **absoluto** — nunca um incremento. O Discord e a fonte ' +
       'da contagem e o bot a recalcula do zero a cada evento, entao um evento ' +
-      'perdido se corrige sozinho no proximo. `PUT` porque a chamada e ' +
-      'idempotente: reenviar o mesmo corpo nao muda nada. ' +
+      'perdido se corrige sozinho no proximo. `PUT` porque o resultado e ' +
+      'idempotente: reenviar o mesmo corpo deixa a mesma contagem (o `updated_at` ' +
+      'da linha ainda se move, entao nao e um no-op literal). ' +
       'Mensagem que nao corresponde a nenhuma sugestao devolve **404** — e o ' +
       'caso normal de alguem reagir a outra mensagem do canal, nao um erro.',
   })

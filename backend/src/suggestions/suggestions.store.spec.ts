@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { desc } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { DRIZZLE } from '../db/database.module';
 import { suggestions } from '../db/schema';
 import { SuggestionTextError } from './suggestion-text';
@@ -597,14 +597,23 @@ describe('SuggestionsStore.setVotesByDiscordMsgId', () => {
     return module.get(SuggestionsStore);
   }
 
-  const VOTED = { ...STORED, votesUp: 7, votesDown: 2 };
+  /**
+   * A real snowflake, unlike the `STORED` fixture's ten digits.
+   *
+   * The store does not validate the id — the DTO does — but a fixture that the
+   * route in front of it would reject with a 400 is a fixture describing a call
+   * that cannot happen.
+   */
+  const MSG = '900000000000000100';
+
+  const VOTED = { ...STORED, discordMsgId: MSG, votesUp: 7, votesDown: 2 };
 
   it('writes both counts as given, absolutely', async () => {
     const { db, updateChain } = buildUpdate([VOTED]);
     const store = await storeWith(db);
 
     await store.setVotesByDiscordMsgId({
-      discordMsgId: '1234567890',
+      discordMsgId: MSG,
       votesUp: 7,
       votesDown: 2,
     });
@@ -618,6 +627,27 @@ describe('SuggestionsStore.setVotesByDiscordMsgId', () => {
     });
   });
 
+  it('keys the write on the message id, not on any other column', async () => {
+    // R4.2 is the reason this route exists in the shape it has, and it had no
+    // assertion that runs outside CI. Both `discord_msg_id` and `author` are
+    // `text`, so swapping them typechecks and leaves every other unit test
+    // green — the write would land on whichever suggestion a *player id*
+    // happened to match, and only the e2e would notice.
+    const { db, updateChain } = buildUpdate([VOTED]);
+    const store = await storeWith(db);
+
+    await store.setVotesByDiscordMsgId({
+      discordMsgId: MSG,
+      votesUp: 7,
+      votesDown: 2,
+    });
+
+    expect(updateChain.calls.where).toHaveBeenCalledTimes(1);
+    expect(updateChain.calls.where.mock.calls[0][0]).toEqual(
+      eq(suggestions.discordMsgId, MSG),
+    );
+  });
+
   it('does not read before it writes, and opens no transaction', async () => {
     // The concurrency claim in the doc comment, asserted. A read-modify-write
     // here would introduce exactly the lost update that an absolute value is
@@ -626,7 +656,7 @@ describe('SuggestionsStore.setVotesByDiscordMsgId', () => {
     const store = await storeWith(db);
 
     await store.setVotesByDiscordMsgId({
-      discordMsgId: '1234567890',
+      discordMsgId: MSG,
       votesUp: 7,
       votesDown: 2,
     });
@@ -642,7 +672,7 @@ describe('SuggestionsStore.setVotesByDiscordMsgId', () => {
 
     await expect(
       store.setVotesByDiscordMsgId({
-        discordMsgId: '1234567890',
+        discordMsgId: MSG,
         votesUp: 7,
         votesDown: 2,
       }),
@@ -674,7 +704,7 @@ describe('SuggestionsStore.setVotesByDiscordMsgId', () => {
     const store = await storeWith(db);
 
     await store.setVotesByDiscordMsgId({
-      discordMsgId: '1234567890',
+      discordMsgId: MSG,
       votesUp: 0,
       votesDown: 0,
     });

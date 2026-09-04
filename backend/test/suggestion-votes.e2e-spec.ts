@@ -277,11 +277,15 @@ describe('Suggestion votes (e2e)', () => {
       ).expect(400);
     });
 
-    it('refuses a count that would overflow the column', async () => {
+    it('refuses a count that would overflow the column, on either side', async () => {
       // `@IsInt()` alone passes this: it is `Number.isInteger`, and
       // `Number.isInteger(1e21)` is `true`. Unbounded, the value reaches
       // Postgres as `integer out of range` — a 500 for a malformed request,
       // the same defect `clampOffset` was written to close.
+      //
+      // Both fields, because the first version of this file only ever sent the
+      // bad value in `votes_up`: deleting `@Max` from `votes_down` alone left
+      // the entire suite green with the 500 reachable in production.
       await seed();
       await asBot(
         http()
@@ -289,7 +293,15 @@ describe('Suggestion votes (e2e)', () => {
           .send({ votes_up: VOTE_COUNT_MAX + 1, votes_down: 0 }),
       ).expect(400);
       await asBot(
+        http()
+          .put(votesUrl(MSG))
+          .send({ votes_up: 0, votes_down: VOTE_COUNT_MAX + 1 }),
+      ).expect(400);
+      await asBot(
         http().put(votesUrl(MSG)).send({ votes_up: 1e21, votes_down: 0 }),
+      ).expect(400);
+      await asBot(
+        http().put(votesUrl(MSG)).send({ votes_up: 0, votes_down: 1e21 }),
       ).expect(400);
     });
 
@@ -304,17 +316,23 @@ describe('Suggestion votes (e2e)', () => {
       ).expect(200);
     });
 
-    it('refuses a fractional count', async () => {
+    it('refuses a fractional count, on either side', async () => {
       await seed();
       await asBot(
         http().put(votesUrl(MSG)).send({ votes_up: 1.5, votes_down: 0 }),
       ).expect(400);
+      await asBot(
+        http().put(votesUrl(MSG)).send({ votes_up: 0, votes_down: 1.5 }),
+      ).expect(400);
     });
 
-    it('refuses a count sent as a string', async () => {
+    it('refuses a count sent as a string, on either side', async () => {
       await seed();
       await asBot(
         http().put(votesUrl(MSG)).send({ votes_up: '3', votes_down: 0 }),
+      ).expect(400);
+      await asBot(
+        http().put(votesUrl(MSG)).send({ votes_up: 0, votes_down: '3' }),
       ).expect(400);
     });
 

@@ -56,52 +56,93 @@ describe('SuggestionVotesDto', () => {
     ).toEqual(['votes_down.min']);
   });
 
-  it('accepts the largest value the column holds, and rejects one more', () => {
-    // Both halves, deliberately. With only the rejection, a `@Max(0)` typo
-    // would pass the suite while refusing every real tally.
+  it('accepts the largest value the column holds', () => {
+    // The half that would be missing if only the rejections were tested: a
+    // `@Max(0)` typo would pass a suite that only ever sends bad values, while
+    // refusing every real tally in production.
     expect(
       failures(SuggestionVotesDto, {
         votes_up: VOTE_COUNT_MAX,
         votes_down: VOTE_COUNT_MAX,
       }),
     ).toEqual([]);
+  });
+
+  /**
+   * Every rejection is asserted **once per field**, and the loop is the point.
+   *
+   * The first version of this file sent every bad value in `votes_up` and a
+   * valid one in `votes_down`. Deleting `@Max` from `votes_down` alone left the
+   * whole suite green — unit, e2e, typecheck — while
+   * `{ votes_up: 0, votes_down: 2147483648 }` went on to produce the 500 these
+   * rules exist to prevent. The property is declared on both fields, so it has
+   * to be exercised on both; asserting it on one and trusting symmetry is how a
+   * guard comes to protect half of what its docblock claims.
+   */
+  const FIELDS = ['votes_up', 'votes_down'] as const;
+
+  /** A valid payload with exactly one field replaced by `value`. */
+  function only(field: (typeof FIELDS)[number], value: unknown) {
+    return { votes_up: 0, votes_down: 0, [field]: value };
+  }
+
+  describe.each(FIELDS)('%s', (field) => {
+    it('rejects a negative count', () => {
+      expect(failures(SuggestionVotesDto, only(field, -1))).toEqual([
+        `${field}.min`,
+      ]);
+    });
+
+    it('rejects one more than the column holds', () => {
+      expect(
+        failures(SuggestionVotesDto, only(field, VOTE_COUNT_MAX + 1)),
+      ).toEqual([`${field}.max`]);
+    });
+
+    it('rejects a value `@IsInt()` alone would let through', () => {
+      // `IsInt` is `Number.isInteger`, and `Number.isInteger(1e21)` is `true`.
+      // Unbounded, this reaches Postgres as `integer out of range` — a 500 for
+      // a malformed request. Same hole `clampOffset` was written to close.
+      expect(Number.isInteger(1e21)).toBe(true);
+      expect(failures(SuggestionVotesDto, only(field, 1e21))).toEqual([
+        `${field}.max`,
+      ]);
+    });
+
+    it('rejects a fractional count', () => {
+      expect(failures(SuggestionVotesDto, only(field, 1.5))).toEqual([
+        `${field}.isInt`,
+      ]);
+    });
+
+    it('rejects a count sent as a string', () => {
+      // No `enableImplicitConversion` in the app's pipe, so "3" stays a string
+      // and must be refused rather than coerced.
+      expect(failures(SuggestionVotesDto, only(field, '3'))).toContain(
+        `${field}.isInt`,
+      );
+    });
+
+    it('rejects an absent count instead of defaulting it to zero', () => {
+      // A partial payload means the bot computed one side and lost the other.
+      // Writing a zero it never measured would be inventing a number.
+      const partial: Record<string, unknown> = { votes_up: 0, votes_down: 0 };
+      delete partial[field];
+      expect(failures(SuggestionVotesDto, partial)).toContain(`${field}.isInt`);
+    });
+  });
+
+  it('refuses a field nobody declared', () => {
+    // `forbidNonWhitelisted`, exercised where it can run without a database. A
+    // `status` smuggled into a vote payload must be refused rather than quietly
+    // dropped — silently ignoring it is how a caller comes to believe it works.
     expect(
       failures(SuggestionVotesDto, {
-        votes_up: VOTE_COUNT_MAX + 1,
+        votes_up: 1,
         votes_down: 0,
+        status: 'aprovada',
       }),
-    ).toEqual(['votes_up.max']);
-  });
-
-  it('rejects a value `@IsInt()` alone would let through', () => {
-    // `IsInt` is `Number.isInteger`, and `Number.isInteger(1e21)` is `true`.
-    // Unbounded, this reaches Postgres as `integer out of range` — a 500 for a
-    // malformed request. Same hole `clampOffset` was written to close.
-    expect(Number.isInteger(1e21)).toBe(true);
-    expect(
-      failures(SuggestionVotesDto, { votes_up: 1e21, votes_down: 0 }),
-    ).toEqual(['votes_up.max']);
-  });
-
-  it('rejects a fractional count', () => {
-    expect(
-      failures(SuggestionVotesDto, { votes_up: 1.5, votes_down: 0 }),
-    ).toEqual(['votes_up.isInt']);
-  });
-
-  it('rejects a count sent as a string', () => {
-    // No `enableImplicitConversion` in the app's pipe, so "3" stays a string
-    // and must be refused rather than coerced.
-    expect(
-      failures(SuggestionVotesDto, { votes_up: '3', votes_down: 0 }),
-    ).toContain('votes_up.isInt');
-  });
-
-  it('rejects an absent count instead of defaulting it to zero', () => {
-    // A partial payload means the bot computed one side and lost the other.
-    // Writing a zero it never measured would be inventing a number.
-    const missing = failures(SuggestionVotesDto, { votes_up: 3 });
-    expect(missing).toContain('votes_down.isInt');
+    ).toContain('status.whitelistValidation');
   });
 });
 
