@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.20.0...backend-v0.21.0) (2026-09-04)
+
+
+### Features
+
+* **admin:** a rota de votos recebe valor absoluto, chaveada por mensagem ([#211](https://github.com/ZzPowerTech/ausTvSales/issues/211)) ([54c244e](https://github.com/ZzPowerTech/ausTvSales/commit/54c244e594e5d7899a5bb67f7ca139953cb86c79))
+
 ## [0.20.0](https://github.com/ZzPowerTech/ausTvSales/compare/backend-v0.19.0...backend-v0.20.0) (2026-09-03)
 
 
