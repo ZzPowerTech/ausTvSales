@@ -10,6 +10,7 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Put,
   Query,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -18,6 +19,10 @@ import type { Suggestion, SuggestionAuditEntry } from '../db/schema';
 import { CreateSuggestionDto } from './dto/create-suggestion.dto';
 import { ListSuggestionsDto } from './dto/list-suggestions.dto';
 import { DeniedAttemptDto } from './dto/denied-attempt.dto';
+import {
+  SuggestionMessageParamsDto,
+  SuggestionVotesDto,
+} from './dto/suggestion-votes.dto';
 import { TransitionSuggestionDto } from './dto/transition-suggestion.dto';
 import { SuggestionTextError } from './suggestion-text';
 import { type SuggestionPage, SuggestionsStore } from './suggestions.store';
@@ -166,6 +171,35 @@ export class SuggestionsController {
       reason: dto.reason,
     });
     if (!recorded) throw new NotFoundException();
+  }
+
+  @Put('by-message/:discordMsgId/votes')
+  @BotAuth()
+  @ApiOperation({
+    summary: 'Grava a contagem de votos do card, por id de mensagem',
+    description:
+      'Recebe o valor **absoluto** — nunca um incremento. O Discord e a fonte ' +
+      'da contagem e o bot a recalcula do zero a cada evento, entao um evento ' +
+      'perdido se corrige sozinho no proximo. `PUT` porque o resultado e ' +
+      'idempotente: reenviar o mesmo corpo deixa a mesma contagem (o `updated_at` ' +
+      'da linha ainda se move, entao nao e um no-op literal). ' +
+      'Mensagem que nao corresponde a nenhuma sugestao devolve **404** — e o ' +
+      'caso normal de alguem reagir a outra mensagem do canal, nao um erro.',
+  })
+  async setVotes(
+    @Param() params: SuggestionMessageParamsDto,
+    @Body() dto: SuggestionVotesDto,
+  ): Promise<Suggestion> {
+    const updated = await this.store.setVotesByDiscordMsgId({
+      discordMsgId: params.discordMsgId,
+      votesUp: dto.votes_up,
+      votesDown: dto.votes_down,
+    });
+    // Not an error condition on either side: the bot cannot know whether a
+    // message is a card without asking, and asking first would double the calls
+    // this route exists to avoid. The bot's job on a 404 is to stop, not retry.
+    if (!updated) throw new NotFoundException();
+    return updated;
   }
 
   @Get(':id/audit')

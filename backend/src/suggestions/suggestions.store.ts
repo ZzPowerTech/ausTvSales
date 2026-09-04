@@ -173,6 +173,70 @@ export class SuggestionsStore {
   }
 
   /**
+   * Overwrite the vote tally of the suggestion posted as `discordMsgId`.
+   *
+   * Returns the updated row, or `null` when no suggestion came from that
+   * message — which is the ordinary case, not a fault: players react to plenty
+   * of messages in the suggestions channel that are not cards (R4.4).
+   *
+   * ## Keyed by message, not by id
+   *
+   * A reaction event carries the message id and nothing else. Resolving it to a
+   * suggestion id first would make every reaction two round trips, and the
+   * lookup would be the same `WHERE` this statement already does.
+   *
+   * ## One statement, and the race it does and does not remove
+   *
+   * No read, no transaction, no `FOR UPDATE` — unlike {@link transition}, which
+   * needs all three because its decision depends on the state it read. This
+   * write depends on nothing it read, so a read-modify-write here would
+   * introduce a lost update where there is currently no update to lose.
+   *
+   * What it does **not** buy is ordering. The payload carries no version and no
+   * sequence number, so the row ends up holding the tally that *arrived* last,
+   * not the one the bot *computed* last. A slow request carrying the count at
+   * t1 can commit after a fast one carrying t2, and the card is then one vote
+   * behind Discord. The mitigation is D2's and not this method's: the value is
+   * absolute, so the next event of any kind repairs it — and the residual cost,
+   * stated rather than denied, is that if the reordered write was the **last**
+   * event, there is no next one and the snapshot stays wrong until somebody
+   * reacts again.
+   *
+   * A version column would close it. It is not here because a stale vote count
+   * on a card is a cosmetic error with a self-healing path, and the ordering
+   * machinery would be permanent.
+   *
+   * ## `updated_at` moves, and it should
+   *
+   * `$onUpdate` bumps it on every vote — so a replay of an identical payload is
+   * idempotent in the tally but not a literal no-op in the row. That is honest:
+   * the row was written. It is also why the column is documented as "last
+   * changed" rather than "last decided", and after this route the honest reading
+   * narrows further — "when this was last decided" is a question only the audit
+   * trail answers now.
+   *
+   * Nothing reads it today: the listing orders by `created_at, id`, and no other
+   * module in this repository selects the column. So a busy card does not climb
+   * the backlog because people are voting on it, and the cost above is a
+   * semantic one rather than a broken consumer.
+   *
+   * No audit row is written (R4.6). The trail exists for staff decisions; one
+   * entry per player click would bury them under what the tally already sums up.
+   */
+  async setVotesByDiscordMsgId(input: {
+    discordMsgId: string;
+    votesUp: number;
+    votesDown: number;
+  }): Promise<Suggestion | null> {
+    const [row] = await this.db
+      .update(suggestions)
+      .set({ votesUp: input.votesUp, votesDown: input.votesDown })
+      .where(eq(suggestions.discordMsgId, input.discordMsgId))
+      .returning();
+    return row ?? null;
+  }
+
+  /**
    * Move one suggestion to `to`, if the state machine allows it.
    *
    * ## "Refused without altering the record", literally
