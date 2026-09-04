@@ -567,3 +567,122 @@ describe('SuggestionsStore.list', () => {
     expect(rowsChain.calls.where.mock.calls[0][0]).toBeUndefined();
   });
 });
+
+/**
+ * The vote tally write (R4).
+ *
+ * These assert the two properties a stub *can* observe: that the write is a
+ * single unconditional `UPDATE ... RETURNING` — no read, no transaction, so
+ * there is no lost update to reason about — and that an unmatched message comes
+ * back as `null` rather than as a fabricated row. That the constraint holds and
+ * that the row really changes are properties of Postgres, and they are asserted
+ * in `suggestion-votes.e2e-spec.ts` against a real one.
+ */
+describe('SuggestionsStore.setVotesByDiscordMsgId', () => {
+  function buildUpdate(returned: unknown[]) {
+    const updateChain = chain(returned);
+    const db = {
+      update: jest.fn(() => updateChain.proxy),
+      select: jest.fn(() => chain([]).proxy),
+      insert: jest.fn(() => chain([]).proxy),
+      transaction: jest.fn(),
+    };
+    return { db, updateChain };
+  }
+
+  async function storeWith(db: unknown): Promise<SuggestionsStore> {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [SuggestionsStore, { provide: DRIZZLE, useValue: db }],
+    }).compile();
+    return module.get(SuggestionsStore);
+  }
+
+  const VOTED = { ...STORED, votesUp: 7, votesDown: 2 };
+
+  it('writes both counts as given, absolutely', async () => {
+    const { db, updateChain } = buildUpdate([VOTED]);
+    const store = await storeWith(db);
+
+    await store.setVotesByDiscordMsgId({
+      discordMsgId: '1234567890',
+      votesUp: 7,
+      votesDown: 2,
+    });
+
+    // The whole set, compared exactly. `toMatchObject` would stay green if a
+    // future edit slipped `status` or `assignee` into the same `set()` — this
+    // route may only ever touch the two counters.
+    expect(updateChain.calls.set.mock.calls[0][0]).toEqual({
+      votesUp: 7,
+      votesDown: 2,
+    });
+  });
+
+  it('does not read before it writes, and opens no transaction', async () => {
+    // The concurrency claim in the doc comment, asserted. A read-modify-write
+    // here would introduce exactly the lost update that an absolute value is
+    // designed to make impossible, and it would do so invisibly.
+    const { db } = buildUpdate([VOTED]);
+    const store = await storeWith(db);
+
+    await store.setVotesByDiscordMsgId({
+      discordMsgId: '1234567890',
+      votesUp: 7,
+      votesDown: 2,
+    });
+
+    expect(db.select).not.toHaveBeenCalled();
+    expect(db.transaction).not.toHaveBeenCalled();
+    expect(db.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns the updated row', async () => {
+    const { db } = buildUpdate([VOTED]);
+    const store = await storeWith(db);
+
+    await expect(
+      store.setVotesByDiscordMsgId({
+        discordMsgId: '1234567890',
+        votesUp: 7,
+        votesDown: 2,
+      }),
+    ).resolves.toEqual(VOTED);
+  });
+
+  it('returns null when no suggestion came from that message', async () => {
+    // The 404 path (R4.4), and the reason it is `null` and not a throw: someone
+    // reacting to an ordinary message in the suggestions channel is the normal
+    // case, so the store reports absence rather than failure.
+    const { db } = buildUpdate([]);
+    const store = await storeWith(db);
+
+    await expect(
+      store.setVotesByDiscordMsgId({
+        discordMsgId: '999999999999999999',
+        votesUp: 1,
+        votesDown: 0,
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it('writes zeros rather than skipping the call', async () => {
+    // A suggestion whose last voter removed their reaction has to go back to
+    // 0/0. A falsy-guard optimisation ("nothing to write") would leave the last
+    // non-zero tally on the card forever, and it is the kind of edit that looks
+    // harmless.
+    const { db, updateChain } = buildUpdate([{ ...STORED }]);
+    const store = await storeWith(db);
+
+    await store.setVotesByDiscordMsgId({
+      discordMsgId: '1234567890',
+      votesUp: 0,
+      votesDown: 0,
+    });
+
+    expect(db.update).toHaveBeenCalledTimes(1);
+    expect(updateChain.calls.set.mock.calls[0][0]).toEqual({
+      votesUp: 0,
+      votesDown: 0,
+    });
+  });
+});

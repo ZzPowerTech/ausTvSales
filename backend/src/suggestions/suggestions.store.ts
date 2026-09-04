@@ -173,6 +173,51 @@ export class SuggestionsStore {
   }
 
   /**
+   * Overwrite the vote tally of the suggestion posted as `discordMsgId`.
+   *
+   * Returns the updated row, or `null` when no suggestion came from that
+   * message — which is the ordinary case, not a fault: players react to plenty
+   * of messages in the suggestions channel that are not cards (R4.4).
+   *
+   * ## Keyed by message, not by id
+   *
+   * A reaction event carries the message id and nothing else. Resolving it to a
+   * suggestion id first would make every reaction two round trips, and the
+   * lookup would be the same `WHERE` this statement already does.
+   *
+   * ## One statement, and that is the concurrency story
+   *
+   * No read, no transaction, no `FOR UPDATE` — unlike {@link transition}, which
+   * needs all three because its decision depends on the state it read. This
+   * write depends on nothing it read: the value is absolute (D2), so two
+   * overlapping bursts settle on whichever the bot computed last, and that is
+   * the correct answer rather than a tolerated race. A read-modify-write here
+   * would introduce a lost update where there is currently no update to lose.
+   *
+   * ## `updated_at` moves, and it should
+   *
+   * `$onUpdate` bumps it on every vote. That is honest — the row did change —
+   * and it is why the column is documented as "last changed" rather than "last
+   * decided". The listing orders by `created_at`, so a busy card does not climb
+   * the backlog because people are voting on it.
+   *
+   * No audit row is written (R4.6). The trail exists for staff decisions; one
+   * entry per player click would bury them under what the tally already sums up.
+   */
+  async setVotesByDiscordMsgId(input: {
+    discordMsgId: string;
+    votesUp: number;
+    votesDown: number;
+  }): Promise<Suggestion | null> {
+    const [row] = await this.db
+      .update(suggestions)
+      .set({ votesUp: input.votesUp, votesDown: input.votesDown })
+      .where(eq(suggestions.discordMsgId, input.discordMsgId))
+      .returning();
+    return row ?? null;
+  }
+
+  /**
    * Move one suggestion to `to`, if the state machine allows it.
    *
    * ## "Refused without altering the record", literally
