@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { count, desc, eq } from 'drizzle-orm';
+import { count, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDB } from '../db/database.module';
 import {
   type Suggestion,
@@ -78,6 +78,31 @@ export const SUGGESTION_PAGE_MAX = 25;
 
 /** Page size when the caller does not choose one. */
 export const SUGGESTION_PAGE_DEFAULT = 5;
+
+/**
+ * How a listing may be ordered (story S11.1, "ordena por data ou votos").
+ *
+ * A closed set rather than a free `orderBy` string: the column names are an
+ * implementation detail, and an open sort parameter on a public route is both a
+ * schema leak and an invitation to sort by something unindexed.
+ */
+export const SUGGESTION_SORTS = ['recent', 'votes'] as const;
+
+export type SuggestionSort = (typeof SUGGESTION_SORTS)[number];
+
+/**
+ * The score a `votes` sort ranks by: upvotes minus downvotes.
+ *
+ * Net score and not `votes_up`, because the two answer different questions and
+ * only one of them is "what do the players want most". A suggestion at 40/38 is
+ * controversial, not popular, and ranking it above a quiet 12/0 would publish
+ * the wrong claim on a public page.
+ *
+ * Computed, not stored: the tally is overwritten wholesale by
+ * {@link SuggestionsStore.setVotesByDiscordMsgId}, so a materialized score would
+ * be a second thing to keep in step with no reader that needs the speed.
+ */
+export const suggestionScore = sql<number>`(${suggestions.votesUp} - ${suggestions.votesDown})`;
 
 /** Result of {@link SuggestionsStore.transition}. */
 export type TransitionOutcome =
@@ -427,31 +452,51 @@ export class SuggestionsStore {
    * twice. The guarantee below is about the inside of one query, not about a
    * sequence of them.
    *
-   * ## Ordering is total, not just by date
+   * ## Ordering is total, whichever sort is asked for
    *
-   * `created_at DESC, id DESC`. Two suggestions can share a timestamp — the
-   * column stores the event date, so a backfill or a burst can produce
-   * duplicates — and a non-total order makes pages overlap or skip rows under
-   * Postgres, which is free to break the tie differently per query. The `id`
-   * is the tiebreaker precisely because it is unique.
+   * `created_at DESC, id DESC` by default; `score DESC, created_at DESC, id DESC`
+   * for `sort: 'votes'`. Every ordering ends in `id DESC` and that is the load
+   * bearing part: two suggestions can share a timestamp — the column stores the
+   * event date, so a backfill or a burst can produce duplicates — and ties on
+   * score are not the exception but the rule, since a fresh backlog is a wall of
+   * `0/0`. A non-total order makes pages overlap or skip rows under Postgres,
+   * which is free to break the tie differently per query. The `id` is the
+   * tiebreaker precisely because it is unique.
+   *
+   * ## Neither sort is indexed for the unfiltered case
+   *
+   * The note above covers the date sort. The score sort is worse off: it orders
+   * by an expression, so `suggestions_status_created_at_idx` cannot serve it
+   * even when a `status` is given, and every page click sorts the filtered set.
+   * Accepted at this table's size for the same reason, with the same escape
+   * hatch named in advance — an index on `((votes_up - votes_down) DESC, id DESC)`
+   * — and one addition: the public surface that uses this sort is rate limited
+   * (see `publicReadThrottle`), so the cost is bounded per client rather than
+   * left to whoever finds the URL.
+   *
+   * The threshold is a number rather than "the day it gets slow", because the
+   * second is never noticed: **create the index once `suggestions` passes
+   * ~50.000 rows**, which at this server's rate of a few suggestions a day is
+   * decades away and would arrive early only through an import. Until then two
+   * sorts of a few hundred rows per request is cheaper than an index to
+   * maintain.
    */
   async list(options: {
-    status?: SuggestionStatus;
+    status?: SuggestionStatus | readonly SuggestionStatus[];
     limit?: number;
     offset?: number;
+    sort?: SuggestionSort;
   }): Promise<SuggestionPage> {
     const limit = clampPageSize(options.limit);
     const offset = clampOffset(options.offset);
-    const where = options.status
-      ? eq(suggestions.status, options.status)
-      : undefined;
+    const where = statusFilter(options.status);
 
     const [items, [totals]] = await Promise.all([
       this.db
         .select()
         .from(suggestions)
         .where(where)
-        .orderBy(desc(suggestions.createdAt), desc(suggestions.id))
+        .orderBy(...orderFor(options.sort))
         .limit(limit)
         .offset(offset),
       this.db.select({ value: count() }).from(suggestions).where(where),
@@ -492,4 +537,40 @@ function clampPageSize(requested: number | undefined): number {
     return SUGGESTION_PAGE_DEFAULT;
   }
   return Math.min(SUGGESTION_PAGE_MAX, Math.max(1, Math.trunc(requested)));
+}
+
+/**
+ * The `ORDER BY` for one sort, always ending in a unique column.
+ *
+ * Separate from {@link SuggestionsStore.list} so the tie-breaking rule is one
+ * thing a test can assert on directly, rather than a property that has to be
+ * inferred from a query builder.
+ */
+function orderFor(sort: SuggestionSort | undefined): SQL[] {
+  const tiebreak = [desc(suggestions.createdAt), desc(suggestions.id)];
+  return sort === 'votes' ? [desc(suggestionScore), ...tiebreak] : tiebreak;
+}
+
+/**
+ * The `WHERE` for a status filter, for one state or for a set of them.
+ *
+ * ## An empty set is not "no filter"
+ *
+ * `[]` returns a predicate that matches nothing, and the branch exists because
+ * the natural implementation — treat a falsy/empty filter as absent — turns a
+ * caller that computed an empty allowlist into a caller that published every
+ * row. On the public surface that is the difference between showing two states
+ * and showing all five, and it fails open, silently, with no error anywhere.
+ */
+function statusFilter(
+  status: SuggestionStatus | readonly SuggestionStatus[] | undefined,
+): SQL | undefined {
+  if (status === undefined) return undefined;
+  if (!Array.isArray(status)) {
+    return eq(suggestions.status, status as SuggestionStatus);
+  }
+  const values = status as readonly SuggestionStatus[];
+  return values.length > 0
+    ? inArray(suggestions.status, [...values])
+    : sql`false`;
 }

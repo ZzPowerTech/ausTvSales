@@ -72,6 +72,20 @@ export function configureApp(
   // CORS com credenciais so quando ha origem cross-site configurada (dev: o
   // Angular dev server em outra porta). Em producao frontend e API dividem a
   // origem sales.austv.net, entao CORS_ORIGIN fica vazio e CORS desligado.
+  //
+  // ⚠️ Desde a S11.1 existe rota ANONIMA (`/public/suggestions`), e o consumidor
+  // dela — a loja do servidor — pode estar noutra origem. Com CORS desligado a
+  // API responde 200 e o navegador descarta: falha invisivel no log, que so
+  // aparece no console de quem chama.
+  //
+  // Se isso acontecer, o caminho de menor esforco e setar `CORS_ORIGIN` — e ele
+  // e o errado. Este `enableCors` vale para o app INTEIRO e com
+  // `credentials: true`, entao a origem liberada para ler uma lista publica
+  // passa a poder ler tambem `/economy/*` e `/retention/*` com o cookie do
+  // operador. Hoje o cookie e `sameSite: 'lax'`, o que barra o envio cross-site
+  // e torna isso inerte; deixa de ser inerte no dia em que alguem trocar para
+  // `none` para fazer a loja funcionar. O certo e CORS por rota, sem
+  // credenciais, so na rota publica.
   const corsOrigin = config.get<string>('CORS_ORIGIN');
   if (corsOrigin) {
     app.enableCors({ origin: corsOrigin, credentials: true });
