@@ -135,9 +135,27 @@ describe('bot principal', () => {
     });
 
     it('is disabled, and says so, when unconfigured', () => {
+      const warn = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+
       const service = new BotIpAllowlistService(config({}));
       expect(service.enabled).toBe(false);
       expect(service.isAllowed('203.0.113.7')).toBe(true);
+
+      // "says so" was unasserted until 2026-09-05, and the text it was not
+      // asserting told the operator to set 127.0.0.1 — the exact guess the
+      // .env.example, the guard's hint and this class's own JSDoc all say not to
+      // make. This warning is the only one of the four an operator reads *at the
+      // moment of deploying*, so it was the one place the instruction was
+      // inverted. Pinned as a property: the boot warning must send the reader to
+      // measure, never hand them a value to copy.
+      const messages = warn.mock.calls.map((call) => String(call[0])).join(' ');
+      expect(messages).toContain('DISABLED');
+      expect(messages).toContain('MEASURE');
+      expect(messages).toContain('ops/deploy/s10-sugestoes.md');
+      expect(messages).not.toMatch(/Set BOT_ALLOWED_IPS in production \(127/);
+      warn.mockRestore();
     });
 
     it('refuses to boot on a malformed address', () => {

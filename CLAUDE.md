@@ -233,6 +233,24 @@ agente adversarial, que devolveu **as duas histórias** `BLOCKED`: sete achados 
 um valor de allowlist que nenhuma topologia produz (backend) mais um furo de escape que um `>` na
 frente abria (bot), com o teste que deveria fixá-lo passando com a proteção removida.
 
+**✅ Verificação de código de 2026-09-05: não falta implementação da S10 neste repo.** As issues
+[#116](https://github.com/ZzPowerTech/ausTvSales/issues/116),
+[#117](https://github.com/ZzPowerTech/ausTvSales/issues/117) e
+[#118](https://github.com/ZzPowerTech/ausTvSales/issues/118) seguem abertas por falta de fechamento,
+não de entrega — todos os critérios de aceite foram conferidos contra `main` um a um. Suíte:
+**79 suítes, 1049 testes**. O que falta da S10 é **implantação**, e ganhou runbook:
+[`ops/deploy/s10-sugestoes.md`](ops/deploy/s10-sugestoes.md) — ordem entre os repos, procedimento de
+**medida** do `BOT_ALLOWED_IPS` e nove verificações que precisam ser **observadas** em produção
+antes de fechar as issues.
+
+**🔴 E a verificação achou duas vezes o mesmo defeito, no único lugar que um operador lê na hora de
+implantar.** O `.env.example`, o `BOT_SOURCE_HINT` do guard e o JSDoc da classe dizem "não chute
+`127.0.0.1`" — mas o **warn de boot** da `BotIpAllowlistService`, o único desses textos que aparece
+no momento do deploy, mandava setar exatamente `127.0.0.1`; e o procedimento de medida do
+`.env.example` mandava medir **com a lista vazia**, que *desliga* a allowlist e portanto não produz
+recusa nenhuma para ler o IP. Instrução certa em três lugares, invertida no que conta. Os dois
+corrigidos, com o warn fixado em teste — e o teste **falha** com a string antiga, conferido.
+
 🔴 **Achado fora de escopo, no `Ticket-Bot`:** o `pnpm-lock.yaml` committado resolve para
 `@magicyan/discord@1.7.4` + `discord.js@14.20.0`, e esse par não importa (`LabelBuilder` não existe
 na 14.20). Uma instalação limpa **não sobe o bot**. Não foi causado por esta sprint; o próximo
