@@ -1223,6 +1223,40 @@ cabeça" entrou na 0009; quando a 0010 chegou, o teste de rollback da 0009 falho
 the head"*. Contornar seria fácil e errado: a ordem que os scripts permitem é uma só, e virou
 código (`test/rollback-utils.ts`), não convenção escrita num README.
 
+### Verificação de código, 2026-09-05
+
+Conferidos os critérios de aceite das três issues contra `main`, um a um: **nada falta de
+implementação neste repositório.** As issues estavam abertas por falta de fechamento.
+
+| critério | onde |
+|---|---|
+| S10.1 — migration `suggestion` (§7) | `drizzle/0009_suggestions.sql` (+`0010` auditoria, +`0011` assignee) |
+| S10.1 — `created_at` = data do evento | `test/suggestions-schema.e2e-spec.ts` assere contra `POSTED_AT`, não contra a hora do insert |
+| S10.1 — rollback testado | `drizzle/rollback/*.down.sql` + `rollbackChainDownTo('0009')`, com reaplicação forward |
+| S10.2 — 5 estados; inválida → 409 sem alterar registro | `suggestion-transitions.ts`, `PATCH /:id/status` |
+| S10.2 — cargo verificado server-side | dividido: cargo no bot, máquina de estados na API atrás de `@BotAuth()` |
+| S10.2 — tentativa negada logada com autor e comando | `POST /:id/denied-attempts` |
+| S10.2 — trilha de auditoria | `GET /:id/audit`, recusas incluídas |
+| S10.3 — filtro, paginação, `total` | `GET /suggestions` + `ListSuggestionsDto` |
+| S10.3 — escape | metade `Ticket-Bot` |
+
+Suíte: **79 suítes, 1049 testes**.
+
+**O que a verificação achou, e é o mesmo defeito duas vezes.** O `.env.example`, o `BOT_SOURCE_HINT`
+do guard e o JSDoc da `BotIpAllowlistService` dizem "não chute `127.0.0.1`, meça". O **warn de boot**
+da mesma classe — o único desses textos que um operador lê **no momento de implantar** — mandava
+setar `127.0.0.1`. E o procedimento de medida do `.env.example` mandava medir **com a lista vazia**,
+que *desliga* a allowlist: a chamada passa, nada é recusado, nenhum IP aparece no log. A instrução
+estava certa em três lugares e invertida nos dois que são usados. Ambos corrigidos; o warn agora tem
+teste, e o teste falha contra a string antiga.
+
+### Implantação: runbook em `ops/deploy/s10-sugestoes.md`
+
+Ordem entre os dois repositórios (API primeiro, e por quê), geração das chaves, o procedimento de
+**medida** do `BOT_ALLOWED_IPS` com `203.0.113.1`, migrations, rollback parcial e **nove
+verificações que precisam ser observadas em produção** — uma por critério de aceite. É o passo que a
+`S6-VERIFICACAO.md` cobra e que este épico já pulou duas vezes.
+
 ### O que ainda não foi observado
 
 - **Nada foi implantado.** Os PRs estão em `main`; o comportamento em produção não foi medido, e
