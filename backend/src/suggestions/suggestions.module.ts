@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { BotModule } from '../bot/bot.module';
+import { ThrottlingModule } from '../config/throttling';
+import { PublicSuggestionsController } from './public-suggestions.controller';
 import { SuggestionsController } from './suggestions.controller';
 import { SuggestionsStore } from './suggestions.store';
 
@@ -10,16 +12,23 @@ import { SuggestionsStore } from './suggestions.store';
  * the single insert that applies it. S10.2 adds the state machine, the audit
  * trail, and the bot-facing surface that drives both.
  *
- * ## Still nothing public
+ * ## S11.1 opened the first anonymous surface in this module
  *
- * Every route is behind `@BotAuth()`. Filtering, pagination, and reads that hide
- * `assignee` and the audit fields from anonymous callers are story S11.1 — that
- * is where the visibility rules get decided, and shipping a public read before
- * then would decide them by accident.
+ * {@link PublicSuggestionsController} serves reads with no principal at all,
+ * behind a projection that names every published field and a rate limit that
+ * bounds the cost. It is a **separate controller on a separate prefix** rather
+ * than a flag on the existing one, so "what the public sees" is a list somebody
+ * has to edit on purpose. The bot's routes are untouched and still return whole
+ * rows behind `@BotAuth()`.
+ *
+ * `ThrottlingModule` is imported for it. Strictly redundant — `BotModule`
+ * already pulls it in transitively and `ThrottlerModule` is `@Global()` — and
+ * kept anyway, because a route whose only protection is a rate limit should not
+ * depend on an unrelated module continuing to import the thing that provides it.
  */
 @Module({
-  imports: [BotModule],
-  controllers: [SuggestionsController],
+  imports: [BotModule, ThrottlingModule],
+  controllers: [SuggestionsController, PublicSuggestionsController],
   providers: [SuggestionsStore],
   exports: [SuggestionsStore],
 })

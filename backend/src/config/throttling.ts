@@ -232,3 +232,65 @@ export const BOT_THROTTLE_LIMIT = 60;
 export const botThrottle = {
   default: { ttl: BOT_THROTTLE_TTL_MS, limit: BOT_THROTTLE_LIMIT },
 } as const;
+
+/**
+ * Profile for **anonymous** reads (story S11.1).
+ *
+ * The other three profiles all bound a principal the API knows: an allowlisted
+ * game server, a session cookie, an API key. This one bounds nobody in
+ * particular — the only key is `req.ip`, and the route it protects is reachable
+ * by anyone who finds the URL.
+ *
+ * That changes what the number is for. `dashboardThrottle` exists to bound what
+ * a *leaked* credential can pull and can afford to be generous, because the
+ * holder was legitimate a moment ago. Here there is no credential to leak and no
+ * legitimacy to assume, so the limit is the whole control: it is what stops the
+ * public listing from being a free full-table sort on demand (see the ordering
+ * note in `SuggestionsStore.list` — neither sort is indexed).
+ *
+ * 60 per minute per IP. A person reading a suggestions page fires one request
+ * per click and a handful on load; a hundred pages of backlog at 20 rows a page
+ * is two thousand suggestions, which this table will not hold for years. So the
+ * limit is far above a reader and far below a scraper walking the offsets.
+ *
+ * ## What it does not bound
+ *
+ * `req.ip` behind Nginx is only the real client if `TRUST_PROXY` is right — the
+ * same dependency the ingest allowlist has, with a different symptom: a wrong
+ * value here puts every anonymous reader in one bucket, and the page starts
+ * answering 429 to people who did nothing. And nothing here is per-account,
+ * because there are no accounts: a distributed scrape is not addressed by this
+ * and is not meant to be. The data is public by decision (§8 exception); the
+ * limit protects the database, not the rows.
+ */
+export const PUBLIC_READ_THROTTLE_TTL_MS = 60_000; // window: 1 minute
+export const PUBLIC_READ_THROTTLE_LIMIT = 60;
+
+export const publicReadThrottle = {
+  default: {
+    ttl: PUBLIC_READ_THROTTLE_TTL_MS,
+    limit: PUBLIC_READ_THROTTLE_LIMIT,
+  },
+} as const;
+
+/**
+ * Guard + profile + documented 429 for an anonymous read route, in one
+ * decorator.
+ *
+ * Bundled for the reason the file has already had to learn twice: `@Throttle`
+ * alone is metadata, `ThrottlerGuard` is deliberately not an `APP_GUARD` here,
+ * and the combination that compiles-but-enforces-nothing is exactly the one a
+ * hurried edit produces. On an authenticated route that mistake costs a rate
+ * limit; on this one it costs the only control the route has.
+ */
+export function PublicReadThrottle(): ReturnType<typeof applyDecorators> {
+  return applyDecorators(
+    UseGuards(ThrottlerGuard),
+    Throttle(publicReadThrottle),
+    ApiResponse({
+      status: 429,
+      description:
+        'Limite de taxa da leitura publica excedido (ver publicReadThrottle).',
+    }),
+  );
+}

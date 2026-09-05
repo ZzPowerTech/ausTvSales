@@ -7,6 +7,7 @@ import {
   SUGGESTION_PAGE_DEFAULT,
   SUGGESTION_PAGE_MAX,
   SuggestionsStore,
+  suggestionScore,
 } from './suggestions.store';
 
 type StubMock = jest.Mock<unknown, unknown[]>;
@@ -488,6 +489,31 @@ describe('SuggestionsStore.list', () => {
     const [first, second] = rowsChain.calls.orderBy.mock.calls[0];
     expect(first).toEqual(desc(suggestions.createdAt));
     expect(second).toEqual(desc(suggestions.id));
+  });
+
+  it('ranks by net score when asked to sort by votes, and still breaks ties', async () => {
+    // Three keys, not one. The score is the ranking key the story asks for, but
+    // it is *not* unique — a fresh backlog is a wall of 0/0 — so dropping the
+    // date and the id would make the order non-total exactly where ties are
+    // most common, and offset pages would then overlap or skip rows.
+    const { db, rowsChain } = buildList([], 0);
+    const store = await storeWith(db);
+
+    await store.list({ sort: 'votes' });
+
+    const keys = rowsChain.calls.orderBy.mock.calls[0];
+    expect(keys).toHaveLength(3);
+    expect(keys[0]).toEqual(desc(suggestionScore));
+    expect(keys[1]).toEqual(desc(suggestions.createdAt));
+    expect(keys[2]).toEqual(desc(suggestions.id));
+  });
+
+  it('ranks by net score, not by upvotes alone', () => {
+    // The claim the sort publishes is "what players want most". `votes_up`
+    // alone answers "what got the most attention", and would put a contested
+    // 40/38 above a quiet 12/0 on a public page. Asserting on the SQL text
+    // because the difference between the two is one operand and both compile.
+    expect(JSON.stringify(suggestionScore.queryChunks)).toContain('votes_down');
   });
 
   it('defaults the page size instead of returning everything', async () => {
