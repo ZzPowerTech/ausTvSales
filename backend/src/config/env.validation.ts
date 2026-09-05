@@ -63,6 +63,22 @@ export class EnvironmentVariables {
   })
   ALLOWED_DISCORD_IDS!: string;
 
+  // Subconjunto do allowlist autorizado a ESCREVER em sugestoes pelo dashboard
+  // (AusTV Admin S11.1, criterio 3). Mesma forma do de cima.
+  //
+  // OPCIONAL de proposito, e a opcionalidade e uma decisao de deploy: uma
+  // variavel nova obrigatoria reprova a validacao no boot, e este repo tem
+  // release automatico a cada merge em `main` — o container entraria em
+  // crash-loop ate alguem setar o valor na VPS (foi o que aconteceu em
+  // 2026-09-03 com BOT_API_KEYS). Ausente, TODO usuario do dashboard e staff,
+  // que e o comportamento de hoje; presente, estreita.
+  @IsOptional()
+  @Matches(/^\s*\d{17,20}\s*(,\s*\d{17,20}\s*)*$/, {
+    message:
+      'STAFF_DISCORD_IDS must be a comma-separated list of Discord user IDs',
+  })
+  STAFF_DISCORD_IDS?: string;
+
   // Secret used to sign the session JWT stored in the httpOnly cookie.
   @MinLength(32, {
     message: 'SESSION_JWT_SECRET must be at least 32 characters',
