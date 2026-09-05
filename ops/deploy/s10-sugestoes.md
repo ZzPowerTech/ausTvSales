@@ -6,9 +6,26 @@
 > Referência: [§5.3 e §7 do spec](../../.specs/features/austv-admin/spec.md) ·
 > [`docs/nginx-ingest.md`](../../backend/docs/nginx-ingest.md) (topologias e `TRUST_PROXY`)
 
+## Estado — 2026-09-04
+
+**Os passos 1 a 5 foram executados. O subsistema está no ar e criou sugestão real.** O que resta
+deste arquivo é a tabela de verificação no fim, e ela está **3 de 9**.
+
+A data está no corpo de propósito: este épico já perdeu tempo com um registro de ambiente sem data,
+lido no dia seguinte como se fosse o estado atual. Se você chegou aqui muito depois, **confirme
+antes de agir** — nada abaixo é garantia permanente.
+
+| passo | estado |
+|---|---|
+| 1. gerar as chaves | ✅ feito (a primeira vazou num `grep` e foi rotacionada) |
+| 2. **medir** `BOT_ALLOWED_IPS` | ✅ **`172.27.0.5`** — o IP do bot na rede `austv-sales_default` |
+| 3. migrations | ✅ aplicadas |
+| 4. subir a API | ✅ |
+| 5. subir o bot | ✅ `v0.2.1`, por pipeline (release-please → GHCR → deploy SSH) |
+
 ## Por que este arquivo existe
 
-A S10 fechou com as três histórias em `main` e **nada rodando**. Esse é o mesmo desfecho que a
+A S10 fechou com as três histórias em `main` e nada rodando **até 2026-09-04**. Esse é o mesmo desfecho que a
 [`S6-VERIFICACAO.md`](../../.specs/features/austv-admin/S6-VERIFICACAO.md) já registrou duas vezes
 no épico: a S6.2b entregou scripts que ninguém rodou, a S6.3 entregou alerta que ninguém disparou.
 Nos três casos o que sobra é o passo que exige tocar um ambiente real.
@@ -23,10 +40,16 @@ Este runbook é esse passo escrito. Ele **não** implanta nada sozinho — preci
 | schema, máquina de estados, auditoria, listagem | `ZzPowerTech/ausTvSales` | `BOT_API_KEYS`, `BOT_ALLOWED_IPS` |
 | comandos `/sugestao*`, check de cargo, escape, navegação | `austv-minecraft/Ticket-Bot` | `ADMIN_API_KEY`, `ADMIN_API_BASE_URL`, `SUGGESTIONS_CHANNEL_ID` |
 
-Bot e API rodam na **mesma VPS** (decisão de 2026-09-02). O bot fala com a API por HTTP em
-loopback, com token de serviço — nunca direto no Postgres.
+Bot e API rodam na **mesma VPS** (decisão de 2026-09-02), com token de serviço — nunca direto no
+Postgres.
 
-## 🔴 Bloqueio conhecido, antes de começar
+**🔴 E não é por loopback, embora este arquivo dissesse que era.** São dois *containers*:
+`127.0.0.1` dentro do bot é o loopback dele, não o do host, e a API publica só em
+`127.0.0.1:3000` do host. Medido em 2026-09-04: **nenhum** valor aceito pelo schema alcançava a
+API, e o subsistema não podia ser ligado. Os dois passaram a dividir a rede
+`austv-sales_default` e o endereço é `http://austv-sales-backend-1:3000`.
+
+## ✅ Bloqueio RESOLVIDO em 2026-09-03 — mantido como registro
 
 O `pnpm-lock.yaml` committado do `Ticket-Bot` resolve `@magicyan/discord@1.7.4` +
 `discord.js@14.20.0`, e esse par **não importa**:
@@ -40,8 +63,9 @@ instalação limpa não sobe o bot.** Não foi causado pela S10 — o lockfile n
 deploy atual provavelmente roda com um `node_modules` mais antigo, mas **o passo 5 abaixo é um
 rebuild**, então ele encontra.
 
-Resolver o lockfile é pré-requisito do passo 5. **Os passos 1 a 4 (metade API) não dependem dele** e
-podem ir na frente.
+**Resolvido** em [Ticket-Bot#4](https://github.com/austv-minecraft/Ticket-Bot/pull/4): o lockfile
+foi regerado e o CI do repositório (que não existia) passou a rodar os dois caminhos de boot como
+smoke. O parágrafo acima fica como registro de por que o passo 5 travou.
 
 ## ⚠️ Ordem entre os dois repositórios: API PRIMEIRO
 
@@ -142,20 +166,48 @@ subido.
 Verde em CI não é observação. Cada linha abaixo é um critério de aceite das issues #116–#118 visto
 em produção **uma vez**. Registre a saída ao fechar as issues.
 
-| # | o que fazer | o que precisa acontecer |
-|---|---|---|
-| 1 | Postar uma sugestão no canal | linha em `suggestion` com `created_at` = **hora do post**, não do insert |
-| 2 | Repetir o mesmo `discord_msg_id` | devolve a sugestão já gravada, texto original preservado (idempotência) |
-| 3 | Staff aprova | estado vai a `aprovada`; `assignee_nickname` **congelado** no apelido do momento |
-| 4 | Tentar `concluida` a partir de `enviada` | **409**, e `SELECT` mostra o registro **inalterado** |
-| 5 | Não-staff tenta aprovar | bot recusa **e** `GET /suggestions/:id/audit` mostra a tentativa com autor e comando |
-| 6 | `GET /suggestions/:id/audit` | trilha com quem mudou o quê, recusas incluídas |
-| 7 | `/sugestoes` com mais de uma página | filtro por estado, `total` do conjunto **inteiro**, sem linha repetida nem pulada entre páginas |
-| 8 | Sugestão contendo `@everyone` e `> # TESTE` | renderiza como **texto**: sem menção disparada, sem heading |
-| 9 | `curl` das rotas de sugestão **de fora da VPS** | **403** antes de qualquer avaliação de chave |
+| # | o que fazer | o que precisa acontecer | estado |
+|---|---|---|---|
+| 1 | Postar uma sugestão no canal | linha em `suggestion` com `created_at` = **hora do post**, não do insert | 🟡 sugestão criada em 2026-09-04; **ninguém leu o banco** para conferir a semântica da data |
+| 2 | Repetir o mesmo `discord_msg_id` | devolve a sugestão já gravada, texto original preservado (idempotência) | ❌ |
+| 3 | Staff aprova | estado vai a `aprovada`; `assignee_nickname` **congelado** no apelido do momento | ❌ |
+| 4 | Tentar `concluida` a partir de `enviada` | **409**, e `SELECT` mostra o registro **inalterado** | ❌ |
+| 5 | Não-staff tenta aprovar | bot recusa **e** `GET /suggestions/:id/audit` mostra a tentativa com autor e comando | 🟡 **recusa ✅** (2026-09-05); a **trilha** não foi conferida |
+| 6 | `GET /suggestions/:id/audit` | trilha com quem mudou o quê, recusas incluídas | ❌ |
+| 7 | `/sugestoes` com mais de uma página | filtro por estado, `total` do conjunto **inteiro**, sem linha repetida nem pulada entre páginas | ❌ |
+| 8 | Sugestão contendo `@everyone` e `> # TESTE` | renderiza como **texto**: sem menção disparada, sem heading | 🟡 **`@everyone` inerte ✅** (2026-09-05); o **markdown** não foi testado |
+| 9 | `curl` das rotas de sugestão **de fora da VPS** | **403** antes de qualquer avaliação de chave | ✅ 2026-09-05 — `GET https://sales.austv.net/api/suggestions` → **403** |
 
 O item 9 é o que prova que os passos 1 e 2 valeram alguma coisa. Os itens 5 e 8 são os dois
 requisitos de segurança das histórias.
+
+### As duas metades que faltam nos itens já marcados
+
+Nenhum dos dois é preciosismo: em ambos, a metade que falta pode estar quebrada **sem diferença
+visível** de quem só olha o Discord.
+
+- **5b — a trilha da recusa.** O bot recusar é a metade visível. A outra é a recusa ficar
+  **consultável**, que é a razão declarada do desenho da S10.2 (*"recusa que só vive em log de
+  processo não é consultável"*). O `recordDeniedAttempt` chama a API antes de recusar; se essa
+  chamada estiver falhando, a recusa aparece igual e a linha simplesmente não existe. Comando, que
+  usa as variáveis de dentro do container (nenhum segredo digitado, e sai do IP que a allowlist
+  aceita):
+  ```bash
+  docker exec discordbot node -e 'fetch(`${process.env.ADMIN_API_BASE_URL}/suggestions/1/audit`,{headers:{"X-Api-Key":process.env.ADMIN_API_KEY}}).then(r=>r.text()).then(console.log)'
+  ```
+  Espere uma entrada com `action: "transition_denied"`, o autor e o comando.
+
+- **8b — o escape de markdown.** `@everyone` inerte prova o `allowedMentions`; o `> # TESTE` prova
+  o `safe-text.ts`, que é outro código — e foi exatamente ali que o review adversarial da S10.2
+  achou um furo que um `>` na frente abria, com o teste que deveria fixá-lo passando sem a
+  proteção. Mande um `/sugestao` com o texto `> # TESTE **negrito** [link](http://x) @everyone` e
+  confira que o card mostra isso **literalmente**.
+
+### Cuidado ao verificar: a allowlist agora barra o host
+
+Com `BOT_ALLOWED_IPS=172.27.0.5`, um `curl` rodado **no host** da VPS chega como loopback e leva
+`403`. Não é defeito — é a lista funcionando. Para chamar a API "como o bot", use o `docker exec`
+acima, que sai de dentro do container.
 
 ## Rollback
 

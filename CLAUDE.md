@@ -187,7 +187,7 @@ Suíte: **72 suítes, 903 testes** unitários, mais 5 arquivos de e2e novos cont
   **Por que nenhum teste pegava:** todas as fixtures de pagamento eram `PAY_RECEIVER`. Com uma
   linha por pagamento, um join que lê os dois tipos é indistinguível de um que lê o certo.
 
-**Sprint 10 — as três histórias entregues e mergeadas em cinco PRs. Nada implantado.** A sprint
+**Sprint 10 — as três histórias entregues, mergeadas e IMPLANTADAS em 2026-09-04.** A sprint
 atravessa **dois repositórios**, o que o plano não dimensionava: S10.2 e S10.3 são cada uma metade
 backend e metade bot. [#202](https://github.com/ZzPowerTech/ausTvSales/pull/202) (schema),
 [#203](https://github.com/ZzPowerTech/ausTvSales/pull/203) (estados, auditoria, superfície),
@@ -197,8 +197,17 @@ backend e metade bot. [#202](https://github.com/ZzPowerTech/ausTvSales/pull/202)
 
 **A decisão de arquitetura que a S10.2 exigiu, e que fechou a pergunta nº 4 do plano:** o bot roda
 na **mesma VPS da API**, a sugestão é persistida pela **API**, e o bot chega até ela por HTTP com
-token de serviço em loopback. Bot escrevendo direto no Postgres foi descartado: poria credencial de
-banco no host do bot e faria o schema existir em dois repositórios livres para divergir.
+token de serviço. Bot escrevendo direto no Postgres foi descartado: poria credencial de banco no
+host do bot e faria o schema existir em dois repositórios livres para divergir.
+
+**🔴 Correção de 2026-09-04: NÃO é loopback, e este documento dizia que era.** Bot e API são dois
+**containers**, e `127.0.0.1` dentro do bot é o loopback *dele*. Medido: `austv-sales-backend-1`
+publica só em `127.0.0.1:3000` do host, e o bot ficava noutra rede Docker — de modo que **nenhum
+valor** de `ADMIN_API_BASE_URL` aceito pelo schema alcançava a API, e o subsistema não podia ser
+ligado. Os dois passaram a dividir a rede `austv-sales_default`, o endereço é
+`http://austv-sales-backend-1:3000`, e o schema do bot foi afrouxado para aceitar host de rede
+Docker interna (com o custo escrito no ponto de chamada: bridge não é a mesma garantia que
+loopback).
 
 **Onde cada decisão da S10.2 é tomada, e são lugares diferentes de propósito:** o cargo de staff é
 checado **no bot**, porque cargo do Discord só existe lá; a transição é validada **na API**, que tem
@@ -223,11 +232,20 @@ apelido é **congelado no momento da aprovação** (`suggestions.assignee_nickna
 leitura: a API não tem token do Discord (decisão da S10.2), e quem se renomear depois não reescreve
 o que a loja disse antes. Mesma forma do `nickname_at_purchase` ao lado do `player_uuid`.
 
-⚠️ **Mergeado não é implantado, e nada disso foi observado em produção.** Os segredos que o
-subsistema exige (`BOT_API_KEYS` na API; `ADMIN_API_KEY`, `ADMIN_API_BASE_URL` e
-`SUGGESTIONS_CHANNEL_ID` no bot) ainda não existem na VPS — o que é seguro porque as três do bot
-são opcionais por decisão: sem elas os comandos de sugestão respondem "não configurado" e o resto
-do bot segue de pé. E `BOT_ALLOWED_IPS` precisa ser **medido**, não escolhido. E o revisor do
+**✅ Implantado em 2026-09-04, e o subsistema criou sugestão real de ponta a ponta.** Os segredos
+existem na VPS, o `BOT_ALLOWED_IPS` foi **medido** (`172.27.0.5`, o IP do bot na
+`austv-sales_default` — não `127.0.0.1`, que era o palpite que nenhuma topologia produz), e o bot
+roda por pipeline: release-please → GHCR → deploy SSH com verificação de digest.
+
+**Mas implantado não é observado, e 3 das 9 verificações do runbook estão fechadas.** ✅ o item 5
+(não-staff recusado), ✅ o 8 (`@everyone` renderizado como texto) e ✅ o 9 (`403` de fora da VPS,
+antes de a chave ser avaliada). **Os itens 5 e 8 estão pela metade:** o 5 provou a recusa e não a
+**trilha** dela — que é a razão declarada do desenho, e falharia sem diferença visível no Discord;
+o 8 provou o `allowedMentions` e não o **escape de markdown**, que é outro código e foi onde o
+review achou o furo do `>`. Faltam inteiros os itens 1, 2, 3, 4, 6 e 7. Detalhe e comandos no
+runbook.
+
+E o revisor do
 Copilot **não rodou** em nenhum dos PRs (quota da conta esgotada) — a revisão que houve foi a do
 agente adversarial, que devolveu **as duas histórias** `BLOCKED`: sete achados na S10.1, e na S10.2
 um valor de allowlist que nenhuma topologia produz (backend) mais um furo de escape que um `>` na
@@ -238,7 +256,8 @@ frente abria (bot), com o teste que deveria fixá-lo passando com a proteção r
 [#117](https://github.com/ZzPowerTech/ausTvSales/issues/117) e
 [#118](https://github.com/ZzPowerTech/ausTvSales/issues/118) seguem abertas por falta de fechamento,
 não de entrega — todos os critérios de aceite foram conferidos contra `main` um a um. Suíte:
-**79 suítes, 1049 testes**. O que falta da S10 é **implantação**, e ganhou runbook:
+**79 suítes, 1049 testes**. O que falta da S10 é **observação** — a implantação aconteceu em
+2026-09-04 (ver acima). Runbook:
 [`ops/deploy/s10-sugestoes.md`](ops/deploy/s10-sugestoes.md) — ordem entre os repos, procedimento de
 **medida** do `BOT_ALLOWED_IPS` e nove verificações que precisam ser **observadas** em produção
 antes de fechar as issues.
