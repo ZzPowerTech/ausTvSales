@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { count, desc, eq, sql, type SQL } from 'drizzle-orm';
+import { count, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDB } from '../db/database.module';
 import {
   type Suggestion,
@@ -102,7 +102,7 @@ export type SuggestionSort = (typeof SUGGESTION_SORTS)[number];
  * {@link SuggestionsStore.setVotesByDiscordMsgId}, so a materialized score would
  * be a second thing to keep in step with no reader that needs the speed.
  */
-export const suggestionScore = sql<number>`(votes_up - votes_down)`;
+export const suggestionScore = sql<number>`(${suggestions.votesUp} - ${suggestions.votesDown})`;
 
 /** Result of {@link SuggestionsStore.transition}. */
 export type TransitionOutcome =
@@ -473,18 +473,23 @@ export class SuggestionsStore {
    * — and one addition: the public surface that uses this sort is rate limited
    * (see `publicReadThrottle`), so the cost is bounded per client rather than
    * left to whoever finds the URL.
+   *
+   * The threshold is a number rather than "the day it gets slow", because the
+   * second is never noticed: **create the index once `suggestions` passes
+   * ~50.000 rows**, which at this server's rate of a few suggestions a day is
+   * decades away and would arrive early only through an import. Until then two
+   * sorts of a few hundred rows per request is cheaper than an index to
+   * maintain.
    */
   async list(options: {
-    status?: SuggestionStatus;
+    status?: SuggestionStatus | readonly SuggestionStatus[];
     limit?: number;
     offset?: number;
     sort?: SuggestionSort;
   }): Promise<SuggestionPage> {
     const limit = clampPageSize(options.limit);
     const offset = clampOffset(options.offset);
-    const where = options.status
-      ? eq(suggestions.status, options.status)
-      : undefined;
+    const where = statusFilter(options.status);
 
     const [items, [totals]] = await Promise.all([
       this.db
@@ -544,4 +549,28 @@ function clampPageSize(requested: number | undefined): number {
 function orderFor(sort: SuggestionSort | undefined): SQL[] {
   const tiebreak = [desc(suggestions.createdAt), desc(suggestions.id)];
   return sort === 'votes' ? [desc(suggestionScore), ...tiebreak] : tiebreak;
+}
+
+/**
+ * The `WHERE` for a status filter, for one state or for a set of them.
+ *
+ * ## An empty set is not "no filter"
+ *
+ * `[]` returns a predicate that matches nothing, and the branch exists because
+ * the natural implementation — treat a falsy/empty filter as absent — turns a
+ * caller that computed an empty allowlist into a caller that published every
+ * row. On the public surface that is the difference between showing two states
+ * and showing all five, and it fails open, silently, with no error anywhere.
+ */
+function statusFilter(
+  status: SuggestionStatus | readonly SuggestionStatus[] | undefined,
+): SQL | undefined {
+  if (status === undefined) return undefined;
+  if (!Array.isArray(status)) {
+    return eq(suggestions.status, status as SuggestionStatus);
+  }
+  const values = status as readonly SuggestionStatus[];
+  return values.length > 0
+    ? inArray(suggestions.status, [...values])
+    : sql`false`;
 }

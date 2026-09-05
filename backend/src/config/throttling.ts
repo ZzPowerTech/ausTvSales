@@ -248,10 +248,21 @@ export const botThrottle = {
  * public listing from being a free full-table sort on demand (see the ordering
  * note in `SuggestionsStore.list` — neither sort is indexed).
  *
- * 60 per minute per IP. A person reading a suggestions page fires one request
- * per click and a handful on load; a hundred pages of backlog at 20 rows a page
- * is two thousand suggestions, which this table will not hold for years. So the
- * limit is far above a reader and far below a scraper walking the offsets.
+ * 60 per minute per IP **per route**, not per controller — the tracker key that
+ * `ThrottlerGuard` builds includes the handler name, exactly as
+ * {@link DASHBOARD_THROTTLE_LIMIT} spells out. So the two routes here admit 120
+ * a minute from one client between them, and the ceiling grows with each route
+ * added to the controller. Said here and not only there because on an
+ * authenticated route the budget is a second line of defence, and on this one it
+ * is the whole of it.
+ *
+ * The number: a person reading a suggestions page fires one request per click
+ * and a handful on load; a hundred pages of backlog at 20 rows a page is two
+ * thousand suggestions, which this table will not hold for years. So the limit
+ * is far above a reader and far below a scraper walking the offsets — with the
+ * per-route multiplier folded in, a determined client can still pull ~1.500 rows
+ * a minute of unindexed sort, which is the number to revisit if the table grows
+ * or a third route lands here.
  *
  * ## What it does not bound
  *

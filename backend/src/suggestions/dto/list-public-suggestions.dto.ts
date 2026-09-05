@@ -1,7 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
-import { SUGGESTION_STATUSES, type SuggestionStatus } from '../../db/schema';
+import type { SuggestionStatus } from '../../db/schema';
 import {
   SUGGESTION_PAGE_MAX,
   SUGGESTION_SORTS,
@@ -19,6 +19,43 @@ import {
 export const PUBLIC_SUGGESTION_PAGE_DEFAULT = 20;
 
 /**
+ * The only states that reach an anonymous reader.
+ *
+ * ## This is written down elsewhere, and the first draft of this file got it wrong
+ *
+ * Story S12.3, criterion 1 — the sole planned consumer of this route — says
+ * *"Lista `aprovada` e `em_andamento`, paginada, pública sob rate limit"*. The
+ * first version of this DTO defaulted to **all five** states and defended it in
+ * a comment saying that hiding one would be "inventing policy nobody asked
+ * for". Somebody had asked, in writing, one story away.
+ *
+ * ## Why the rule is right independently of who wrote it down
+ *
+ * A suggestion in `enviada` has been read by nobody. Publishing it takes text a
+ * player typed and republishes it on the server's own domain, indexable, with
+ * no human step in between — a phishing link, a named accusation, somebody's
+ * address. The write-time sanitizer removes control characters; it has no
+ * opinion about meaning. §8 keeps personal data off public surfaces, and the
+ * 2026-09-03 exception is explicit about its scope: *"staff que aprova, apelido
+ * apenas, nada sobre jogador"*. Content is the door that projection does not
+ * close.
+ *
+ * `recusada` is worse in one way: it is terminal with no re-open, so a
+ * suggestion the staff rejected would stay published forever.
+ *
+ * ## What this deliberately leaves out
+ *
+ * `concluida` — a suggestion that shipped — is arguably the most worth showing
+ * of all, and it is **not** here because S12.3 names two states and this is not
+ * the story that gets to widen a public surface. Adding it is one entry in this
+ * array and an owner's decision.
+ */
+export const PUBLIC_SUGGESTION_STATUSES = [
+  'aprovada',
+  'em_andamento',
+] as const satisfies readonly SuggestionStatus[];
+
+/**
  * Query parameters of the public listing (story S11.1, criterion 1).
  *
  * ## Pagination is mandatory, and that is enforced by there being no way off it
@@ -31,15 +68,16 @@ export const PUBLIC_SUGGESTION_PAGE_DEFAULT = 20;
  */
 export class ListPublicSuggestionsDto {
   @ApiPropertyOptional({
-    enum: SUGGESTION_STATUSES,
+    enum: PUBLIC_SUGGESTION_STATUSES,
     description:
-      'Filtra por estado. Ausente, devolve todos os estados — o canal de ' +
-      'sugestoes do Discord ja e publico, entao o estado de uma sugestao nao e ' +
-      'segredo; esconder um deles aqui seria inventar politica que ninguem pediu.',
+      'Filtra dentro do conjunto publicavel. Ausente, devolve os dois estados ' +
+      'de `PUBLIC_SUGGESTION_STATUSES`. Pedir um estado fora dele e **400**, ' +
+      'nao uma lista vazia: "esse estado nao e publico" e uma resposta ' +
+      'diferente de "nao ha nenhuma assim".',
   })
   @IsOptional()
-  @IsIn(SUGGESTION_STATUSES as readonly string[])
-  status?: SuggestionStatus;
+  @IsIn(PUBLIC_SUGGESTION_STATUSES)
+  status?: (typeof PUBLIC_SUGGESTION_STATUSES)[number];
 
   @ApiPropertyOptional({
     enum: SUGGESTION_SORTS,

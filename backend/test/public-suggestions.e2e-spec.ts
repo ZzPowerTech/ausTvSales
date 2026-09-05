@@ -5,7 +5,10 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import * as schema from '../src/db/schema';
 import { suggestions } from '../src/db/schema';
-import { PUBLIC_SUGGESTION_PAGE_DEFAULT } from '../src/suggestions/dto/list-public-suggestions.dto';
+import {
+  PUBLIC_SUGGESTION_PAGE_DEFAULT,
+  PUBLIC_SUGGESTION_STATUSES,
+} from '../src/suggestions/dto/list-public-suggestions.dto';
 import type { PublicSuggestionDto } from '../src/suggestions/dto/public-suggestion.dto';
 import { SUGGESTION_PAGE_MAX } from '../src/suggestions/suggestions.store';
 import { createApp } from './e2e-utils';
@@ -80,7 +83,7 @@ describe('Public suggestions (e2e)', () => {
         text: row.text ?? 'Colocar mais eventos no Survival',
         votesUp: row.votesUp ?? 0,
         votesDown: row.votesDown ?? 0,
-        status: row.status ?? 'enviada',
+        status: row.status ?? 'aprovada',
         createdAt: new Date(row.createdAt ?? POSTED_AT),
         assignee: row.assignee ?? null,
         assigneeNickname: row.assigneeNickname ?? null,
@@ -103,11 +106,17 @@ describe('Public suggestions (e2e)', () => {
       expect(page.items).toHaveLength(1);
     });
 
-    it('does not accept a bot key as a way in to anything more', async () => {
-      // Presenting the bot key on the public route must not widen the
-      // projection. The two surfaces are separate classes, so this is really a
-      // check that no shared middleware decided to be helpful.
+    it('answers the same to a caller presenting the bot key', async () => {
+      // A regression canary, and named as one rather than as proof: nothing in
+      // this controller's path reads `X-Api-Key` (the key guard is applied per
+      // route by `@BotAuth()`, which this class does not use), so today the
+      // header cannot change the answer. What the test would catch is a future
+      // shared middleware that decided to be helpful about credentials.
+      //
+      // The key is asserted non-empty first, because `?? ''` degrades in
+      // silence and a canary that stops carrying a credential stops being one.
       const botKey = process.env.BOT_API_KEYS?.split(',')[0].trim() ?? '';
+      expect(botKey).not.toBe('');
       await seed({ discordMsgId: '900000000000000001' });
 
       const page = bodyOf<Page>(
@@ -183,6 +192,91 @@ describe('Public suggestions (e2e)', () => {
     });
   });
 
+  describe('only what the staff has read is public', () => {
+    it('leaves an unread suggestion out of the listing entirely', async () => {
+      // The failure this closes: a player writes a phishing link or somebody's
+      // address, the bot records it as `enviada`, and the next anonymous read
+      // republishes it on the server's own domain before any human sees it.
+      await seed({
+        discordMsgId: '900000000000000001',
+        status: 'enviada',
+        text: 'texto que ninguem da staff leu ainda',
+      });
+      await seed({ discordMsgId: '900000000000000002', status: 'aprovada' });
+
+      const response = await http().get('/public/suggestions').expect(200);
+      const page = bodyOf<Page>(response);
+
+      expect(page.total).toBe(1);
+      expect(page.items).toHaveLength(1);
+      expect(page.items[0].status).toBe('aprovada');
+      expect(response.text).not.toContain('ninguem da staff leu');
+    });
+
+    it('leaves a refused suggestion out too, permanently', async () => {
+      // `recusada` is terminal with no re-open, so publishing it would keep a
+      // rejected suggestion on the shop forever.
+      await seed({ discordMsgId: '900000000000000001', status: 'recusada' });
+
+      const page = bodyOf<Page>(
+        await http().get('/public/suggestions').expect(200),
+      );
+
+      expect(page.total).toBe(0);
+    });
+
+    it('counts only publishable rows in `total`', async () => {
+      // `total` is computed by a second query, so it can disagree with the
+      // filter — and a total that counts hidden rows tells the reader there are
+      // pages that do not exist.
+      for (const status of ['enviada', 'recusada', 'concluida'] as const) {
+        await seed({
+          discordMsgId: `9000000000000000${status.length}0`,
+          status,
+        });
+      }
+      await seed({ discordMsgId: '900000000000000099', status: 'aprovada' });
+
+      const page = bodyOf<Page>(
+        await http().get('/public/suggestions').expect(200),
+      );
+
+      expect(page.total).toBe(1);
+    });
+
+    it('refuses a filter for a state that is not public', async () => {
+      // 400 rather than an empty page: "that state is not public" and "there
+      // are none like that" are different answers, and only one of them is
+      // true.
+      await http().get('/public/suggestions?status=enviada').expect(400);
+      await http().get('/public/suggestions?status=recusada').expect(400);
+    });
+
+    it('serves each publishable state when asked for it explicitly', async () => {
+      for (const status of PUBLIC_SUGGESTION_STATUSES) {
+        await http().get(`/public/suggestions?status=${status}`).expect(200);
+      }
+    });
+
+    it('hides an unpublished suggestion behind the same 404 on the by-id route', async () => {
+      // Without this the detail route is an oracle: walk the ids and every 200
+      // is a suggestion the listing refuses to show.
+      const hidden = await seed({
+        discordMsgId: '900000000000000001',
+        status: 'enviada',
+      });
+
+      await http().get(`/public/suggestions/${hidden.id}`).expect(404);
+    });
+
+    it('answers 404 rather than 500 for an id outside the int4 range', async () => {
+      // `ParseIntPipe` accepts it; the `integer` column does not, and the round
+      // trip used to end in `value out of range for type integer` — a 500 an
+      // anonymous caller could mint at will.
+      await http().get('/public/suggestions/3000000000').expect(404);
+    });
+  });
+
   describe('pagination is mandatory', () => {
     it('applies a default page size to an unqualified request', async () => {
       for (let i = 0; i < PUBLIC_SUGGESTION_PAGE_DEFAULT + 3; i++) {
@@ -220,7 +314,10 @@ describe('Public suggestions (e2e)', () => {
     it('reports the total of the filtered set, not of the page', async () => {
       await seed({ discordMsgId: '900000000000000001', status: 'aprovada' });
       await seed({ discordMsgId: '900000000000000002', status: 'aprovada' });
-      await seed({ discordMsgId: '900000000000000003', status: 'recusada' });
+      await seed({
+        discordMsgId: '900000000000000003',
+        status: 'em_andamento',
+      });
 
       const page = bodyOf<Page>(
         await http()
@@ -254,6 +351,14 @@ describe('Public suggestions (e2e)', () => {
         quiet.id,
         contested.id,
       ]);
+
+      // The published `score` and the SQL the ordering uses are the same
+      // arithmetic written twice, in two languages. Nothing proved they agreed
+      // until this line: assert the published numbers are non-increasing in the
+      // order Postgres returned them.
+      const scores = page.items.map((item) => item.score);
+      expect(scores).toEqual([...scores].sort((a, b) => b - a));
+      expect(scores).toEqual([12, 2]);
     });
 
     it('keeps the order total when the score and the date both tie', async () => {

@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { desc, eq } from 'drizzle-orm';
+import { Column, desc, eq } from 'drizzle-orm';
 import { DRIZZLE } from '../db/database.module';
 import { suggestions } from '../db/schema';
 import { SuggestionTextError } from './suggestion-text';
@@ -511,9 +511,16 @@ describe('SuggestionsStore.list', () => {
   it('ranks by net score, not by upvotes alone', () => {
     // The claim the sort publishes is "what players want most". `votes_up`
     // alone answers "what got the most attention", and would put a contested
-    // 40/38 above a quiet 12/0 on a public page. Asserting on the SQL text
-    // because the difference between the two is one operand and both compile.
-    expect(JSON.stringify(suggestionScore.queryChunks)).toContain('votes_down');
+    // 40/38 above a quiet 12/0 on a public page — and both spellings compile,
+    // so the operands are asserted rather than the behaviour.
+    //
+    // In order, because `down - up` also has two operands and is the same
+    // ranking upside down.
+    const operands = suggestionScore.queryChunks.filter(
+      (chunk) => chunk instanceof Column,
+    );
+
+    expect(operands).toEqual([suggestions.votesUp, suggestions.votesDown]);
   });
 
   it('defaults the page size instead of returning everything', async () => {
