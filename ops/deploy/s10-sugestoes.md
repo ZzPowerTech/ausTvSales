@@ -8,8 +8,9 @@
 
 ## Estado — 2026-09-04
 
-**Os passos 1 a 5 foram executados. O subsistema está no ar e criou sugestão real.** O que resta
-deste arquivo é a tabela de verificação no fim, e ela está **3 de 9**.
+**Executado e verificado: 9 de 9 em 2026-09-05.** O subsistema está no ar, criou sugestões reais, e
+cada critério de aceite das issues #116–#118 foi observado em produção. Este arquivo passa a ser
+referência de reimplantação, não de trabalho pendente.
 
 A data está no corpo de propósito: este épico já perdeu tempo com um registro de ambiente sem data,
 lido no dia seguinte como se fosse o estado atual. Se você chegou aqui muito depois, **confirme
@@ -166,42 +167,55 @@ subido.
 Verde em CI não é observação. Cada linha abaixo é um critério de aceite das issues #116–#118 visto
 em produção **uma vez**. Registre a saída ao fechar as issues.
 
-| # | o que fazer | o que precisa acontecer | estado |
+| # | o que fazer | o que precisa acontecer | observado em 2026-09-05 |
 |---|---|---|---|
-| 1 | Postar uma sugestão no canal | linha em `suggestion` com `created_at` = **hora do post**, não do insert | 🟡 sugestão criada em 2026-09-04; **ninguém leu o banco** para conferir a semântica da data |
-| 2 | Repetir o mesmo `discord_msg_id` | devolve a sugestão já gravada, texto original preservado (idempotência) | ❌ |
-| 3 | Staff aprova | estado vai a `aprovada`; `assignee_nickname` **congelado** no apelido do momento | ❌ |
-| 4 | Tentar `concluida` a partir de `enviada` | **409**, e `SELECT` mostra o registro **inalterado** | ❌ |
-| 5 | Não-staff tenta aprovar | bot recusa **e** `GET /suggestions/:id/audit` mostra a tentativa com autor e comando | 🟡 **recusa ✅** (2026-09-05); a **trilha** não foi conferida |
-| 6 | `GET /suggestions/:id/audit` | trilha com quem mudou o quê, recusas incluídas | ❌ |
-| 7 | `/sugestoes` com mais de uma página | filtro por estado, `total` do conjunto **inteiro**, sem linha repetida nem pulada entre páginas | ❌ |
-| 8 | Sugestão contendo `@everyone` e `> # TESTE` | renderiza como **texto**: sem menção disparada, sem heading | 🟡 **`@everyone` inerte ✅** (2026-09-05); o **markdown** não foi testado |
-| 9 | `curl` das rotas de sugestão **de fora da VPS** | **403** antes de qualquer avaliação de chave | ✅ 2026-09-05 — `GET https://sales.austv.net/api/suggestions` → **403** |
+| 1 | Postar uma sugestão no canal | `created_at` = **hora do post**, não do insert | ✅ `#5` postada 16:53:49 BRT, API devolve `19:53:49.266Z` — **mesmo instante** (UTC−3). E o `createdAt` da `#1` continuou em 04/09 depois de um reenvio que mandou a data de hoje |
+| 2 | Repetir o mesmo `discord_msg_id` | devolve a gravada, texto original preservado | ✅ **5 de 5** sugestões: mesmo id, texto original |
+| 3 | Staff aprova | `assignee_nickname` **congelado** | ✅ apelido do servidor **trocado** e o valor **não** mudou |
+| 4 | `concluida` a partir de `enviada` | **409**, registro **inalterado** | ✅ `#5`: 409, estado depois `enviada`, motivo legível na trilha |
+| 5 | Não-staff tenta aprovar | recusa **e** trilha consultável | ✅ recusa no Discord + **7 linhas `auth_denied`** de 5 atores distintos |
+| 6 | `GET /suggestions/:id/audit` | trilha com quem mudou o quê | ✅ transições e recusas, com ator, comando, `de→para` e motivo |
+| 7 | `/sugestoes` paginado | `total` do conjunto **inteiro** | ✅ `total=5` com `limit=1`; páginas 0 e 1 devolveram `#5` e `#4` |
+| 8 | `@everyone` e `> # TESTE` | renderiza como **texto** | ✅ menção inerte e markdown escapado |
+| 9 | `curl` **de fora da VPS** | **403** antes de avaliar a chave | ✅ `GET https://sales.austv.net/api/suggestions` → **403** |
 
 O item 9 é o que prova que os passos 1 e 2 valeram alguma coisa. Os itens 5 e 8 são os dois
 requisitos de segurança das histórias.
 
-### As duas metades que faltam nos itens já marcados
+### 🔴 A armadilha de leitura do item 1
 
-Nenhum dos dois é preciosismo: em ambos, a metade que falta pode estar quebrada **sem diferença
-visível** de quem só olha o Discord.
+`created_at` volta em **UTC** (o `Z` do ISO 8601) e o Discord mostra no fuso de quem olha. Em
+America/Sao_Paulo isso são **três horas de diferença aparente**, e parece atraso de gravação. Não
+é — converta antes de abrir incidente. Quase virou um aqui.
 
-- **5b — a trilha da recusa.** O bot recusar é a metade visível. A outra é a recusa ficar
-  **consultável**, que é a razão declarada do desenho da S10.2 (*"recusa que só vive em log de
-  processo não é consultável"*). O `recordDeniedAttempt` chama a API antes de recusar; se essa
-  chamada estiver falhando, a recusa aparece igual e a linha simplesmente não existe. Comando, que
-  usa as variáveis de dentro do container (nenhum segredo digitado, e sai do IP que a allowlist
-  aceita):
-  ```bash
-  docker exec discordbot node -e 'fetch(`${process.env.ADMIN_API_BASE_URL}/suggestions/1/audit`,{headers:{"X-Api-Key":process.env.ADMIN_API_KEY}}).then(r=>r.text()).then(console.log)'
-  ```
-  Espere uma entrada com `action: "transition_denied"`, o autor e o comando.
+### As duas metades que quase passaram por inteiras
 
-- **8b — o escape de markdown.** `@everyone` inerte prova o `allowedMentions`; o `> # TESTE` prova
-  o `safe-text.ts`, que é outro código — e foi exatamente ali que o review adversarial da S10.2
-  achou um furo que um `>` na frente abria, com o teste que deveria fixá-lo passando sem a
-  proteção. Mande um `/sugestao` com o texto `> # TESTE **negrito** [link](http://x) @everyone` e
-  confira que o card mostra isso **literalmente**.
+Vale registrar porque nas duas a parte que faltava podia estar quebrada **sem diferença visível**
+para quem só olha o Discord:
+
+- **item 5** — o bot recusar é a metade visível; a outra é a recusa ficar **consultável**, que é a
+  razão declarada do desenho da S10.2. O `recordDeniedAttempt` chama a API antes de recusar: se
+  essa chamada falhasse, a recusa apareceria igual e a linha não existiria. As 7 linhas provam que
+  grava.
+- **item 3** — ler o apelido uma vez é indistinguível de um valor resolvido ao vivo. Só a **troca
+  de apelido entre duas leituras** separa congelado de consultado.
+
+### Como reproduzir esta verificação
+
+O script está em [`verify-s10.js`](verify-s10.js), ao lado deste arquivo. Roda **dentro do
+container do bot** e usa as variáveis de lá — nenhum segredo digitado nem impresso, e sai do único
+IP que a allowlist aceita:
+
+```bash
+docker cp ops/deploy/verify-s10.js discordbot:/tmp/verify-s10.js
+docker exec discordbot node /tmp/verify-s10.js <id-da-sugestao> <seu-discord-id>
+```
+
+O `<seu-discord-id>` vai para a trilha como autor da tentativa ilegal do item 4 — é honesto que
+seja o real, não um inventado.
+
+Dois itens o script **não** decide sozinho, de propósito: o **3** exige a troca de apelido entre
+duas execuções, e o **1** exige comparar com o horário do Discord convertendo o fuso.
 
 ### Cuidado ao verificar: a allowlist agora barra o host
 

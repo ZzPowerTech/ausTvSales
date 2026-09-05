@@ -237,13 +237,18 @@ existem na VPS, o `BOT_ALLOWED_IPS` foi **medido** (`172.27.0.5`, o IP do bot na
 `austv-sales_default` — não `127.0.0.1`, que era o palpite que nenhuma topologia produz), e o bot
 roda por pipeline: release-please → GHCR → deploy SSH com verificação de digest.
 
-**Mas implantado não é observado, e 3 das 9 verificações do runbook estão fechadas.** ✅ o item 5
-(não-staff recusado), ✅ o 8 (`@everyone` renderizado como texto) e ✅ o 9 (`403` de fora da VPS,
-antes de a chave ser avaliada). **Os itens 5 e 8 estão pela metade:** o 5 provou a recusa e não a
-**trilha** dela — que é a razão declarada do desenho, e falharia sem diferença visível no Discord;
-o 8 provou o `allowedMentions` e não o **escape de markdown**, que é outro código e foi onde o
-review achou o furo do `>`. Faltam inteiros os itens 1, 2, 3, 4, 6 e 7. Detalhe e comandos no
-runbook.
+**✅ E observado: as 9 verificações do runbook fecharam em 2026-09-05**, com 5 sugestões reais em
+estados diferentes e atores reais. As duas que exigiam mais que uma leitura: o **apelido congelado**
+foi provado trocando o apelido do servidor entre duas execuções — o valor não mudou, o que é o
+único jeito de distinguir congelado de resolvido-ao-vivo; e a **recusa consultável** apareceu como
+**7 linhas `auth_denied`** de 5 atores distintos, fechando a metade que falharia sem diferença
+visível no Discord. O `409` da transição ilegal veio com motivo legível para humano, e
+`transition_denied` (API) e `auth_denied` (bot) são registros distintos na mesma trilha, que era o
+desenho.
+
+**🔴 Uma armadilha de leitura que quase virou incidente:** `created_at` volta em **UTC** e o Discord
+mostra no fuso de quem olha — em America/Sao_Paulo isso são 3h de diferença aparente, e parece
+atraso de gravação. Está registrado no runbook ao lado do item 1.
 
 E o revisor do
 Copilot **não rodou** em nenhum dos PRs (quota da conta esgotada) — a revisão que houve foi a do
@@ -256,8 +261,8 @@ frente abria (bot), com o teste que deveria fixá-lo passando com a proteção r
 [#117](https://github.com/ZzPowerTech/ausTvSales/issues/117) e
 [#118](https://github.com/ZzPowerTech/ausTvSales/issues/118) seguem abertas por falta de fechamento,
 não de entrega — todos os critérios de aceite foram conferidos contra `main` um a um. Suíte:
-**79 suítes, 1049 testes**. O que falta da S10 é **observação** — a implantação aconteceu em
-2026-09-04 (ver acima). Runbook:
+**79 suítes, 1049 testes**. **A S10 está fechada:** implantada em 2026-09-04, verificada 9/9 em
+2026-09-05. Runbook, agora com a evidência por linha e o script que a reproduz:
 [`ops/deploy/s10-sugestoes.md`](ops/deploy/s10-sugestoes.md) — ordem entre os repos, procedimento de
 **medida** do `BOT_ALLOWED_IPS` e nove verificações que precisam ser **observadas** em produção
 antes de fechar as issues.
