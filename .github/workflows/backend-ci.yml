@@ -48,6 +48,12 @@ jobs:
       DISCORD_CLIENT_SECRET: ci-discord-client-secret
       DISCORD_REDIRECT_URI: http://localhost:3000/auth/discord/callback
       ALLOWED_DISCORD_IDS: '111111111111111111,222222222222222222'
+      # Estreita o escopo de staff ao PRIMEIRO id, que e o operador de teste
+      # (TEST_DISCORD_ID). Deixar a variavel ausente faria o escopo cair no
+      # allowlist inteiro e o guard de staff nunca recusaria ninguem — a suite
+      # passaria identica com o guard removido da composicao, que e o defeito
+      # que a S10.2 pagou com o `@BotAuth()` e a allowlist desligada no CI.
+      STAFF_DISCORD_IDS: '111111111111111111'
       SESSION_JWT_SECRET: ci-session-secret-for-e2e-suite-0123456789
       # Non-secret CI value (64 hex chars) for the ingest guard boot validation.
       INGEST_API_KEYS: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'

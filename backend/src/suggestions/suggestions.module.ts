@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
+import { AuthModule } from '../auth/auth.module';
 import { BotModule } from '../bot/bot.module';
 import { ThrottlingModule } from '../config/throttling';
 import { PublicSuggestionsController } from './public-suggestions.controller';
+import { SuggestionsAdminController } from './suggestions-admin.controller';
 import { SuggestionsController } from './suggestions.controller';
 import { SuggestionsStore } from './suggestions.store';
 
@@ -25,10 +27,22 @@ import { SuggestionsStore } from './suggestions.store';
  * already pulls it in transitively and `ThrottlerModule` is `@Global()` — and
  * kept anyway, because a route whose only protection is a rate limit should not
  * depend on an unrelated module continuing to import the thing that provides it.
+ *
+ * ## Three surfaces on one table, and that is the shape S11.1 asked for
+ *
+ * {@link SuggestionsAdminController} completes the set: the bot writes through
+ * its own key, anybody reads the narrow public projection, and a signed-in
+ * member of staff reads the whole row and moves states. `AuthModule` is imported
+ * for `StaffScopeGuard`, which is the only new authorization in the module —
+ * "is signed in" is still the global default and lives in the APP_GUARD.
  */
 @Module({
-  imports: [BotModule, ThrottlingModule],
-  controllers: [SuggestionsController, PublicSuggestionsController],
+  imports: [AuthModule, BotModule, ThrottlingModule],
+  controllers: [
+    SuggestionsController,
+    PublicSuggestionsController,
+    SuggestionsAdminController,
+  ],
   providers: [SuggestionsStore],
   exports: [SuggestionsStore],
 })
